@@ -1,0 +1,13 @@
+[package]
+name = "xtask"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# 架构防腐检查器。只读:解析 cargo metadata、静态扫描源码、比对 legacy allowlist 基线。
+# 不依赖任何生产 crate,不进 core-runtime 镜像。
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = "0.8"

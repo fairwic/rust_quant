@@ -1,10 +1,12 @@
 # Rust Quant 架构迁移计划
 
-- 状态：计划中
+- 状态：计划中（阶段 0 基线已冻结、阶段 1 防腐 ratchet 已落地，业务搬迁未开始）
 - 首次制定：2026-07-18
-- 最近修订：2026-07-21
+- 最近修订：2026-07-27
 - 目标架构：[Rust Quant 长期目标架构](target-architecture.md)
 - 数据访问规则：[业务代码与数据访问放置规范](business-code-and-data-access.md)
+- AI 执行协议：[AI 架构迁移执行协议](ai-migration-execution-protocol.md)
+- 阶段 0/1 产物：[baseline-2026-07](migrations/baseline-2026-07/README.md)（依赖图、Owner Ledger、运行拓扑、legacy allowlist、`cargo xtask arch-check`）
 
 ## 1. 目的
 
@@ -42,7 +44,7 @@
 | 删除门 | 调用方、配置、表、监控和白名单的删除条件 |
 | 验证 | unit、integration、contract、parity、recovery、deploy contract |
 
-没有填写完整清单，不开始迁移。
+该清单必须保存为 `docs/architecture/migrations/<migration-id>-<slug>/manifest.toml`，使用 [`migrations/_template.toml`](migrations/_template.toml) 的机器可读 schema；聊天计划不能替代 Manifest。每个切片只能选择 `structure_only`、`behavior_change`、`cutover`、`legacy_delete` 中一个主模式，并固定已提交的 `architecture_baseline_git_sha`。没有填写完整清单、基线未冻结或模式混合时，不开始迁移。
 
 ## 4. 阶段 0：冻结当前基线与 Owner Ledger
 
@@ -51,8 +53,11 @@
 - 为 Strategy Signal、Web Execution Task、Readiness、订单结果和 internal API 建立 Contract snapshot；
 - 记录 `quant_core` 与 `quant_web` 当前表 owner、写入者、读取者和数据量；
 - 为关键策略建立固定输入下的 evaluator、portfolio、risk 和 execution parity 基线；
-- 为 Vegas 固定 DatasetManifest、Strategy Runtime Snapshot、SimulationProfile、指标预热长度、风险/资金配置、费用、滑点与随机 Seed；
+- 为 Vegas 固定 DatasetManifest、四个 Domain Policy Snapshot、ExecutionDecisionContext、SimulationProfile、指标预热长度、动态 Evidence、费用、滑点与随机 Seed；
 - 记录 Vegas 当前 backtest、paper/live 的实际窗口差异、状态缓存 identity 和信号字段差异；
+- 记录 `TradingState`、`deal_signal`、`StrategyExecutor`、全局 Registry、零字段 Service/Calculator 的调用方、owner 混合和删除条件；
+- 记录 `BasicRiskConfig`、`BasicRiskStrategyConfig` 及 live/helper 止盈止损计算的字段来源、默认值、舍入与触发顺序；
+- 记录当前 Cargo 传递依赖、总 CLI binary 清单、Docker 实际复制内容和 CI build matrix，区分 Research-only、共享 Domain 和生产 App 变更；
 - 记录订单状态、lease、重试、保护单和恢复的现有行为。
 
 验证：同一基线可以在迁移前后重复执行，并能识别策略结论、订单参数、状态机和 Contract 漂移。
@@ -62,7 +67,14 @@
 - 建立 `apps` 与 `crates/{domains,quant,contracts,adapters,platform}` 目录约定；
 - 建立最小 command/query/event-consumer 三个模板；
 - 建立 `cargo xtask arch-check` 的只读报告；
+- 建立 Migration Manifest 模板、人工 Evidence 和 `cargo xtask migration-check --manifest <path>` 的 schema/基线/diff-scope 只读报告；
+- 建立 `release-units/{core-runtime,core-maintenance,quant-lab}.toml`，先记录 root package、binary allowlist、forbidden package、生产部署资格和测试集；
+- 将六个生产组合根拆为独立 Cargo package，但先继续打入同一个 `core-runtime` 镜像；schema-tool 与 quant-lab 分别使用独立工件；
 - 保存 legacy allowlist，CI 先禁止新增违规；
+- 对新增零字段 Service/Manager/Calculator、Aggregate 公开可变不变量、Model/Policy 隐式时间/环境变量/全局业务缓存建立 ratchet；
+- 建立由 Git diff、Cargo 反向传递依赖和 Release Unit Manifest 推导的 build-impact 报告：Research-only 改动不构建或部署 `core-runtime`，共享 Domain 改动不得漏掉生产构建和 parity，无法判断时 fail closed；
+- 增加生产镜像内容检查：实际 binary 与 `core-runtime` allowlist 完全一致，禁止 Research/Backtest/Paper/candidate/schema-tool；
+- 只有 build-impact 基线证明候选策略与已发布策略确有独立编译/发布生命周期时，才在 Strategy owner 内建立 api/released/candidates 三个 catalog 级 package；`signal-worker` 不依赖 candidates，`quant-lab` 可以依赖 released + candidates；
 - 建立一个 Postgres Adapter crate 的 owner module 骨架；
 - 建立 Research Domain 最小骨架，只含 Experiment/Run/Evidence identity、Port 与状态机，不先搬回测交易逻辑；
 - Migration 采用单一有序目录和 owner 文件名。
@@ -145,6 +157,11 @@ Research::BacktestRun + DatasetManifest
 - 引入 `StrategyEvaluationStateKey = EvaluationScopeId + RuntimeSnapshotId + MarketStreamPartition`，消除并行 Run 和仅按 symbol/period/type 缓存的歧义；
 - Strategy evaluator 不再接收账户级 `BasicRiskStrategyConfig`；
 - 将历史 `position_leverage` 的资金比例语义迁为 Portfolio `allocation_ratio`，真实交易所 leverage 单独建模；
+- 拆分并冻结 `StrategyRuntimeSnapshot`、`PortfolioPolicySnapshot`、`RiskPolicySnapshot`、`ExecutionPlanningPolicySnapshot`；Strategy 快照不再承载用户风险或其他 owner 政策，同一 payload 不再解析为两个语义重叠的 Risk 类型；
+- 引入 `ExecutionDecisionContextSnapshot`，由 Execution 在请求 intake 事务中绑定四个 Published Policy Snapshot，并让 RiskDecision、OrderIntent、Plan、Attempt 与恢复证据引用同一 Context；
+- 引入 `ResearchRunSpec`，固定 DatasetManifest、四个 Policy Snapshot、SimulationProfile、模拟账户初态和 Clock/Seed；动态 Market/Account/Instrument Evidence 与配置分离；
+- Strategy 保留候选失效价、退出意图/候选止盈政策，Risk 使用唯一 Policy 产生不可放宽的最终止损、风险边界和批准数量，Execution 合并 Strategy exit intent 与 RiskDecision 生成 `OrderPlan`/`ProtectionPlan`；
+- `trade_fee_rate`、slippage、funding、latency 和 candle path 全部迁入 `SimulationProfile`，不再混入风险配置；
 - `quant/backtest` 只迁移确定性时钟、事件调度、撮合、费用、滑点和资金费；Research use case 驱动同一 Strategy、Portfolio、Risk 和 OrderPlan API；
 - 多币种在同一 decision time 先收集全部 Signal，再统一排序、净额和分配；新增 symbol 重排不变性测试；
 - 固定指标预热/最大历史窗口，解释并消除当前 backtest 与 live 的 7000/4000 等不一致；
@@ -152,6 +169,7 @@ Research::BacktestRun + DatasetManifest
 - ResearchEvidence 由 Research owner 发布：先内容寻址上传大对象，再以单一数据库事务发布 Completed EvidenceManifest；
 - 明确 `ResearchBar` 不覆盖 lease/outbox/Unknown/recovery；PaperEvent 与 RecoveryHarness 分别建立独立验收；
 - 建立现有 pipeline 与新 pipeline 的逐事件 parity 报告，并对所有差异分类。
+- parity 报告记录实际调用的业务 symbol 与各快照 identity/version/hash，并比较 EvaluationState before/after、Signal、Target、RiskDecision、OrderPlan、ProtectionPlan 和 decision trace；最终 PnL 接近不能通过。
 
 完整逐文件分配和切换门见 [Vegas 与现有回测主链迁移实战](vegas-backtest-migration.md)。
 
@@ -199,6 +217,15 @@ Research::BacktestRun + DatasetManifest
 10. Research Domain、其他策略的 Backtest/live parity、Analytics 与 ResearchEvidence；Vegas 已作为第二验收切片先固定模板。
 
 每个步骤继续使用第 3 节清单，不能在同一切片中同时调整策略判断、资本分配、风险阈值和执行协议。
+
+代码形态迁移同样按垂直切片完成：
+
+- `TradingState` 拆为 Strategy EvaluationState、Research SimulationLedger 和 owner typed output，禁止重建新的万能 Context；
+- `deal_signal` 由 Research use case 的跨域编排逐步绞杀，不能整体搬入 `impl` 或新 `TradingEngineService`；
+- 无状态计算优先迁为纯函数；共享冻结配置的决策迁为 Policy；
+- 有 identity/生命周期的 Order、Run、Release 使用 Aggregate，关键字段通过 transition 保护；
+- Worker 只保留循环、Contract 映射、Use Case 调用和 ack/checkpoint；
+- Trait 只保留真实 Port、稳定 API 或多实现边界，删除没有调用证据的工厂/基类式抽象。
 
 ## 9. 阶段 5：运行入口收敛
 
@@ -249,11 +276,14 @@ Research::BacktestRun + DatasetManifest
 - 把 Experiment、DatasetManifest、样本、成本、SimulationProfile 和评估写入 ResearchEvidence；
 - 把 lifecycle、promote、rollback 写入 `StrategyRelease`；
 - 发布不可变 `StrategyRuntimeSnapshot` 给数据面；
+- Portfolio、Risk、Execution 分别发布自己的不可变 Policy Snapshot；
+- Web `risk_profile_ref + version` 经 Core Risk 校验、默认值展开和 canonical hash 后幂等解析为 `RiskPolicySnapshot`，缺失或不兼容时不允许默认放行；
+- Execution 发布不可变 `ExecutionDecisionContextSnapshot`；Research 发布不可变 `ResearchRunSpec`；
 - 为有状态 evaluator 建立由 EvaluationScopeId、RuntimeSnapshotId 与 MarketStreamPartition 组成的状态身份；
 - Registry、Catalog、Signal builder 和 Worker 使用同一 strategy identity；
 - legacy alias 只在边界 Adapter 保留。
 
-验证：历史 Definition/Artifact/Evidence 字节身份不被覆盖；相同 RunId、Manifest、Seed 可重放；Release 变化不会修改历史信号和回测事实。
+验证：历史 Definition/Artifact/Evidence 字节身份不被覆盖；相同 RunSpec、Context、动态 Evidence 和 EvaluationState before 可逐层重放；Release 变化不会修改历史信号、订单或回测事实。
 
 ## 11. 阶段 7：控制面与数据面解耦
 
@@ -294,6 +324,11 @@ Research::BacktestRun + DatasetManifest
 - 架构门禁从 ratchet 收敛为全量规则，legacy allowlist 清零；
 - Strategy 不直接生成最终订单，Portfolio/Account/Risk/Execution 边界可验证；
 - Strategy evaluator 不读取环境变量、不接收账户风险配置，回测/live 使用同一评估状态迁移；
+- backtest、paper、shadow、canary、live 使用同一 Strategy entry/exit、Portfolio、Risk/final-stop 和 Execution planning 实现；exact parity 同时证明四个 Policy Snapshot、Decision Context、动态 Evidence、EvaluationState before 和 Clock identity 一致；
+- Research-only crate 不进入生产 App 依赖图和 `core-runtime` 镜像；Research-only 变更无生产部署资格，共享 Domain 变更由 Cargo 依赖图触发受影响生产构建与 parity；
+- 三个 Release Unit Manifest、实际镜像内容、Compose 角色和 deploy contract 一致；
+- 尚未发布的候选策略只存在于 Strategy candidates catalog；晋级 released catalog 后才进入生产构建与 live RuntimeSnapshot，不为每个策略建立服务或 crate；
+- 新增代码按 Entity/Value Object、纯函数、Policy、Use Case、Port、Adapter 唯一归类，不再新增零状态万能 Service/Calculator；
 - Web ExecutionRequest 与 Core OMS 事实完全分离；
 - 数据库 CRUD、事务、Outbox 和查询归属可以唯一定位；
 - 成交反馈、持续风险、保护和 Reconciliation 闭环完整；
@@ -301,3 +336,4 @@ Research::BacktestRun + DatasetManifest
 - 所有外部 mutation 都有幂等、Unknown、恢复和对账证据；
 - legacy 入口、兼容字段和旧表写入全部有明确结束结论。
 - 现有 Vegas 回测入口完成 parity 切换后，`BacktestRunner`、`BacktestExecutor`、万能 `BacktestContext` 与 `deal_signal` 的对应 legacy 职责均有删除证据。
+- 每个架构迁移切片都有版本化 Manifest、当前 revision 的 Evidence 和 Migration Verdict；规范基线、实际 diff、迁移模式、授权与完成状态一致。

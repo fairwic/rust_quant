@@ -1,0 +1,66 @@
+# 阶段 0 Legacy 违规基线 allowlist。
+# 由 cargo xtask arch-check 读取:运行违规数 > 本文件登记的基线即 FAIL,<= 通过。
+# 迁移期只允许违规数下降,禁止新增。删除条件满足后从本文件移除对应条目。
+#
+# 上位:docs/architecture/migration-plan.md 阶段 0/1、dependency-rules.md §13(ratchet 约定)。
+
+schema_version = 1
+architecture_baseline_git_sha = "660407f438db52acde8318e705b26ad05948aa0a"
+frozen_at = "2026-07-27"
+
+# 跨库直连基线:0(已治理,不得新增)
+[cross_db_direct]
+baseline_count = 0
+note = "quant_web 走 HTTP(execution_task_client.rs);quant_core DB 单例 URL 门禁(sqlx_pool.rs);无 quant_news 直连。"
+
+# 依赖方向违规(owner-agnostic 反向依赖 / 层次异常)
+[[dependency_violation]]
+id = "V1"
+edge = "analytics -> strategies"
+rule = "dependency-rules §13-11(quant/* 禁止依赖业务 Domain)"
+owner = "analytics -> quant/analytics(迁移后)"
+deletion_condition = "analytics 迁入 quant/analytics 且对 strategies 的依赖被打断(改依赖 quant 基础与 contracts)"
+review_by = "2026-10-01"
+
+[[dependency_violation]]
+id = "V2"
+edge = "execution -> {strategies, indicators}(且不依赖 domain)"
+rule = "dependency-rules §3/§4(依赖方向与 Domain 顺序)"
+owner = "execution -> domains/execution(迁移后)"
+deletion_condition = "execution 迁入 domains/execution,依赖收敛为本 Domain model + 上游 api,不再反向依赖 strategies/indicators"
+review_by = "2026-10-01"
+
+# legacy signed read-only 账户直读路径(env 门禁 LEGACY_SIGNED_READ_ONLY_CONFIRM)
+[[legacy_path]]
+id = "V3"
+path = "crates/risk/src/legacy_signed_read_only.rs"
+kind = "signed_read_only_account_read"
+rule = "dependency-rules §13-17 精神(账户读取应经 reconciliation + quant-web adapter)"
+owner = "risk -> domains/reconciliation + adapters/quant-web-client(迁移后)"
+deletion_condition = "所有调用方改走 quant_web execution reconciliation 路径,env 门禁与本模块删除"
+review_by = "2026-10-01"
+
+[[legacy_path]]
+id = "V4"
+path = "crates/execution/src/order_manager/order_service.rs"
+path_also = "crates/execution/src/order_manager/swap_order_service.rs"
+kind = "signed_read_only_account_read"
+rule = "dependency-rules §13-17 精神"
+owner = "execution -> domains/reconciliation + adapters/quant-web-client(迁移后)"
+deletion_condition = "同 V3"
+review_by = "2026-10-01"
+
+[[legacy_path]]
+id = "V5"
+path = "crates/infrastructure/src/exchanges/okx_adapter.rs"
+kind = "signed_read_only_account_read"
+rule = "dependency-rules §13-17 精神"
+owner = "infrastructure -> adapters/exchange-gateway(迁移后)"
+deletion_condition = "同 V3"
+review_by = "2026-10-01"
+
+# 汇总:arch-check 用的聚合基线计数
+[baseline_counts]
+dependency_violations = 2   # V1, V2
+legacy_paths = 3            # V3, V4, V5
+cross_db_direct = 0
