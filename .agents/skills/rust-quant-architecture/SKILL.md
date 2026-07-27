@@ -1,6 +1,6 @@
 ---
 name: rust-quant-architecture
-description: 约束 rust_quant 的领域归属、代码放置、数据库 CRUD、Ports/Adapters、Research/回测和生产运行边界。用于设计、评审、实现或迁移后端模块、Vegas、策略/组合/风险/执行链路、分级模拟、运行入口和架构文档，检查代码是否违反目标架构，以及识别并防止六类结构坏味道（空 struct 服务、指标层做决策、同名两义配置、依赖反向拉直连、env flag 热路径、时间戳内联）、七类工程纪律坏习惯（f64 金额、无类型 JSON 端口、SDK DTO 穿透、热路径 panic、压平错误、pub 泛滥、假测试）、八类基础设施/数据/运维坏习惯（fire-and-forget spawn、schema 三真相源、迁移改写、密钥裸传、配置散读、无可观测性、依赖不复用、契约无版本）与研究/生产未隔离。
+description: 约束 rust_quant 的领域归属、代码放置、数据库 CRUD、Ports/Adapters、Research/回测和生产运行边界。用于设计、评审、实现或迁移后端模块、Vegas、策略/组合/风险/执行链路、分级模拟、运行入口和架构文档，检查代码是否违反目标架构，以及识别并防止六类结构坏味道（空 struct 服务、指标层做决策、同名两义配置、依赖反向拉直连、env flag 热路径、时间戳内联）、七类工程纪律坏习惯（f64 金额、无类型 JSON 端口、SDK DTO 穿透、热路径 panic、压平错误、pub 泛滥、假测试）、八类基础设施/数据/运维坏习惯（fire-and-forget spawn、schema 三真相源、迁移改写、密钥裸传、配置散读、无可观测性、依赖不复用、契约无版本）、七类重复造轮子/未用外部标准版（手写重试、指标绕过、精度舍入脱节、回测/信号多路镜像、K线结构体泛滥、变体整文件复制、f64 金额）与研究/生产未隔离。
 ---
 
 # Rust Quant 架构规范
@@ -62,7 +62,7 @@ Adapters：
 
 ### 3. 从真实调用链反向验证
 
-使用当前代码、测试、数据库 contract 和运行入口复核假设。标记 legacy 边界，不把历史目录当成目标 owner。对照“迭代废物的产生模式”“工程纪律坏习惯”“基础设施/数据/运维纪律坏习惯”三节自查：新增代码是否在复制任一坏味道/坏习惯，触碰的存量属于哪一类、收敛路径是什么。
+使用当前代码、测试、数据库 contract 和运行入口复核假设。标记 legacy 边界，不把历史目录当成目标 owner。对照“迭代废物的产生模式”“工程纪律坏习惯”“基础设施/数据/运维纪律坏习惯”“重复造轮子/未用外部标准版”四节自查：新增代码是否在复制任一坏味道/坏习惯，是否在 `indicators`/`common`/`execution` 与 workspace 依赖已有实现的情况下另起炉灶，触碰的存量属于哪一类、收敛路径是什么。
 
 对 Vegas 或回测至少追踪：
 
@@ -195,6 +195,22 @@ EvaluationScopeId + StrategyRuntimeSnapshotId + MarketStreamPartition
 | N | **有依赖不复用，各写各的** | 依赖 `tokio-retry` 却手写 6+ 套重试（99 处）；幂等键分散；`hyperliquid_rust_sdk` git 无 rev（不可复现） | 统一 retry/退避/去重封装；workspace 内 `workspace = true`；git 依赖钉 rev（§12） |
 | O | **同表多套 Row + 表名漂移** | `SwapOrderEntity` 定义 3 次跨 3 crate；`CandlesEntity` 2 次；`strategy_config` vs `strategy_configs` 并存 | 一表一 `FromRow` 归属其 owner Adapter；表名集中常量，不留旧名别名（§10.3） |
 | P | **契约无版本化** | internal HTTP API 无 `/v1/`、无 apiVersion；版本混进业务字符串 `entry_rule_version:"..._v2"`；必填字段无 `#[serde(default)]` | internal API 显式版本化，可选字段带 default 兼容，版本不混业务字符串；handoff/Outbox N/N-1（§7.3/§12） |
+
+## 重复造轮子 / 未用外部标准版（第四批，代码泛滥主因）
+
+全量实证台账见 [duplication-and-wheel-reinvention](../../docs/architecture/migrations/baseline-2026-07/duplication-and-wheel-reinvention.md)（含 `文件:行`）。两个根因：①**已引入依赖却不用到位**（`tokio-retry`/`rust_decimal`/`ndarray` 在依赖树里，业务代码仍手写）；②**同一件事跨 crate 各写一份**（回测循环、指标、止损、K线模型、精度舍入、信号评估）。新增代码必须先查 `indicators`/`common`/`execution` 与 workspace 依赖是否已有实现，禁止再复制一份。
+
+| 键 | 坏习惯 | 存量证据 | 新架构防线 |
+| --- | --- | --- | --- |
+| Q | **手写重试/退避** | `tokio-retry` 已依赖零引用；9+ 份逐字 `0..4u64`+`250*(attempt+1)` 退避（`okx_historical_15m_backfill.rs:997`、`market_velocity_backfill.rs:756` 等） | 统一 `tokio-retry`/`backoff`，合并成一个共享 helper（xtask WARN 局部退避） |
+| R | **指标绕过 `indicators` crate 手写** | `atr_at` 逐字 6 份、`ema_at` 4 份、`compute_rsi`/Bollinger/MACD 多份，权威版都在 `indicators/src/` | 指标只来自 `indicators`，删除全部 `*_at`/`compute_*`；契约测试禁 indicators 外定义指标函数 |
+| S | **精度舍入 + 真实量化脱节** | `round_price` 逐字 9 处硬编码 `*10_000.0).round()`，与交易所 filters 量化（`execution_order_filters.rs:208`）完全平行 | 单一 `execution::precision::quantize(price/qty, tick/step)`，回测与 live 都传 filters；禁硬编码精度魔数 |
+| T | **回测/信号评估多路镜像** | 回测主循环 5+ 套；止损 live vs backtest 平行（`market_velocity_signal.rs:1490` vs MVE `stop_loss.rs:123`）；信号评估 paper/backtest/live 近 4000 行镜像 | 单一 `backtest-engine` + 纯函数 `SignalEvaluator` + `StopLossPolicy`，三路只换数据源/执行后端；live-parity 升为强制门禁 |
+| U | **K线/OHLCV 结构体 8+ 份** | `common CandleItem`(权威) 外还有 `domain Candle`/`market CandlesEntity`/MVE `BacktestCandle`/tv-parity `Candle` 等；对齐逻辑两份 | `common::CandleItem` 唯一内存模型，其余仅 DB 实体 + `From`；对齐/聚合统一到 `market::candle` |
+| V | **变体用整文件复制而非参数化** | `filtered_volume_rsi_ema_macd/` 16 个 `*_vN.rs`(v1..v13)；`*_research.rs` 24 / `*_vN.rs` 19；单家族 37 个 MANIFEST | 差异抽成声明式 `StrategyParams`(TOML/DB 行)，v1..v13 收敛为 1 参数化策略 + N 配置；research 结果落表非 markdown |
+| W | **金额用 f64 而非 `rust_decimal`** | 金额语义字段 f64:Decimal≈275:27；`domain position.rs:56` pnl、`swap_order_service.rs:568` entry_price 全 f64 | 成交价/数量/盈亏/余额用 `Decimal`（已就绪），指标/统计保留 f64（与第二批 A 项合并） |
+
+> 与第三批的关系：N（不复用）/O（同表多 Row）是"配置/依赖/行结构"视角，本批 Q–V 是"算法与领域逻辑"视角，互补不重叠；W 与第二批 f64 金额是同一债，此处给量化底数。
 
 ## 研究/迭代与生产必须物理隔离
 

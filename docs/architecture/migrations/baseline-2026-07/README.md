@@ -14,6 +14,7 @@
 | [owner-ledger.md](owner-ledger.md) | 阶段 0:现有 crate/module → 目标 owner 映射矩阵 + services 拆分线 |
 | [runtime-topology.md](runtime-topology.md) | 阶段 0:七个 quant_core_* 角色 bin → app → 装配冻结 |
 | [legacy-allowlist.toml](legacy-allowlist.toml) | 阶段 1:ratchet 输入基线(V1–V5 + 删除条件 + 复查日期) |
+| [duplication-and-wheel-reinvention.md](duplication-and-wheel-reinvention.md) | 重复造轮子 / 未用外部标准版实证台账(W1–W6 未用外部版 + D1–D8 内部重复 + 规模速览) |
 
 ## 防腐闸门 `cargo xtask arch-check`
 

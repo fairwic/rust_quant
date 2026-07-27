@@ -30,6 +30,17 @@
 - **第二批(SQL/配置纪律)**:SELECT \*、L(业务层 env)、N(git 无 rev)、B(domain Value 端口)。基线小、复杂度低到中。
 - **第三批(需大量基线豁免,谨慎)**:F(glob 导入,158)、println(323)。基线大,冻结成本高,ratchet 收益偏弱,建议末位或先只 WARN 不计 ratchet。
 
+### 重复造轮子 / 未用外部标准版(来自 [duplication 台账](duplication-and-wheel-reinvention.md))
+
+| 键 | 检查 | 查法 | 基线量级 | 误报风险 | 复杂度 |
+|---|---|---|---|---|---|
+| R | **指标绕过 indicators** | `indicators` crate 外定义 `fn (atr\|ema\|rsi\|bollinger)_at` / `compute_rsi` | 6(ATR)+4(EMA)+N | 低 | 低(文件级 ratchet) |
+| S | **round_price 精度魔数** | 非测试代码出现 `* 10_000.0).round()` | 9 | 低 | 低(文件级 ratchet) |
+| U | **candle 结构体泛滥** | `struct \w*Candle\w* {` 定义计数 | 8 | 中(DB 实体合法) | 低(计数 WARN) |
+| Q | **手写重试退避** | 研究/CLI 层 `sleep(` + `attempt` 局部循环 | 9+ | 中(合法轮询) | 中(先 WARN 不 ratchet) |
+
+重试(Q)误报中先只 WARN;R/S 文件级 ratchet 冻结当前份数、只许减。回测循环去重(D1)、信号合一(D8)、f64→Decimal(W)需 AST/类型判定,见下表。
+
 ## 二、暂时做不到(需 AST / 类型信息 / 语义分析,regex 会大量误报)
 
 老实登记,不假装能查:
