@@ -2,7 +2,7 @@
 
 - 状态：已接受
 - 首次接受：2026-07-18
-- 最近修订：2026-07-21
+- 最近修订：2026-07-23
 - 上位文档：[Rust Quant 长期目标架构](target-architecture.md)
 - CRUD 细则：[业务代码与数据访问放置规范](business-code-and-data-access.md)
 
@@ -196,6 +196,21 @@ Use case 可以定义事务必须原子完成哪些业务结果，但不能接�
 - SimulationLedger 不是 AccountProjection，模拟事实不得写生产 Order/Fill/Account 表；
 - Evidence 使用内容寻址对象加 Research owner 数据库事务实现原子可见发布，不宣称跨存储全局原子。
 
+### 5.9 Rust 对象、函数与 Trait
+
+代码形态不能替代 owner 和分层。新增代码按以下规则选择：
+
+- 有稳定业务 identity、生命周期或必须一起维护的不变量，使用 Entity/Aggregate `struct`/`enum` + `impl`；
+- 只有单位、范围、组合合法性而无 identity，使用不可变 Value Object；
+- 无状态、无 I/O、完整输入决定输出，默认使用 module 内自由纯函数；
+- 多个纯决策共享同一不可变版本配置，使用 Policy 对象；Policy 的字段只能是已解析的强类型快照或纯依赖；
+- 跨市场事件维护滚动状态时，使用带完整 scope identity 的显式 State，并让 backtest/live 调用同一纯 transition；
+- Use Case 可以是持有 Port 的对象；没有状态和依赖时，不得仅为了 `XxxService::method()` 语法创建零字段 Service；
+- Adapter 可以持有连接池、Client、限流器和协议配置，但不得因此接管业务不变量；
+- Trait 只用于真实多实现、消费方 Port、稳定 Domain API 或测试替身，不建立继承式 `BaseService`、万能 `Manager` 或每类型一个空 Trait。
+
+Aggregate 中能够破坏不变量的字段不得向任意调用方公开可变访问；时间、随机值和外部事实必须作为参数或 Port 输入。把一个跨 owner 大函数移动到 `impl TradingState`、`TradingEngineService` 或其他对象中，不会改变其违规性质。
+
 ## 6. Owner 规则
 
 | 事实 | 唯一 Owner |
@@ -242,6 +257,52 @@ Use case 可以定义事务必须原子完成哪些业务结果，但不能接�
 
 只有独立轮询/流消费、扩缩容、故障隔离、安全边界或部署生命周期出现时才创建 App。文件数量增加本身不是拆 App 的理由。
 
+### 8.1 构建与发布影响边界
+
+目标使用三个 Release Unit：
+
+| Release Unit | 内容 | 生产部署资格 |
+| --- | --- | --- |
+| `core-runtime` | control-api、market-worker、signal-worker、account-worker、execution-worker、reconciliation-worker | 自动发布候选 |
+| `core-maintenance` | schema-tool 与批准的有界维护 Job | 仅显式运行 |
+| `quant-lab` | Research、Backtest、Analytics、PaperEvent 研究入口和 research CLI | 禁止生产部署 |
+
+每个生产 App 是独立 Cargo package，但六个生产 binary 继续共享一个 `core-runtime` 镜像。Release Unit 是构建/工件边界，不是业务 owner、服务或仓库边界。
+
+目标依赖图必须保证：
+
+```text
+apps/signal-worker、apps/execution-worker
+  -> strategy-api + strategy-released
+  -> other production domains + quant/math/indicators + required adapters
+  -X-> strategy-candidates、domains/research、quant/backtest、quant/analytics、apps/quant-lab
+
+apps/quant-lab
+  -> strategy-api + strategy-released + strategy-candidates
+  -> domains/research
+  -> production domains stable APIs
+  -> quant/backtest/analytics/math
+```
+
+`release-units/{core-runtime,core-maintenance,quant-lab}.toml` 至少声明 root packages、binary allowlist、forbidden packages、镜像、生产部署资格和必需测试集。CI、Dockerfile、Compose 与 deploy contract 必须消费同一清单，不得各自维护一份二进制列表。
+
+CI/CD 通过 Git diff、owning package、`cargo metadata` 反向传递依赖和 Release Unit Manifest 计算影响范围。path filter 只能作为依赖图之上的优化，不能手工漏掉传递依赖；无法归属、依赖图失败或清单漂移时 fail closed：
+
+| 变更范围 | 必须构建/验证 |
+| --- | --- |
+| `apps/quant-lab`、`domains/research`、`quant/backtest`、`quant/analytics` | Research/quant-lab 单元、回放与 Evidence 测试；不因该变更重建生产 App |
+| Strategy owner 内的 `strategy-candidates` | 候选策略、quant-lab、Research 与候选回放；不构建生产 App |
+| Strategy owner 内的 `strategy-api`、`strategy-released` | signal-worker、依赖其公开 API 的生产 App、Research 与 parity |
+| Strategy、Portfolio、Risk、Execution、Market、`quant/math`、`quant/indicators` 的共享公开实现 | 所有受影响生产 App + Research + parity |
+| `apps/signal-worker` 或其专属装配 | signal-worker 与 deploy contract |
+| `apps/execution-worker`、生产 Execution Adapter/Contract | execution-worker、相关 consumer、contract、integration/recovery |
+| Contract 或共享 Platform API | 依赖该 Contract/API 的全部 producer/consumer |
+| Cargo.lock、toolchain、workspace/build script、Release Unit Manifest 或公共镜像基础 | 全部 Release Unit |
+
+新增“只用于实验、尚未发布”的候选策略，其规则仍由 Strategy owner 管理，但物理放入 `strategy-candidates`，并由 Research Experiment 引用；它不能注册进 live `StrategyCatalog` 或进入生产 App 依赖图。候选晋级时进入 `strategy-released` catalog，创建 Definition/Artifact/Release/RuntimeSnapshot，并重新进入生产构建、parity 和发布门禁。不能通过让生产 App 依赖回测 crate 来共享代码；已发布策略的共享业务逻辑只能位于 Strategy released/API 或其他对应 production Domain。
+
+生产镜像内容必须与 `core-runtime` binary allowlist 完全一致，禁止包含 quant-lab、Research/Backtest/optimizer、Paper 收益研究入口、strategy candidates、schema-tool 和未批准维护工具。每个工件记录 Git revision、Cargo.lock/toolchain、Manifest hash、传递依赖图 hash、binary checksum、镜像 digest 与 SBOM。完整规则见 [ADR-0010](adr/0010-build-impact-and-artifact-isolation.md)。
+
 ## 9. Contract 规则
 
 - 删除、改名或改变字段语义必须发布新版本；
@@ -251,7 +312,9 @@ Use case 可以定义事务必须原子完成哪些业务结果，但不能接�
 - 每个 Contract 有序列化快照、旧 payload 解析和未知字段测试；
 - Command/Event 携带 event、correlation、causation、idempotency、aggregate、sequence、时间和 partition identity；
 - producer 与所有 consumer 保持同一业务幂等身份；
-- consumer 在业务 side effect 与消费确认之间必须具备可恢复状态。
+- consumer 在业务 side effect 与消费确认之间必须具备可恢复状态；
+- `ExecutionRequest.risk_profile_ref/version` 只表达 Web 配置来源和授权；Core Risk 必须将其幂等解析为 Published `RiskPolicySnapshot`，缺失、不兼容或已撤销时 Blocked；
+- `ExecutionDecisionContextSnapshot` 必须带四个 Domain Policy Snapshot 的稳定 id/version/hash；后续 RiskDecision、OrderIntent、Plan、Attempt 与恢复 Contract 必须可追溯到同一 `context_id + context_hash`。
 
 ## 10. 数据库与事务规则
 
@@ -273,6 +336,8 @@ Use case 可以定义事务必须原子完成哪些业务结果，但不能接�
 - 时间和随机源必须注入；
 - backtest、paper、shadow、canary、live 复用同一业务实现；
 - Strategy evaluator 不接收账户风险配置；候选失效价可以作为信号证据，最终仓位、止损和审批由 Portfolio/Risk 决定；
+- `StrategyRuntimeSnapshot` 只包含 Strategy owner 事实，不包含 account、user、credential、risk profile 或 Portfolio/Risk/Execution policy 内容；
+- Portfolio、Risk、Execution planning 各自发布不可变 Policy Snapshot；Execution 只用 `ExecutionDecisionContextSnapshot` 绑定这些 Published 引用，不重新解析业务 JSON 或补默认值；
 - 已产生运行证据的策略 Definition/Artifact 不得覆盖；
 - Signal 携带 strategy version、definition hash 和 evidence cutoff；
 - PortfolioTarget 记录 allocator/policy version 与输入 Signal identity；
@@ -326,8 +391,20 @@ Use case 可以定义事务必须原子完成哪些业务结果，但不能接�
 15. ResearchBar 是否运行/声称覆盖 lease、outbox、Unknown 和 Reconciliation；
 16. ResearchEvidence 是否缺少原子可见发布状态或被 Strategy 表直接拥有。
 17. Dispatcher/其他 App 是否直接依赖或装配 raw SDK mutation client/credential；mutation capability 只能进入 Fenced Gateway。
+18. 新增零字段 `*Service`、`*Manager`、`*Calculator` 是否只作为 associated function 命名空间；
+19. Aggregate 是否公开能够绕过状态机或破坏不变量的可变字段，Model/Policy 是否直接读取系统时间、随机全局状态或进程全局业务缓存；
+20. backtest/live 是否新增重复的 Strategy、Portfolio、Risk、止盈止损或 OrderPlan 实现，或把同一 JSON 解析为语义重叠的运行模式配置；
+21. `signal-worker`、`execution-worker` 等生产 App 是否依赖 `strategy-candidates`、Research、`quant/backtest`、`quant/analytics` 或 `quant-lab`；
+22. CI 影响范围是否与 Cargo 传递依赖和 Release Unit Manifest 一致，Research-only 变更是否错误进入生产镜像，或共享 Domain 变更是否漏掉生产构建/parity；
+23. 生产镜像 binary 是否与 `core-runtime` allowlist 完全一致，是否混入 quant-lab、Research/Backtest/Paper、candidate、schema-tool 或未批准工具；
+24. 每个生产 App 是否为独立 Cargo package，且传递依赖闭包不含 candidates、Research、Backtest、Analytics；
+25. `StrategyRuntimeSnapshot` 是否混入 account/user/credential/risk profile 或其他 owner 的 policy 内容；
+26. Execution 是否在请求 intake 时原子持久化完整 `ExecutionDecisionContextSnapshot`，后续决策、计划、attempt 与恢复证据是否缺少 `context_id + context_hash`；
+27. 热路径是否重新读取可变配置、“最新版本”、环境变量或隐式默认值，ResearchRunSpec/Context 是否缺少规范 hash 与兼容测试。
 
 迁移期采用 ratchet：保存当前 legacy 违规基线，CI 只允许违规数下降，禁止新增。不得在门禁尚未实现时把本文写成“已经自动执行”。
+
+门禁落地状态（2026-07-27）：`cargo xtask arch-check` 已实现本节第 1/2（跨库直连）、3/4/11（依赖方向与 owner-agnostic 反向依赖）、10（文件行数）、17（legacy signed read-only 存续）项的静态检查与 ratchet，基线冻结在 [migrations/baseline-2026-07/legacy-allowlist.toml](migrations/baseline-2026-07/legacy-allowlist.toml)。其余需 AST/语义分析或运行时证据的项（5–9、12–16、18–27）仍为 TODO，覆盖清单见 [baseline-2026-07/README.md](migrations/baseline-2026-07/README.md)，未实现的项不得声称已自动执行。
 
 ## 14. 例外流程
 

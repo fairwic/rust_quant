@@ -14,6 +14,7 @@ members = [
     "crates/orchestration",
     "crates/analytics",
     "crates/rust-quant-cli",
+    "xtask",                 # 架构防腐检查器(只读,不进生产依赖图)
 ]
 resolver = "2"
 
@@ -129,7 +130,6 @@ rust-quant-risk = { path = "crates/risk" }
 rust-quant-execution = { path = "crates/execution" }
 rust-quant-orchestration = { path = "crates/orchestration" }
 rust-quant-analytics = { path = "crates/analytics" }
-rust-quant-ai-analysis = { path = "crates/ai-analysis" }
 rust-quant-cli = { path = "crates/rust-quant-cli" }
 crypto_exc_all = { path = "../crypto_exc_all" }
 
