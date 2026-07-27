@@ -46,6 +46,9 @@ ratchet 语义:读 `legacy-allowlist.toml` 冻结基线,运行违规数 **> 基�
 | 10 | 文件行数闸门(1000 WARN / 2000 硬失败) | ✅ 已实现(复用 check_code_file_line_limit.sh 阈值) |
 | 11 | quant/* 依赖业务 Domain | ✅ 由方向检查覆盖(V1 analytics→strategies) |
 | 17 | legacy signed read-only 账户直读 | ✅ 存续核对(V3/V4/V5 文件存在性) |
+| §10.1 | SDK DTO 泄漏(业务 crate `use okx`) | ✅ 已实现(文件级 ratchet,基线 9 文件) |
+| §10.2 | 交易/风控热路径 panic(unwrap/expect/panic) | ✅ 已实现(execution/risk 生产区扫描,基线 5 文件) |
+| §10.3 | 运行时 DDL(CREATE/ALTER TABLE) | ✅ 已实现(文件级 ratchet,基线 3 文件) |
 | 8 | Contract 未声明变化 | ⏳ TODO(需 Contract snapshot 基线,属阶段 2) |
 | 13 | evaluator 读账户配置/生成订单数量 | ⏳ TODO(需 AST/语义分析) |
 | 18 | 零字段 Service/Manager/Calculator | ⏳ TODO(需 AST) |

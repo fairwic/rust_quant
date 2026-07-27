@@ -64,3 +64,37 @@ review_by = "2026-10-01"
 dependency_violations = 2   # V1, V2
 legacy_paths = 3            # V3, V4, V5
 cross_db_direct = 0
+
+# ── 第二批检查(C/D/I)的文件级违规基线 ──
+# ratchet:名单内文件仍违规=基线内(seen);不在名单=新增(FAIL);名单内已清理=resolved。
+# 迁移期只允许名单缩短,禁止新增文件。清理某文件后从对应名单移除。
+[file_baselines]
+# C:业务 crate 直接 use okx(SDK 类型泄漏,应只在 exchange-gateway 映射)。收敛条件:
+# 迁移到 domains/* 时业务层改依赖 domain::ports,SDK 调用收进 adapters/exchange-gateway。
+sdk_dto_leak = [
+  "crates/execution/src/order_manager/order_service.rs",
+  "crates/execution/src/order_manager/swap_order_service.rs",
+  "crates/orchestration/src/jobs/risk/risk_balance_job.rs",
+  "crates/orchestration/src/scheduler/scheduler_service.rs",
+  "crates/orchestration/src/workflow/risk_order_job.rs",
+  "crates/risk/src/account/account_job.rs",
+  "crates/risk/src/order/swap_orders_detail.rs",
+  "crates/risk/src/position/position_service.rs",
+  "crates/risk/src/realtime/okx_stop_loss_amender.rs",
+]
+# D:execution/risk 热路径 panic(unwrap/expect/panic 家族)。收敛条件:实盘链改为显式 Err 传播,
+# 常量构造(如 Percentage::new)改用 const 或编译期保证。
+hot_path_panic = [
+  "crates/execution/src/order_manager/swap_order_service.rs",
+  "crates/risk/src/order/swap_order.rs",
+  "crates/risk/src/policies/drawdown_policy.rs",
+  "crates/risk/src/policies/position_limit_policy.rs",
+  "crates/risk/src/position/position_analysis.rs",
+]
+# I:运行时 DDL(CREATE/ALTER TABLE)。收敛条件:分表建表迁进 migrations/ 或声明式分区,
+# 移除首次访问即时建表逻辑。
+runtime_ddl = [
+  "crates/infrastructure/src/repositories/candle_repository.rs",
+  "crates/infrastructure/src/repositories/external_market_snapshot_repository.rs",
+  "crates/market/src/models/candles.rs",
+]

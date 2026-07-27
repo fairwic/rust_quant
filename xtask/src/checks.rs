@@ -26,16 +26,23 @@ pub fn run_arch_check() -> Result<Outcome, String> {
     checks.push(check_dependency_direction(&root)?);
     checks.push(check_cross_db_direct(&root)?);
     checks.push(check_legacy_paths(&root)?);
+    checks.push(check_sdk_dto_leak(&root, &baseline)?);
+    checks.push(check_hot_path_panic(&root, &baseline)?);
+    checks.push(check_runtime_ddl(&root, &baseline)?);
     let (size_check, hard_size_failures) = check_file_size(&root)?;
     checks.push(size_check);
 
     // ratchet:把每条违规按 baseline_id 是否命中划分。
     let mut new_violations = Vec::new();
+    let fb = &baseline.file_baselines;
     let baseline_ids: BTreeSet<String> = baseline
         .dependency_violation
         .iter()
         .map(|v| v.id.clone())
         .chain(baseline.legacy_path.iter().map(|v| v.id.clone()))
+        .chain(fb.sdk_dto_leak.iter().map(|p| format!("sdk-dto:{p}")))
+        .chain(fb.hot_path_panic.iter().map(|p| format!("hot-panic:{p}")))
+        .chain(fb.runtime_ddl.iter().map(|p| format!("ddl:{p}")))
         .collect();
     let mut seen_ids: BTreeSet<String> = BTreeSet::new();
 
@@ -380,4 +387,161 @@ fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
 /// 相对 workspace 根的可读路径。
 fn rel(root: &Path, f: &Path) -> String {
     f.strip_prefix(root).unwrap_or(f).display().to_string()
+}
+
+/// 取 text 中 `#[cfg(test)]` 之前的部分(底部测试模块的常见形态),
+/// 使行扫描只作用于生产代码区。若无该标记返回全文。
+fn production_region(text: &str) -> &str {
+    match text.find("#[cfg(test)]") {
+        Some(idx) => &text[..idx],
+        None => text,
+    }
+}
+
+/// 在指定 crate 子树里扫描"某文件是否命中 pattern",返回命中的相对路径集合。
+/// 已排除测试文件;只在 `#[cfg(test)]` 之前的生产区匹配。
+fn scan_files_with<F>(root: &Path, crate_dirs: &[&str], mut hit: F) -> Vec<String>
+where
+    F: FnMut(&str) -> bool,
+{
+    let mut hits = Vec::new();
+    for cd in crate_dirs {
+        let dir = root.join(cd);
+        let mut files = Vec::new();
+        collect_rs_files(&dir, &mut files);
+        for f in &files {
+            let Ok(text) = std::fs::read_to_string(f) else {
+                continue;
+            };
+            let path_str = rel(root, f);
+            // 文件名含 test 或整文件是 tests/ 的直接跳过
+            if path_str.contains("/tests/")
+                || f.file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|n| n.contains("test"))
+                    .unwrap_or(false)
+            {
+                continue;
+            }
+            if hit(production_region(&text)) {
+                hits.push(path_str);
+            }
+        }
+    }
+    hits.sort();
+    hits
+}
+
+/// 按文件级 allowlist 做 ratchet:命中文件在名单内标 baseline_id(seen),不在名单为新增(None → FAIL)。
+fn file_ratchet(
+    check_name: &str,
+    category: &str,
+    detail: &str,
+    id_prefix: &str,
+    hits: Vec<String>,
+    baseline: &[String],
+) -> CheckResult {
+    let mut result = CheckResult::new(check_name);
+    let allow: BTreeSet<&str> = baseline.iter().map(String::as_str).collect();
+    for path in hits {
+        let in_baseline = allow.contains(path.as_str());
+        result.violations.push(Violation {
+            category: category.into(),
+            detail: detail.into(),
+            location: path.clone(),
+            baseline_id: if in_baseline {
+                Some(format!("{id_prefix}:{path}"))
+            } else {
+                None
+            },
+        });
+    }
+    result
+}
+
+/// 检查 C:SDK DTO 泄漏。业务 crate(domain/indicators/strategies/risk/execution/
+/// trading/orchestration)直接 `use okx` 把交易所 SDK 类型拉进业务层(§10.1)。
+/// SDK 类型只应活在 adapters/exchange-gateway;业务层换交易所要重写即此债。
+fn check_sdk_dto_leak(root: &Path, baseline: &Baseline) -> Result<CheckResult, String> {
+    let dirs = [
+        "crates/domain/src",
+        "crates/indicators/src",
+        "crates/strategies/src",
+        "crates/risk/src",
+        "crates/execution/src",
+        "crates/trading/src",
+        "crates/orchestration/src",
+    ];
+    let hits = scan_files_with(root, &dirs, |t| {
+        t.lines().any(|l| {
+            let l = l.trim_start();
+            l.starts_with("use okx") || l.starts_with("use ::okx")
+        })
+    });
+    Ok(file_ratchet(
+        "sdk-dto-leak",
+        "sdk-dto-leak",
+        "业务 crate 直接 use okx(SDK 类型应只在 exchange-gateway 映射)",
+        "sdk-dto",
+        hits,
+        &baseline.file_baselines.sdk_dto_leak,
+    ))
+}
+
+/// 检查 D:交易/风控热路径 panic。execution/risk 生产代码里的
+/// `.unwrap()`/`.expect(`/`panic!`/`unreachable!`/`unimplemented!`/`todo!`(§10.2)。
+/// 实盘下单/风控链任何 panic 都是资金安全事故。
+fn check_hot_path_panic(root: &Path, baseline: &Baseline) -> Result<CheckResult, String> {
+    let dirs = ["crates/execution/src", "crates/risk/src"];
+    let hits = scan_files_with(root, &dirs, |t| {
+        t.lines().any(|l| {
+            let l = l.trim_start();
+            if l.starts_with("//") {
+                return false;
+            }
+            l.contains(".unwrap()")
+                || l.contains(".expect(")
+                || l.contains("panic!")
+                || l.contains("unreachable!")
+                || l.contains("unimplemented!")
+                || l.contains("todo!")
+        })
+    });
+    Ok(file_ratchet(
+        "hot-path-panic",
+        "hot-path-panic",
+        "execution/risk 热路径出现 panic 家族调用(实盘应返回 Err)",
+        "hot-panic",
+        hits,
+        &baseline.file_baselines.hot_path_panic,
+    ))
+}
+
+/// 检查 I:运行时 DDL。生产代码里 `CREATE TABLE`/`ALTER TABLE` 字面量(§10.3)。
+/// schema 应只由 migrations/ 定义;运行时建表制造第二真相源与环境漂移。
+fn check_runtime_ddl(root: &Path, baseline: &Baseline) -> Result<CheckResult, String> {
+    let dirs = [
+        "crates/infrastructure/src",
+        "crates/market/src",
+        "crates/services/src",
+        "crates/orchestration/src",
+    ];
+    let hits = scan_files_with(root, &dirs, |t| {
+        t.lines().any(|l| {
+            let up = l.to_uppercase();
+            let up = up.trim_start();
+            if up.starts_with("//") {
+                return false;
+            }
+            up.contains("CREATE TABLE") || up.contains("ALTER TABLE")
+        })
+    });
+    Ok(file_ratchet(
+        "runtime-ddl",
+        "runtime-ddl",
+        "生产代码出现运行时 DDL(schema 应只由 migrations/ 定义)",
+        "ddl",
+        hits,
+        &baseline.file_baselines.runtime_ddl,
+    ))
 }

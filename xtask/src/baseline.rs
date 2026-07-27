@@ -12,6 +12,9 @@ pub struct Baseline {
     #[serde(default)]
     pub legacy_path: Vec<LegacyPath>,
     pub baseline_counts: BaselineCounts,
+    /// 文件级违规基线(第二批检查:C/D/I)
+    #[serde(default)]
+    pub file_baselines: FileBaselines,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -33,6 +36,22 @@ pub struct BaselineCounts {
     pub dependency_violations: usize,
     pub legacy_paths: usize,
     pub cross_db_direct: usize,
+}
+
+/// 文件级违规基线:每类检查一段,列出当前已知违规文件(workspace 相对路径)。
+/// ratchet 语义:扫描发现的违规文件在名单内 = 基线内(seen);不在名单 = 新增(FAIL);
+/// 名单内但扫描未再发现 = 已消除(resolved)。
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct FileBaselines {
+    /// C:业务 crate 直接 `use okx` 的 SDK DTO 泄漏文件
+    #[serde(default)]
+    pub sdk_dto_leak: Vec<String>,
+    /// D:execution/risk 热路径 panic(unwrap/expect/panic)文件
+    #[serde(default)]
+    pub hot_path_panic: Vec<String>,
+    /// I:运行时 DDL(CREATE/ALTER TABLE)文件
+    #[serde(default)]
+    pub runtime_ddl: Vec<String>,
 }
 
 impl Baseline {
