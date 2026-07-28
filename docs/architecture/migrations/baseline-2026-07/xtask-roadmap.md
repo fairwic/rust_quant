@@ -4,9 +4,23 @@
 - 制定日期:2026-07-27
 - 上位:[baseline README](README.md)、[dependency-rules §13](../../dependency-rules.md)
 
-当前 `cargo xtask arch-check` 已实现 4 类静态检查(依赖方向、跨库直连、文件行数、legacy 路径存续)。本文列出可继续静态落地的候选检查,以及明确做不到、需 AST/语义分析的项。每项标注**当前基线量级、误报风险、实现复杂度**,供决定实现批次。
+当前 `cargo xtask arch-check` 已实现 legacy 依赖方向、跨库直连、legacy 路径存续、文件行数、SDK DTO 泄漏、热路径 panic 和运行时 DDL 检查。本文列出可继续静态落地的候选检查,以及明确做不到、需 AST/语义分析的项。每项标注**当前基线量级、误报风险、实现复杂度**,供决定实现批次。
 
 所有新检查沿用现有 ratchet:先冻结当前违规基线(写入 `legacy-allowlist.toml`),只允许违规数下降,禁止新增。
+
+## 零、P0：先让检查器认识目标目录（未实现，阻断首个物理迁移）
+
+现有实现的 package layer 和若干目录扫描都写死在 legacy 路径；新 `domains/*`、`quant/*`、`adapters/*` 与 `apps/*` 若直接开始迁移，可能根本不被检查器分类或扫描。此项优先级高于下方新增 regex 规则：
+
+| 项目 | 最小实现 | 验收 |
+| --- | --- | --- |
+| Package role map | 新增机器可读 role map：workspace package/path -> `domain:<owner>` / `quant` / `adapter` / `contract` / `platform` / `app` / `xtask`，并关联 Release Unit | 新 package 未登记时 FAIL；每种 role 有最小正反例 |
+| 依赖方向 | 以 role map 替代旧 package 名分层；Domain/Quant/Contract/App 规则按目标架构判定 | 在临时 target package 注入 `quant -> domain`、`domain -> adapter`、`app -> research` 等反例均 FAIL |
+| 源码根覆盖 | 统一收集 legacy `crates/`、目标 `crates/**` 和 `apps/**`，各检查按 role/路径排除测试而非漏扫整个文件 | `apps/` 超 2000 行、target execution panic、target adapter runtime DDL 均被发现 |
+| baseline 完整性 | allowlist 的内容 hash/变更与 `Migration Manifest` 绑定；架构基线漂移在 active `structure_only` Manifest 中 FAIL | 单独扩 allowlist、unknown package、未更新 Evidence 都 FAIL |
+| CI 证据 | 在受跟踪 pipeline 中运行 `arch-check` 和目标注入测试，并把 revision 写入 Evidence | 合并前可追溯；当前仓库未发现受跟踪 pipeline，状态仍未验证 |
+
+P0 不降低 legacy 阈值，也不要求提前创建空目标 crate；它只保证真正开始搬迁时，新的目录不处于静态门禁盲区。
 
 ## 一、可静态落地(regex / 行扫描 / Cargo 解析)
 

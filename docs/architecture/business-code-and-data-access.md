@@ -1,16 +1,17 @@
 # 业务代码与数据访问放置规范
 
 - 状态：已接受
-- 日期：2026-07-21
+- 日期：2026-07-23
 - 上位文档：[Rust Quant 长期目标架构](target-architecture.md)
 - 依赖规则：[Rust Quant 依赖与代码归属规则](dependency-rules.md)
 
 ## 1. 目的
 
-本文专门回答最容易被写乱的两个问题：
+本文专门回答最容易被写乱的三个问题：
 
 1. 业务逻辑到底放在哪里；
-2. 数据库增删改查、事务和 SQL 到底放在哪里。
+2. 哪些逻辑应使用 Entity/Value Object/Policy/Use Case，哪些应使用函数；
+3. 数据库增删改查、事务和 SQL 到底放在哪里。
 
 本文是开发者和 AI 新增代码时的默认放置标准。现有 legacy 代码可以按迁移计划暂时保留，但不得继续扩大错误边界。
 
@@ -73,6 +74,164 @@ Message Contract
 | HTTP/消息 DTO 映射 | `apps/<app>` 或入站 Adapter | `ExecutionRequestedV1 -> CreateOrderIntentInput` |
 | 环境变量、连接池、任务循环 | `apps/<app>` / `platform` | 解析 WorkerConfig、建立 PgPool |
 
+### 3.1 Rust 代码形态决策表
+
+不要用“逻辑复杂就建对象、逻辑简单就写函数”判断。按以下顺序决策：
+
+| 问题 | 是 | 否 |
+| --- | --- | --- |
+| 是否已经确定唯一业务 Owner？ | 继续判断 | 停止；不得先创建 `common`、Service 或 DTO |
+| 是否有稳定 identity、生命周期或跨字段不变量？ | Entity/Aggregate | 继续判断 |
+| 是否无 identity，但需要构造时保证单位、范围或组合合法？ | Value Object | 继续判断 |
+| 是否为无状态、无 I/O、完整输入决定输出的计算？ | 自由纯函数 | 继续判断 |
+| 是否有多个纯决策共享不可变、带版本配置？ | Policy 对象 | 继续判断 |
+| 是否跨事件维护滚动状态？ | 显式 State + 同一 transition | 继续判断 |
+| 是否编排读取、判断、持久化和事件？ | 持有 Port 的 Use Case 对象 | 继续判断 |
+| 是否实现数据库、HTTP、Redis 或交易所协议？ | Adapter 对象 | 重新检查职责是否过宽 |
+
+Trait 不是“面向对象基类”。只有以下场景才创建 Trait：
+
+- Domain 定义自己需要的 Port；
+- 存在 live/in-memory/simulated 等真实替换实现；
+- 跨 Domain 暴露稳定进程内 API；
+- 测试需要 Fake 且边界本身有业务意义。
+
+只有一个实现、没有调用边界或只是希望以后扩展时，不创建 Trait。
+
+### 3.2 Entity、纯函数、Policy 与 Use Case 示例
+
+有身份和生命周期的订单使用 Aggregate，并通过方法保护状态迁移：
+
+```rust
+pub struct Order {
+    id: OrderId,
+    state: OrderState,
+    quantity: Quantity,
+    filled_quantity: Quantity,
+}
+
+impl Order {
+    pub fn apply_fill(
+        &mut self,
+        fill: Fill,
+        observed_at: Timestamp,
+    ) -> Result<Vec<OrderEvent>, OrderError> {
+        // 只验证不变量、推进状态并生成事件；不访问数据库或系统时间。
+        todo!()
+    }
+}
+```
+
+无状态的止损候选选择使用自由纯函数：
+
+```rust
+pub fn select_tightest_valid_stop(
+    side: PositionSide,
+    entry: Price,
+    candidates: &[StopCandidate],
+) -> Option<Price> {
+    todo!()
+}
+```
+
+多个决策共享同一冻结风险配置时使用 Policy：
+
+```rust
+pub struct PreTradeRiskPolicy {
+    snapshot: RiskPolicySnapshot,
+}
+
+impl PreTradeRiskPolicy {
+    pub fn evaluate(&self, input: PreTradeRiskInput) -> RiskDecision {
+        todo!()
+    }
+}
+```
+
+需要读取 Snapshot 并原子持久化结果时使用 Use Case：
+
+```rust
+pub struct EvaluatePreTradeRisk<A, S> {
+    account_snapshots: A,
+    risk_decisions: S,
+}
+
+impl<A, S> EvaluatePreTradeRisk<A, S> {
+    pub async fn execute(
+        &self,
+        input: EvaluateRiskInput,
+    ) -> Result<RiskDecisionId, RiskError> {
+        todo!()
+    }
+}
+```
+
+Use Case 对象存在的理由是持有依赖并编排一个完整业务动作，不是给函数增加 `Service::` 前缀。没有字段和依赖的 `StopLossCalculator`、`OrderService` 或 `XxxStrategy` 静态方法容器，应改成语义明确的 module + function；确有冻结配置时再变成 Policy。
+
+### 3.3 状态对象与纯 transition
+
+跨 K 线或订单事件维护状态时，可以采用以下任一种形式：
+
+```text
+Aggregate method:
+  order.apply(event, observed_at) -> domain events
+
+Pure transition:
+  transition(previous_state, event, policy_snapshot) -> next_state + effects
+```
+
+选择规则：
+
+- 状态带业务 identity、version 且需要防止任意修改时，优先 Aggregate method；
+- 状态是 evaluator 内部可重放值、需要 backtest/live 逐字节比较时，优先纯 transition；
+- 两种形式都必须显式传入时间、随机值、配置快照和外部事实；
+- 禁止在 Model/Policy 中读取 `Utc::now()`、`std::env`、全局随机源或进程全局业务 Map；
+- 能破坏不变量的字段不得提供任意 setter 或公开可变访问。
+
+`StrategyEvaluationState` 使用 `EvaluationScopeId + StrategyRuntimeSnapshotId + MarketStreamPartition` 作为 identity。live 只使用 Redis Adapter；Postgres 不得成为 evaluator state 的同源或回退事实库。backtest 使用内存 Adapter，只替换状态存储，不替换 evaluator transition。
+
+### 3.4 Backtest、Paper 与 Live 的单实现规则
+
+相同配置不是“同一 JSON 分别反序列化到两个相似结构体”。所有运行模式必须使用同一组强类型快照、同一 `DecisionContextCoreV1` builder 和同一业务 symbol：
+
+```text
+StrategyRuntimeSnapshot             -> Strategy evaluator/exit policy
+PortfolioPolicySnapshot             -> Portfolio policy
+RiskPolicySnapshot                  -> Risk policy
+ExecutionPlanningPolicySnapshot     -> Order/Protection planning
+              \                         /
+               -> DecisionContextCoreV1
+                  + 动态 MarketDecisionReadiness/Market/Account/Instrument Evidence
+                  + live: ExecutionDecisionContextSnapshot(ExecutionRequest subject)
+                  + research: ResearchDecisionContextSnapshot(ResearchScenario subject)
+```
+
+Owner 边界固定为：
+
+- Strategy 输出候选失效价、退出意图/候选止盈计划和 Signal evidence；
+- Portfolio 决定资本预算、净额和目标仓位；
+- Risk 选择不可放宽的最终止损与风险边界、批准数量并生成 `RiskDecision`，不替 Strategy 发明盈利目标；
+- Execution 根据 Strategy exit intent、RiskDecision 和 instrument capability 先生成纯、规范化的 `ExecutionPlanningValue`（内含有序 child `OrderPlan` 与 `ProtectionPlanningValue`）；只有 live intake 的单一事务才能由该值初始化持久 `ExecutionPlan` aggregate 与 `ProtectionPlan`；
+- ResearchBar 只替换 Account/Market 的模拟输入和 Fill/fee/slippage/funding 机制，只产生/比较 `ExecutionPlanningValue`，不产生 `OrderIntent`、live `ExecutionPlan`、Outbox 或交易所 mutation；
+- PaperEvent 只替换 Exchange Adapter，并复用 Execution 状态迁移；如需模拟 OMS 状态，只验证从同一 planning value 无损初始化的模拟 aggregate，不把它当作 Research parity 对象；
+- live 使用真实 Adapter，但不得另写 `LiveRisk`、`LiveStopLoss` 或 `LiveOrderPlanner`。
+
+`trade_fee_rate`、slippage、funding 和 candle 内路径归 `SimulationProfile`；分批止盈、ATR/固定目标等 alpha exit 规则归 Strategy RuntimeSnapshot；`allocation_ratio` 归 Portfolio；账户风险比例、最大损失、leverage/margin 限制和最终止损约束归 Risk；具体 leverage/margin mode、交易所精度与保护单能力映射归 Execution。禁止把这些字段继续混入一个 `BasicRiskStrategyConfig`，也禁止同一配置 payload 同时解析为两个语义重叠的风险类型。
+
+完整配置边界固定为：
+
+- `StrategyRuntimeSnapshot` 不包含账户、用户、凭证、risk profile 或其他 owner 的政策内容；
+- `ActivationEligibilityV1` 由 Strategy owner 随 immutable RuntimeSnapshot、Release generation、Completed Evidence、allowed deployment channel、eligibility generation 与撤销状态发布；Control 的 `ActivationPointer` 只能消费该资格，且必须满足 channel×stage，不能从“已发布”或可变 Release 状态自行推断；
+- Web risk profile 只能作为 `ExecutionRequest` 中的精确来源/授权引用，由 Core Risk 校验并解析为 Published `RiskPolicySnapshot`；
+- Execution 在自己的事务中把四个 Published Policy Snapshot 绑定成 `ExecutionDecisionContextSnapshot`，并与请求 intake/幂等身份一起持久化；Research 使用 `ResearchScenarioRef`/`ResearchDecisionContextSnapshot`，不得伪造 Web execution fields；
+- `MarketDecisionReadiness`、MarketSnapshot、AccountSnapshot、InstrumentRulesSnapshot 和 observed time 是动态决策证据，不得塞进 Policy Snapshot；非 `ReadyForNewRisk` 时只允许已声明且可证明的 reduce-only 路径，不能新增/加仓；
+- 连续 `RiskAction` 必须按 `risk_action_decision_id = subject_binding_hash + trigger_event/evidence_hash + risk_policy_snapshot_hash + action_generation` 幂等；同一 identity 只能产生一次同语义 action/outcome，避免事件重放重复减仓/平仓；
+- Research 取得历史 Market 输入只能使用 Market historical API/Contract，禁止直读 Market Storage、触发 backfill、使用生产 Adapter 或持有 `MarketDataAccessCredential`；
+- Research 用 `ResearchRunSpec` 冻结 DatasetManifest、四个 Policy Snapshot、SimulationProfile、模拟账户初态和 Clock/Seed，再以同一 `DecisionContextCoreV1` builder 构造 ResearchScenario binding；
+- 任一默认值只能由字段 owner 在发布 Snapshot 时展开；App、Research 和 Dispatcher 禁止自行补业务默认值或选择“当前最新配置”。
+
+详细字段与 exact parity 定义见 [ADR-0011](adr/0011-layered-runtime-snapshots-and-decision-context.md)。
+
 ## 4. Command 的推荐目录
 
 以“创建订单意图”为例：
@@ -132,14 +291,14 @@ pub trait ExecutionWritePort {
 }
 ```
 
-Postgres Adapter 在一个 SQLx transaction 中写入：
+live Postgres Adapter 在一个 SQLx transaction 中写入：
 
 1. Inbox/幂等记录和唯一业务键；
 2. 通过 account gate row CAS 或活跃唯一约束取得 `AccountOpeningSlot`；
 3. 不可变 `risk_evaluation_id`/`RiskDecision` 引用、摘要、批准边界和过期时间，并唯一绑定 parent OrderIntent/plan hash；
 4. `OrderIntent` 与当前 child Order 首个持久状态 `SubmitPending`；
-5. 完整不可变 `ExecutionPlan`；
-6. 初始为 `Planned` 的 `ProtectionPlan`；
+5. 由同一不可变 `ExecutionPlanningValue`/hash 无损初始化的完整 aggregate `ExecutionPlan`（含有序 child `OrderPlan` snapshot；child 不另建表、生命周期或 Contract）；
+6. 由对应 `ProtectionPlanningValue` 初始化、初始为 `Planned` 的 `ProtectionPlan`；
 7. `OrderSubmissionRequestedV1` Outbox；
 8. correlation、causation 和必要审计字段。
 
@@ -182,8 +341,8 @@ pub trait ExecutionMutationWritePort {
 - `complete_mutation_attempt` 在一个事务中一起写 attempt outcome、permit 终态、Order/Protection transition 和后续 Outbox；Unknown outcome 只能创建 query/reconciliation/alert 等恢复任务，不能直接创建同 kind mutation Outbox；
 - `recover_unknown_and_enqueue_retry` 只有在 DefinitivelyAbsent 且无可发送 permit 时，才原子写 RecoveryAuthorized、supersede 旧 mutation generation 的本地授权/投递记录、推进原 kind 的 Pending state，并按 Submit/Cancel/Protect 映射创建对应新 Outbox；只滚动 mutation 三字段和 attempt number，保持原 mutation/目标 identity 与 payload/plan hash，不能依赖旧 Outbox 或进程扫描；
 - `rollover_mutation_delivery` 统一处理 Submit/Cancel/Protect 的 transient blocker、可重试 DefinitelyNotSent 和 fence/gate 变化：确认当前 delivery 的同一事务必须 supersede 旧 generation，并创建 delayed Outbox 或 durable RetrySchedule；Scheduler 到期只能经 owner transaction 物化唯一 Outbox，不能直接 claim；
-- `ExecutionMutationAttempt` 与 Permit 至少保存 mutation kind、stable identity/number、payload/plan hash、fence/generation、expiry、门禁引用、结果/permit 状态和 started/completed time；不得保存明文凭证；
-- raw SDK mutation client/credential 只装配进 Fenced Gateway，不向 Dispatcher 或其他 App 暴露；
+- `ExecutionMutationAttempt` 与 Permit 至少保存 mutation kind、stable identity/number、payload/plan hash、fence/generation、expiry、门禁引用、结果/permit 状态和 started/completed time；不得保存明文凭证、`GatewayCredentialCapability`、原始 `MarketDataAccessCredential` 或其 Ref；
+- raw SDK mutation client 与用户 credential material 只装配进 Fenced Gateway。Gateway 仅以 Web owner 签发、audience-bound、短 TTL/一次性的 capability 在内存解析材料；Dispatcher、Risk、Context、Outbox 和其他 App 不得读取、序列化或持久化它。原始 `MarketDataAccessCredential` 只允许 Market/Gateway 公共 read-only 配置内存使用；公共配额/证据/必要 Market Contract 仅可使用非敏感 `MarketDataAccessCredentialRef` 或 `market_data_source_profile_id`，绝不能复用为私有/执行能力；
 - 暂时 blocker 必须持久化 `next_eligible_at`/唤醒条件并确认当前 delivery，由 durable scheduler/event 唤醒，不能 nack 热循环。
 
 错误做法：
@@ -194,7 +353,7 @@ generic_repository.insert<T>()
 handler 直接 INSERT
 先写订单，事务外再写 outbox
 先调用交易所，成功后再补订单状态
-只持久化 OrderIntent，ExecutionPlan/ProtectionPlan 留在内存
+只持久化 OrderIntent，ExecutionPlan（含 child OrderPlan）/ProtectionPlan 留在内存
 ```
 
 ### 5.2 Read
@@ -247,7 +406,7 @@ Use case 不接收 `sqlx::Transaction`，而是调用一个表达原子业务动
 - Outbox Event；
 - 同 owner 的审计事实。
 
-Execution 的下单准备是该规则的严格实例：`RiskDecision` 由 Risk owner 先行持久化；Execution 不建立跨 owner 事务，只在自己的单一事务中取得 `AccountOpeningSlot`，并保存不可变审批引用以及 `SubmitPending + OrderIntent + ExecutionPlan + ProtectionPlan + Idempotency + Outbox`。该事务提交前禁止确认上游或发生外部 I/O；提交后由 Dispatcher 执行门禁复核并签发 permit，再由 Fenced Gateway 消费 current permit 后调用交易所。
+Execution 的 live 下单准备是该规则的严格实例：`RiskDecision` 由 Risk owner 先行持久化；Execution 不建立跨 owner 事务，只在自己的单一事务中取得 `AccountOpeningSlot`，保存不可变审批引用与 `ExecutionPlanningValue` hash，并原子保存由其初始化的 `SubmitPending + OrderIntent + ExecutionPlan（含 child OrderPlan snapshot）+ ProtectionPlan + Idempotency + Outbox`。该事务提交前禁止确认上游或发生外部 I/O；提交后由 Dispatcher 复核 `MarketDecisionReadiness`、账户新鲜度、资格与保护门禁并签发 permit，再由 Fenced Gateway 消费 current permit 后调用交易所。
 
 Opening slot 也是 Execution owner 事实，不由 worker lease 代替。释放必须由业务用例验证全部 child mutation 已确定、没有 attempt/Unknown、Account owner typed watermark 已覆盖 cumulative fill，且剩余敞口保护满足政策；Adapter 只原子执行该决定。
 
@@ -305,6 +464,7 @@ crates/adapters/postgres/src/
 ├── lib.rs
 ├── pool.rs
 ├── error.rs
+├── control/
 ├── market/
 ├── strategy/
 ├── portfolio/
@@ -363,12 +523,20 @@ migrations/
 - Core 读取 Web 商业事实必须使用 `quant-web-client` 调用 owner internal API；
 - Web/Admin 读取 Core 交易事实必须使用 Core API、Event 或只读投影；
 - 禁止新增跨库 SQL、共享 ORM Model 或让 Admin 直写业务表。
+- 跨仓库业务 payload 随其唯一 owner 仓库发布：Core `crates/contracts` 只保存 Core owner payload 和 owner-neutral `ContractEnvelopeV1` primitive；Web/News payload 由各自 owner 发布，Core 仅在 Adapter 显式映射固定版本 binding。Envelope 只放传输 identity，不能携带业务字段；Envelope/payload 均须独立 N/N-1 兼容测试。
+- `NewsInsightV1` 由 News owner 发布且带 version、`published_at`、不可变 `available_at` 与 evidence ref；它只可作为 `StrategyRuntimeSnapshot` 声明可消费的已发布 evaluator 输入，且仅当 `available_at <= DecisionTime` 时可消费为 `StrategySignal`，不得直接形成 Web `ExecutionRequest`。
 
 ### 10.2 Execution Request 与订单事实
 
-`quant_web.execution_tasks` 在迁移期映射为 `ExecutionRequest`：它证明“这个用户的这个 combo 被允许交给 Core 尝试执行”，不证明已经形成交易所订单。
+`quant_web.execution_tasks` 在迁移期映射为 `ExecutionRequest`：它证明“这个用户的这个 combo 被允许交给 Core 尝试执行”，不证明已经形成交易所订单。表始终由 Web owner 管理，Core 既不直连、也不轮询该表。
 
-Core 收到请求后生成自己的稳定 `OrderIntentId` 和 `client_order_id`。Core 的 Order/Fill/Protection 才是执行事实。Web 展示 Core 结果时保存的是投影，投影可重建且不能反向覆盖 Core 状态。
+其中 `risk_profile_ref + version` 只是 Web 配置来源和商业授权引用。Core Risk 必须按精确版本校验并幂等解析为不可变 `RiskPolicySnapshot`；不得把 Web JSON 直接当作业务政策，也不得缺失时回退默认风险。
+
+Core 通过 `ClaimExecutionRequestV1` 取得带 claim fence/expiry 的 canonical request；长流程用 `RenewExecutionRequestClaimV1`，放弃/阻塞用 `ReleaseExecutionRequestClaimV1`，完成/用户可见 blocker 用 `ReportExecutionRequestOutcomeV1`。Web 在自己的事务中处理 claim、重复、过期与迟到 outcome；Core 的 worker lease、OpeningSlot 与 OMS 幂等独立存在，二者不构成跨库事务。
+
+持有有效 claim 后，Execution 才把四个 Published Policy Snapshot 绑定为不可变 `ExecutionDecisionContextSnapshot`，再生成稳定 `OrderIntentId` 和 `client_order_id`。Core 的 Order/Fill/Protection 才是执行事实。Web 展示 Core 结果时保存的是投影，投影可重建且不能反向覆盖 Core 状态。
+
+已由该 Web 请求触发且仍有成交、保护、Unknown、撤单或对账责任的交易，Execution 从原 request/context/order identity 持久派生 `SafetyObligation`。会员、订阅或 claim 到期只能冻结新风险，不能删除该责任；只有可追溯该来源链的 `ManagedExposure` 可在原始证据、Gateway capability、permit/fence 与 reduce-only 证明齐备时执行 Cancel/Protect/Reduce/Close。`ObservedExternalPosition`/`UnknownOrigin` 只能读取、告警和人工处置，除非 Web 另行发布版本化账户管理授权 Contract；不得借平台市场数据材料或其他用户 credential 继续自动 mutation。
 
 ## 11. 三种模板的最低内容
 
@@ -407,15 +575,18 @@ AI 在新增或移动代码前，必须先给出以下简表；不能唯一填�
 变更：
 Owner：
 切片类型：Command / Query / Event Consumer / Pure Policy
+代码形态：Entity / Value Object / Pure Function / Policy / Use Case / Port / Adapter
 入口：
 Use Case：
 Model/Policy：
 所需 Ports：
 Adapters：
+Backtest/Paper/Live 复用点与允许差异：
+构建影响：Research-only / Strategy candidate / Shared Domain / Production App；受影响 App：
 事务原子性：
 跨进程 Contract：无 / 名称与版本
 恢复 Owner：
-测试：unit / integration / contract / recovery
+测试：unit / deterministic / parity / integration / contract / recovery
 ```
 
 ## 13. 典型功能归属示例
@@ -451,7 +622,7 @@ Execution policy            计算已成交敞口应保护数量
 Fill consumer use case      幂等应用 Fill，原子写订单/保护命令 outbox
 Exchange gateway            映射 attached/conditional order 能力
 Reconciliation              检测 ProtectionMissing/QuantityMismatch
-Risk                        超过未保护窗口后发 Reduce/Close/KillSwitch
+Risk                        超过未保护窗口后发 Reduce/Close 与 Kill Switch typed request
 ```
 
 ## 14. 禁止模式速查
@@ -462,6 +633,12 @@ Risk                        超过未保护窗口后发 Reduce/Close/KillSwitch
 禁止：Domain -> Wire Contract
 禁止：Adapter -> 策略/组合/风险决策
 禁止：Repository<T> / BaseService / update_by_id / save_json
+禁止：零字段 Service/Manager/Calculator 仅作为函数命名空间
+禁止：把跨 owner 大函数移动进 impl 后冒充 Aggregate
+禁止：Aggregate 公开可绕过状态机的可变字段
+禁止：Model/Policy 读取系统时间、环境变量或全局业务缓存
+禁止：backtest/paper/live 各自实现 Risk、止盈止损或 `ExecutionPlanningValue`（含 child `OrderPlan`）；禁止 Research 创建或比较 live-only `ExecutionPlan` aggregate
+禁止：同一 JSON 解析为语义重叠的 backtest/live 风险配置
 禁止：跨 owner JOIN 后直接修改
 禁止：Query 隐藏写入
 禁止：Reconciliation 直接修表

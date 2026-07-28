@@ -2,7 +2,7 @@
 
 - 状态：已接受
 - 首次接受：2026-07-18
-- 最近修订：2026-07-20
+- 最近修订：2026-07-28
 - 决策者：Rust Quant Core
 
 ## 背景
@@ -46,18 +46,29 @@ StrategyArtifact 和 ResearchEvidence 都不决定当前是否上线，也不修
 
 ### StrategyRelease
 
-显式管理 Research、Paper、Shadow、Canary、Live、Retired 状态及 promote、rollback、pause、retire 记录。Release 是有审计的状态机，不嵌入不可变 Definition。
+Strategy owner 显式管理 Research、Paper、Shadow、Canary、Live、Retired 状态及 promote、rollback、pause、retire 记录。Release 是有审计的状态机，不嵌入不可变 Definition，也不等于“当前运行范围选择了它”。`Research` 只表示 Research owner 已完成的证据尚未获得运行资格，不能被任何 ActivationPointer 选用。
+
+### ActivationPointer 与 KillSwitchSnapshot
+
+Control owner 管理可变 `ActivationPointer`：它只选择某个已发布 `StrategyRuntimeSnapshot` 在明确 activation scope（例如 `strategy_key + deployment_channel`）中的当前引用，并为该 scope 维护单调 `activation_generation`。Strategy 不能通过修改 Release 自行激活，Control 也不能修改 StrategyRelease 的生命周期。
+
+Strategy owner 还必须发布不可变 `ActivationEligibilityV1`，作为 Control 写 Pointer 的唯一资格输入。它绑定 `runtime_snapshot_id/hash`、`strategy_release_id/generation`、Completed ResearchEvidence 引用、eligible channel 集、eligibility generation 与 revoked 标记。固定 channel×stage 规则为：`Research -> none`、`Paper -> paper`、`Shadow -> shadow`、`Canary -> canary`、`Live -> live`、`Retired -> none`。Control 只能验证并审计该资格，不能自行从可变 Release 状态推断；资格撤销或 Retired 必须触发新的 Control catalog generation，使旧 Pointer 不再被数据面接受。
+
+Control 还拥有 `KillSwitchSnapshot`。它使用独立的全局 `kill_switch_catalog_generation` 与每个 scope 的 `scope_generation`；不得复用 activation/release generation。RiskAction、Account 失败或 Web 商业停用只能提交 typed request，不能绕过 Control 直接写 switch。Kill Switch 只阻断新增风险，保护、reduce-only 和恢复仍经各 owner 状态机。
 
 ### StrategyRuntimeSnapshot
 
 数据面实际消费的不可变快照，固定：
 
-- Definition 与参数；
-- Portfolio/Risk policy 版本；
-- Contract 版本；
-- Release generation、有效期与 kill-switch generation。
+- Definition/Artifact identity 与 Strategy entry/exit 参数；
+- evaluator state schema、输入要求与策略能力；
+- compatible policy/Contract schema 范围；
+- 所属 StrategyRelease identity/version；
+- 不包含 ActivationPointer、activation generation、Kill Switch 或其 generation。
 
-控制面发布 Snapshot；数据面不在热路径临时组合定义、配置和默认值。
+Strategy 发布 RuntimeSnapshot 与独立的 ActivationEligibility；Control 发布指向其的 ActivationPointer/KillSwitchSnapshot。数据面本地读取已发布控制快照，不在热路径临时组合定义、配置和默认值，并拒绝 channel、eligibility generation 或 runtime snapshot hash 不匹配的 Pointer。
+
+`StrategyRuntimeSnapshot` 不拥有或内嵌 Portfolio、Risk、Execution policy，也不包含 account、user、credential 或 risk profile。各 Domain 分别发布自己的 Policy Snapshot，Execution 通过 `ExecutionDecisionContextSnapshot` 绑定某次请求实际使用的四个稳定引用；完整规则见 [ADR-0011](0011-layered-runtime-snapshots-and-decision-context.md)。
 
 ### 显式编译期 Registry
 
@@ -65,7 +76,7 @@ StrategyArtifact 和 ResearchEvidence 都不决定当前是否上线，也不修
 
 ### 版本化 Wire Contract
 
-Strategy Signal、Portfolio Target、Risk Decision、Execution Request、Order Intent、Order Event、Fill Event、Readiness 与 Catalog Sync 等跨进程结构必须有明确 owner/version。
+Strategy Signal、Portfolio Target、Risk Decision、Execution Request、Order Intent、live Execution Plan、Order Event、Fill Event、Readiness、ActivationEligibility 与 Catalog Sync 等跨进程结构必须有明确 owner/version。纯 `ExecutionPlanningValue` 是进程内/Research parity 值，不是独立 OMS Contract；只有 live aggregate 的跨进程状态需要 Wire Contract。
 
 Domain 不依赖 Wire Contract。App/入站 Adapter 显式完成：
 
@@ -75,12 +86,14 @@ Wire Contract <-> Use Case Input/Output
 
 Signal 至少携带 strategy/definition version、definition hash、instrument、timeframe、observed time 和 evidence cutoff。订单链路保持稳定 event/correlation/causation/idempotency/aggregate/sequence identity。
 
+业务 payload 随其事实/command owner 的仓库发布：Core `crates/contracts` 只保存 Core owner payload；Web/News payload 由其 owner 发布，Core 只能在 Adapter 使用固定版本 binding。所有 wire body 都把 owner-neutral `ContractEnvelopeV1`（版本、message/correlation/causation/idempotency、aggregate/sequence、partition、transport time）与业务 payload 分开；Envelope 不承载 credential、风险配置、订单或策略等业务字段。两层分别执行 golden serialization 和 N/N-1 兼容测试。
+
 ### 跨仓库 Owner
 
-- Core Strategy 拥有 Definition、StrategyArtifact 技术身份、Release 和 Runtime Snapshot；
+- Core Strategy 拥有 Definition、StrategyArtifact 技术身份、Release 和 Runtime Snapshot；Control 拥有 ActivationPointer、KillSwitchSnapshot 与其各自 generation；
 - Core Research 拥有 Experiment、BacktestRun、DatasetManifest、Checkpoint 和 ResearchEvidence；
 - `quant_web` 拥有产品标题、营销描述、订阅可见性、会员/combo 和用户配置；
-- Web 的执行资格交接使用 `ExecutionRequest` Contract，不把产品事实写入 Core 策略定义；
+- Web 是 canonical `ExecutionRequest` 的唯一 creator。执行资格交接使用 Web owner Contract：Core 通过 `ClaimExecutionRequestV1`/`RenewExecutionRequestClaimV1`/`ReleaseExecutionRequestClaimV1`/`ReportExecutionRequestOutcomeV1` 与 Web 协作，不读取或轮询 Web `execution_tasks`；不把产品事实写入 Core 策略定义；
 - Core 的订单结果通过 Core Contract/API 投影给 Web，不把 Web 结果表作为交易事实源。
 
 ## 结果

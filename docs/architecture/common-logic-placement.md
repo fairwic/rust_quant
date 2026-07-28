@@ -2,7 +2,7 @@
 
 - 状态：已接受
 - 首次接受：2026-07-18
-- 最近修订：2026-07-20
+- 最近修订：2026-07-28
 - 上位文档：[Rust Quant 目标架构](target-architecture.md)
 
 ## 1. 核心原则
@@ -28,9 +28,9 @@
 | 技术指标 | `crates/quant/indicators` | EMA、RSI、MACD、ATR、布林带、形态 primitives | 策略入场结论、仓位和下单 |
 | 确定性回测内核 | `crates/quant/backtest` | 时间推进、事件调度、Replay、撮合、费用、滑点、资金费 | Domain 编排、Experiment、某策略规则、promote 结论 |
 | 绩效分析 | `crates/quant/analytics` | PnL 序列、回撤、Sharpe、Sortino、胜率 | 用户展示文案、生产发布状态 |
-| 研究业务 | `crates/domains/research` | DatasetManifest、Experiment、Run、Checkpoint、SimulationProfile、Evidence、OOF/OOS | 原始行情、Strategy Definition、生产订单/账户事实 |
+| 研究业务 | `crates/domains/research` | DatasetManifest、EvaluationManifest、Experiment、Run、Checkpoint、SimulationProfile、Evidence、OOF/OOS | 原始行情、Strategy Definition、生产订单/账户事实 |
 | 业务内部复用 | `crates/domains/<owner>` | 同一 owner 下多个用例稳定共用的模型和规则 | 无 owner 的万能 helpers |
-| 跨服务数据 | `crates/contracts` | 带 owner 和版本的 wire DTO/Event | SQLx Model、页面 DTO、SDK 原始类型 |
+| 跨服务数据 | owner 仓库发布的 `contracts/<owner>/<version>` | 带 owner 和版本的 payload；Core `crates/contracts` 只放 Core payload 与 owner-neutral Envelope | SQLx Model、页面 DTO、SDK 原始类型、复制到 Core 的 Web/News DTO |
 | 外部系统实现 | `crates/adapters` | Postgres、Redis、HTTP、交易所、通知实现 | 策略、风控和订单状态机 |
 | 进程技术能力 | `crates/platform` | 配置、日志、安全、取消、健康检查、消息运行时 | 业务判断和策略参数 |
 | 测试复用 | `crates/platform/testkit` | Builder、Fixture、Fake Port、Deterministic Clock | 生产代码依赖 |
@@ -56,14 +56,16 @@ crates/platform/kernel/src/
 以下类型不应因为“很多地方使用”就进入 kernel：
 
 - `Candle`、`Ticker`、`SymbolRules`：属于 Market；
-- `StrategyDefinition`、`StrategyRelease`、`StrategyDecision`：属于 Strategy；
+- `StrategyDefinition`、`StrategyRelease`、`StrategyDecision`：属于 Strategy；`ActivationPointer`、`KillSwitchSnapshot` 与各自 generation：属于 Control；
 - `CapitalBudget`、`PortfolioTarget`、`TargetPosition`：属于 Portfolio；
 - `Balance`、`Position`：属于 Account；
 - `RiskApproval`：属于 Risk；
-- `OrderIntent`、`ExecutionPlan`、`Order`：属于 Execution；
+- `OrderIntent`、`ExecutionPlan`、`Order`：属于 Execution；`OrderPlan` 仅是 `ExecutionPlan` 内部的 child value plan，不单独成为事实、表或 Contract；
 - `ReconciliationIssue`：属于 Reconciliation。
 
 其他模块通过 owner 的稳定公开 API 使用这些类型，而不是把所有业务类型搬进 kernel。
+
+`common::CandleItem` 是 legacy 位置，不是长期“通用内存模型”的例外。OHLCV、时间、确认状态、数据源/序号和缺口语义都是 Market 事实；迁移后的 canonical 类型应位于 `domains/market/model`（例如 `MarketBar`），由 Market 的公开 API 暴露。数据库 Row、交易所 DTO 和 backtest fixture 在 Adapter/Testkit 边界映射，不能为了兼容把 Candle 再放入 `platform/kernel`、`quant/*` 或新的 `common` crate。
 
 ## 4. `quant/math`：无交易语义的纯数学
 
@@ -147,14 +149,14 @@ Research 的 `SimulationLedger` 保存模拟现金、仓位、费用和权益，
 
 Research Domain 负责组织实验和证据：
 
-- 数据集和样本窗口；
-- 参数空间和实验编号；
-- OOF/OOS；
-- Artifact、Definition 与 Runtime Snapshot identity；
+- 带 point-in-time universe、`available_at`/revision、历史 InstrumentRules、缺口/修订政策的数据集和样本窗口；
+- 在查看结果前冻结的 `EvaluationManifest`：训练/验证/OOS 窗口、purge/embargo、参数空间、优化算法/Seed/预算、候选选择规则、holdout 重用次数与收益集中度审计；
+- OOF/OOS 与 walk-forward；
+- `ResearchExecutionArtifactRef`、Artifact、Definition 与 Runtime Snapshot identity；
 - candidate 比较；
 - promote 建议和拒绝理由。
 
-Analytics 不决定是否发布策略；Research 不直接修改 live 默认版本。Research 通过自己的 Port 持久化 Evidence，Strategy Release 只引用已完成 Evidence identity。
+Analytics 不决定是否发布策略；Research 不直接修改 live 默认版本。Research 通过自己的 Port 持久化 Evidence，并分别记录“运行/工件完整可见”和“评价门是否通过”；亏损、过拟合或被拒绝的实验也可以是完整 Evidence，但不因此具备 promotion eligibility。Strategy Release 只引用已完成 Evidence identity 与明确的评价门结果；candidate 重新构建进入 released catalog 时还必须有 `PromotionReceiptV1` 证明被研究工件与 released 工件的可追溯性和业务 parity。Control 的 ActivationPointer 才决定某个已发布且具备 `ActivationEligibilityV1` 的 RuntimeSnapshot 是否被当前运行范围选用。
 
 ## 8. 业务模块内部的通用逻辑
 

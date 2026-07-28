@@ -1,7 +1,7 @@
 # ADR-0007：采用 Owner-scoped 数据访问与业务事务边界
 
 - 状态：已接受
-- 日期：2026-07-21
+- 日期：2026-07-28
 - 决策者：Rust Quant Core
 
 ## 背景
@@ -18,13 +18,15 @@
 
 ```text
 crates/adapters/postgres/src/
+├── control/
 ├── market/
 ├── strategy/
 ├── portfolio/
 ├── account/
 ├── risk/
 ├── execution/
-└── reconciliation/
+├── reconciliation/
+└── research/
 ```
 
 每个 module 只实现本 owner 的 Port，只访问 owner 表或明确批准的只读投影。只有独立编译、重依赖、规模或发布证据出现时才拆 crate。
@@ -50,7 +52,7 @@ transition_release_generation
 
 Use Case 说明哪些状态、幂等记录和事件必须一起成功；一个 business-named Port 方法在 Postgres Adapter 内建立并提交 SQLx transaction。
 
-Execution 下单准备使用 `stage_order_submission_with_outbox` 表达单一原子结果：`AccountOpeningSlot` claim、不可变 `RiskDecision` 引用及 parent OrderIntent/plan hash 唯一绑定、`OrderIntent`、完整 `ExecutionPlan`、`ProtectionPlan(Planned)`、首个持久订单状态 `SubmitPending`、Inbox/幂等、提交 Outbox 与审计字段一起提交。
+Execution 下单准备使用 `stage_order_submission_with_outbox` 表达单一 live 原子结果：`AccountOpeningSlot` claim、不可变 `RiskDecision` 引用、对应纯 `ExecutionPlanningValue` 的规范 hash、由该值初始化的 parent `OrderIntent`、持久 `ExecutionPlan`（保存有序 child `OrderPlan` snapshot）和由 `ProtectionPlanningValue` 初始化的 `ProtectionPlan(Planned)`，以及首个持久订单状态 `SubmitPending`、Inbox/幂等、提交 Outbox 与审计字段一起提交。`ExecutionPlanningValue`/`OrderPlan` 不具有 OMS 表、独立生命周期或跨进程 Contract；Research/Paper 只持久化自己的规划值与模拟事实，不能创建此 live aggregate。
 
 Dispatcher 使用 `claim_mutation_attempt` 在短事务中 CAS `mutation_event_id`/`mutation_generation`/`expected_aggregate_version`/`send_claim`/fence，记录 attempt 并签发绑定这些字段的短期 permit；旧 delivery 只 ack/no-op。取消/恢复 revoke 与 Gateway consume 竞争同一 permit CAS。`consume_mutation_permit` 只供 Fenced Gateway 在网络 I/O 边界调用，校验 current permit 后原子置为 Consumed；外部调用不属于数据库事务。`complete_mutation_attempt` 再把 attempt outcome、permit 终态、Order/Protection transition 和后续 Outbox 原子提交；Unknown outcome 只能生成 query/reconciliation/alert 等恢复任务。`rollover_mutation_delivery` 用于所有 Submit/Cancel/Protect 的可重试路径：确认当前 delivery 的同一事务 supersede 旧 generation，并创建 delayed Outbox 或 durable RetrySchedule，Scheduler 不能直接 claim。`recover_unknown_and_enqueue_retry` 只在 DefinitivelyAbsent 且无可发送 permit 时，原子持久化 RecoveryAuthorized、supersede 旧 generation 的本地授权/投递记录、恢复原 kind 的 Pending state，并按 Submit/Cancel/Protect 映射写对应新 Outbox；原 mutation/目标 identity 与 payload hash 不变。外部 mutation 的完整顺序以 [ADR-0006](0006-at-least-once-idempotency-and-recovery.md) 为唯一权威。
 
@@ -119,7 +121,7 @@ YYYYMMDDHHMMSS__<owner>__<action>.sql
 
 - Domain crate 不依赖 SQLx；
 - 新 SQL 可以映射到唯一 owner module；
-- Command 的状态、幂等和 Outbox 原子提交有集成测试；Execution 测试还要证明 opening slot、完整计划、审批引用和 `SubmitPending` 同生共死，cancel/recovery revoke 与 Gateway permit consume 互斥，stale permit 不触达 SDK，且 Unknown 恢复事务会写入新的提交 Outbox；
+- Command 的状态、幂等和 Outbox 原子提交有集成测试；Execution 测试还要证明 opening slot、`RiskDecision`、`ExecutionPlanningValue` hash、由其初始化的 `OrderIntent`/live `ExecutionPlan`/`ProtectionPlan` 与 `SubmitPending` 同生共死，cancel/recovery revoke 与 Gateway permit consume 互斥，stale permit 不触达 SDK，且 Unknown 恢复事务会写入新的提交 Outbox；
 - Query 有索引、分页/上限和计划证据；
 - 跨 owner 状态同步有 Contract、幂等和 recovery test；
 - CI 拒绝新增泛型 Repository、跨 owner SQL 和无 owner migration。

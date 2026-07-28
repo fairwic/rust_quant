@@ -2,7 +2,7 @@
 
 - 状态：已接受
 - 首次接受：2026-07-18
-- 最近修订：2026-07-20
+- 最近修订：2026-07-28
 - 决策者：Rust Quant Core
 
 ## 背景
@@ -20,7 +20,7 @@
 ```text
 domains/     Market、Strategy、Portfolio、Account、Risk、Execution、Reconciliation、Research
 quant/       Math、Indicators、Backtest Kernel、Analytics
-contracts/   按 owner/version 组织的跨进程合同
+contracts/   仅 Core owner、按 owner/version 组织的跨进程合同与 owner-neutral Envelope
 adapters/    Postgres、Exchange、HTTP、Redis、对象存储、通知
 platform/    Kernel、Messaging、Lifecycle、Observability、Security、Testkit
 ```
@@ -48,7 +48,7 @@ api/         允许其他 Domain 使用的稳定进程内 API
 ### Adapter 粒度
 
 - Postgres 默认是一个 crate，内部按 owner module 隔离；
-- Contracts 默认是一个 crate，内部按 owner/version 隔离；
+- Core owner Contracts 默认是一个 crate，内部按 owner/version 隔离；Web、News 等外部 owner 的业务 Contract 始终在各自 owner repo 发布，Core 只在 Adapter 使用固定版本 binding，不镜像 DTO；
 - 只有编译隔离、重依赖、独立 owner 或独立发布证据出现时才拆更多 crate；
 - Exchange Gateway 包装 `crypto_exc_all`，不复制交易所 SDK。
 

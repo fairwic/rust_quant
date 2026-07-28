@@ -1,9 +1,11 @@
 # AI 编码与架构防腐护栏
 
 - 状态：已接受
-- 日期：2026-07-21
+- 日期：2026-07-23
+- 最近修订：2026-07-28
 - 上位文档：[Rust Quant 长期目标架构](target-architecture.md)
 - 放置规则：[业务代码与数据访问放置规范](business-code-and-data-access.md)
+- 迁移协议：[AI 架构迁移执行协议](ai-migration-execution-protocol.md)
 
 ## 1. 目标
 
@@ -30,6 +32,8 @@
 业务目标：
 唯一 Owner：
 切片：Command / Query / Event Consumer / Pure Policy
+代码形态：Entity / Value Object / Pure Function / Policy / Stateful Transition / Use Case / Port / Adapter
+为何不能使用更简单的纯函数或 module：
 要保持的不变量：
 输入入口与 Contract：
 Use Case：
@@ -37,14 +41,24 @@ Model / Policy：
 Ports：
 Adapters：
 运行模式与替换的 Adapter：
+Backtest/Paper/Live 共用的业务 symbol、四个 Policy Snapshot 与 Decision Context：
+Context 类型：live `ExecutionDecisionContextSnapshot` / Research `ResearchDecisionContextSnapshot`（不得混用）：
+稳定账户绑定与准入证据：ExecutionAccountBinding / AccountAdmissionEvidence / ExchangeAccountRef：
+必需行情证据：RequiredMarketEvidence / BarFinalization / MarketDecisionReadiness / ResolvedMarketEvidenceSet：
+允许因 SimulationProfile/Adapter 产生差异的层：
+构建影响：Release Unit；root/受影响 Cargo package；是否有生产部署资格：
 事务边界：
 持久化顺序与外部副作用边界：
 并发业务唯一约束（不得只写 worker lease）：
 幂等身份：
+Web `ClaimExecutionRequestReceiptV1` ref/hash / current fence / expiry：
 Attempt / Unknown / 恢复证据：
+SafetyObligation / SafetyMonitoring 闭合与监测交接：
 失败与恢复 Owner：
 验证：
 ```
+
+如果任务属于 legacy、crate、Owner、事实源、运行入口或 Backtest/Live 双实现迁移，聊天声明只用于沟通，不能替代版本化 Migration Manifest。AI 必须先复制并填写 [`migrations/_template.toml`](migrations/_template.toml)，按 [AI 架构迁移执行协议](ai-migration-execution-protocol.md)冻结架构基线、允许路径、业务不变量、验证和删除门。
 
 出现以下情况时必须停止并请求确认：
 
@@ -55,6 +69,15 @@ Attempt / Unknown / 恢复证据：
 - 现有 Contract 无法表达且可能影响其他仓库；
 - 迁移同时改变目录和策略/风控/执行行为，无法分开验证。
 - Strategy evaluator 需要账户余额、用户风险配置、最终下单数量或环境变量才能运行。
+- 同一业务语义准备新增 `Backtest*` 与 `Live*` 两套配置、Policy、止盈止损或 `ExecutionPlanningValue`（含 child `OrderPlan`）；或准备让 Research 创建/比较 live-only `ExecutionPlan` aggregate；
+- 准备创建零字段 `*Service`、`*Manager`、`*Calculator`，但无法说明其状态、依赖或策略版本；
+- Aggregate 需要公开可变字段或任意 setter 才能被现有调用方使用。
+- 计划创建 Core/系统/自营 `ExecutionRequest`，或把平台固定 Market 数据 API Key 当作用户账户、私有流或 mutation 凭证；该产品不存在自营执行路径，见 [ADR-0013](adr/0013-user-execution-request-and-public-market-data-credentials.md)。
+- 跨仓库请求没有 owner repo 的 Contract source、版本化 Envelope，或 Web 到 Core 的执行请求没有 Claim/Renew/Release/Outcome 生命周期。
+- 计划让 Execution 直接消费原始用户私有流/query，或让 AccountProjection 晚于 OMS；固定方向必须是 Account owner 更新投影并发布 `AccountFactV1` 给 Execution Inbox。
+- `execution_account_ref` 无法解析为 Web owner 的稳定 `ExecutionAccountBindingV1`，或 lease/shard/fence 仍以可轮换 credential 作为账户身份。
+- 多周期策略没有 `RequiredMarketEvidenceV1`/Bar finality，或准备以短周期新鲜替代必需长周期未闭合证据。
+- 计划在仍有 ManagedExposure、开放订单、Unknown/attempt/permit 或未闭合 Account evidence 时删除 `SafetyObligation`/关闭监测会话。
 
 ## 4. 默认生成单位：垂直切片
 
@@ -84,20 +107,32 @@ AI 不按“先建所有 model，再建所有 repository，再建所有 service�
 
 ## 6. 自动门禁
 
-目标命令为：
+当前 `arch-check` 已能作为 legacy ratchet 运行，但尚未完整覆盖目标 `domains/*`、`quant/*`、`adapters/*` 与 `apps/*`；它的 PASS 不能替代 target-layout migration Verdict。首个物理目录迁移前的 P0 要求见 [baseline README](migrations/baseline-2026-07/README.md) 和 [xtask 路线图](migrations/baseline-2026-07/xtask-roadmap.md)。
+
+目标静态命令为：
 
 ```bash
 cargo xtask arch-check
 ```
 
-在实现前，文档只能称其为“目标门禁”，不能宣称已经存在。实现后至少检查：
+在实现前，文档只能称其为“目标门禁”，不能宣称已经存在。`arch-check` 仅覆盖可静态观察的目录、依赖、禁止导入、owner/Contract 声明、Manifest/baseline 与测试注册 ratchet；它不能替代行为、恢复或发布验证。
+
+| 门禁类别 | 必须由谁执行 |
+|---|---|
+| 目录、依赖方向、禁止 API、role map、未知 package、静态 Contract/Manifest 与测试注册 | `cargo xtask arch-check` |
+| owner 单事务、唯一约束、`ExecutionPlanningValue` 到 live aggregate 的无损初始化、RiskAction 去重 | Postgres/Adapter 集成测试 |
+| 外部 owner binding、Envelope、N/N-1、`ActivationEligibilityV1`、claim fence、AccountFact/SafetyMonitoring | Contract/compatibility test |
+| Strategy/Portfolio/Risk/Planning value parity、ResearchBar 安全顺序与模拟 KillSwitch | 确定性 parity/safety harness |
+| `RequiredMarketEvidence`/Bar finality、Account admission/recovery、claim/permit/fence、Unknown 与恢复 | pre-trade/recovery 集成测试 |
+| Release Unit、镜像 allowlist、cutover、真实 mutation 授权与 Evidence | release contract / deploy verification / 显式授权 |
+
+以下目标要求必须由上表至少一种门禁覆盖：
 
 1. 路径与 crate 分区；
 2. Domain 对 SQLx、Redis、Reqwest、SDK、环境变量和 Contract 的禁止依赖；
 3. Contract 对 Domain、SQLx 和 SDK 的禁止依赖；
 4. App 以外的环境变量读取；
 5. 跨 owner SQL 和无 owner migration；
-6. 新增 `common`、`utils`、`helpers`、`BaseService`、泛型 Repository；
 7. Testkit 被生产代码依赖；
 8. 未版本化跨进程 payload；
 9. 新增/触碰文件行数上限；
@@ -109,6 +144,43 @@ cargo xtask arch-check
 15. ResearchBar 声称覆盖 lease、outbox、Unknown、保护恢复或 Reconciliation；
 16. 多币种回测按 symbol 遍历顺序逐个分配资金；
 17. ResearchEvidence 由 Strategy 表直接拥有，或跨对象存储/Postgres 宣称全局原子。
+18. 新增零字段 `*Service`、`*Manager`、`*Calculator` 仅提供 associated functions；
+19. Aggregate 暴露可绕过状态机的不变量字段，或 Model/Policy 读取系统时间、全局随机源、环境变量和进程全局业务缓存；
+20. backtest/paper/live 新增重复 Strategy、Portfolio、Risk、止盈止损、`ExecutionPlanningValue`（含 child `OrderPlan`）实现，或同一 payload 解析为语义重叠的配置；Research 创建、持久化或用 live-only `ExecutionPlan` aggregate 做 parity；
+21. 生产 App 依赖 `strategy-candidates`、`domains/research`、`quant/backtest`、`quant/analytics` 或 `apps/quant-lab`；
+22. CI 构建影响范围与 Cargo 反向传递依赖/Release Unit Manifest 不一致：Research-only 改动误触发生产镜像，或共享 Domain 改动漏掉生产构建和 parity；
+23. `core-runtime` 镜像 binary 与 allowlist 不一致，或混入 Research/Backtest/Paper/candidate/schema-tool；
+24. 生产 App 不是独立 Cargo package，或其依赖闭包包含 Research-only package；
+25. `StrategyRuntimeSnapshot` 混入 account、user、credential、risk profile 或其他 owner 的政策内容；
+26. Execution intake 没有原子持久化四个 Published Policy Snapshot 的 `ExecutionDecisionContextSnapshot`，或后续对象缺少 `context_id + context_hash + subject_binding_hash`；
+27. 热路径读取“最新配置”、环境变量业务默认值或 Web 原始 JSON，或者 Snapshot/Context/RunSpec 缺少 canonical hash 与兼容测试。
+28. 架构迁移缺少 Migration Manifest，Manifest 未冻结已提交的规范基线，或实际 diff 超出 `allowed_change_paths`；
+29. `structure_only` 切片实际改变业务输出、默认值、舍入、时序、事务或错误语义；
+30. 同一 Manifest 混合 structure、behavior、cutover 或 legacy delete，或者为继续迁移扩大 legacy allowlist；
+31. Evidence、测试或 Verdict 不属于当前 revision，或只用 AI 文字结论代替确定性证据；
+32. cutover、生产写入或真实交易 mutation 缺少独立显式授权。
+33. Core 在信号生成/handoff 阶段查询 Web 订阅、接收候选用户/credential/risk profile 商业明细，或自行创建/批量提交 Web canonical `ExecutionRequest`；正确边界是 `StrategySignal -> CreateExecutionRequestFromSignalV1 -> Web owner`。Web 创建请求后，Execution 可以消费其稳定引用并按 owner Contract 校验；
+34. News 把 AI 分析直接作为可执行信号或直接调用 Web 执行请求入口；正确链路只能是 `NewsInsightV1 { version, published_at, available_at } -> StrategyRuntimeSnapshot 声明可消费的 evaluator -> StrategySignal -> Web owner`，且 evaluator 只能在 `available_at <= DecisionTime` 时消费；
+35. 将 OHLCV/Candle 事实放入 `common`、`platform/kernel` 或 `quant/*`，或让 DB Row/交易所 DTO 成为其长期模型；canonical MarketBar/Candle 必须归 Market；
+36. target package/app 未被 role map 分类、未知 package 被静默跳过、`apps/` 未被静态扫描，或 baseline/allowlist 变更没有独立 Manifest/Evidence。
+37. Core 自行创建/持久化/消费系统或自营 `ExecutionRequest`，或没有 Web 商业授权即进入用户 live Account、Portfolio、Risk、Execution 或 mutation；已持久化 `SafetyObligation` 的既有风险收敛除外，但它必须引用原 request/context/order identity，只可对 `ManagedExposure` 执行 Query/Reconciliation/Cancel/Protect/Reduce/Close，仍受 capability、permit/fence 与 reduce-only 证明约束。Research 必须使用 `ResearchScenario`/`ResearchRunSpec`，只能产生 Research-scoped 模拟输出，不能伪造用户请求或形成 live Account/OMS 事实。
+38. 将平台 `MarketDataAccessCredential` 与 Web 用户 `credential_reference` 混用，或让前者进入 Account、私有流、Risk、Execution、MutationPermit、用户凭证表或跨仓库执行 Contract；公共只读数据与私有/mutation 配额必须隔离。
+39. 跨仓库 Contract 没有 owner repo source、schema/version、N/N-1 兼容声明、统一 Envelope（event/correlation/causation/idempotency/aggregate/sequence/time/partition）或消费端绑定来源。
+40. Core 以轮询/SQL 解释 Web `execution_tasks`，而不是通过 Web owner Claim/Renew/Release/Outcome Contract 持有可恢复 lease、幂等 receipt 与结果投影。
+41. `degraded`/stale Account 或非 `ReadyForNewRisk` 的 `MarketDecisionReadiness` 允许新增风险，或把运行时 session/readiness 事实写进不可变 Policy Snapshot/Decision Context；该状态只允许对账、持续风控和可证明 reduce-only。
+42. 多 owner 迁移只靠 `secondary_owners`，没有父计划、每 owner 子 Manifest、依赖关系、各自本地事务/Inbox/Outbox 及 Contract cutover 约束。
+43. `ActivationPointer` 绕过 Strategy owner 的 `ActivationEligibilityV1`，或 channel×stage、release/evidence/eligibility generation、撤销语义没有 Contract test。
+44. Research 绕过 Market historical API/Contract 直读 Market Storage、backfill、生产 Adapter 或 `MarketDataAccessCredential`。
+45. 持续风险动作缺少 `risk_action_decision_id = subject_binding_hash + trigger_event/evidence_hash + risk_policy_snapshot_hash + action_generation`，导致重放重复减仓/平仓。
+46. Claim/Renew/Release/Outcome 缺少 current `ClaimExecutionRequestReceiptV1` 的 `claim_fence`/expiry/CAS，或 live Context、batch/source mapping、Risk approval、planning/OMS、attempt、Gateway capability、final gate、permit 未绑定同一 receipt ref/hash，TTL 未被最早 claim expiry 截断。
+47. 原始用户私有流/query 绕过 Account owner 进入 Execution，或 Account 未先更新投影就发布缺 source cursor/session generation/projection revision 的 `AccountFactV1`。
+48. 稳定 `ExchangeAccountRef` 与 credential revision/revocation generation 混为一个 identity，credential rotation 创建第二个 session/lease/slot，或 `ExecutionAccountBindingV1` 和 `AccountAdmissionEvidenceV1` 的账户/产品/mode/binding generation 不匹配时仍新增风险。
+49. Strategy 缺少 `RequiredMarketEvidenceV1`，或 Market 没有用 `BarFinalizationV1`/`MarketDecisionReadinessV1` 形成完整 `ResolvedMarketEvidenceSetV1`；Bar final/revision/source/continuity generation、迟到/源切换、aggregate hash/TTL 不能确定性聚合。
+50. `SafetyObligation` 闭合谓词不完整；`SafetyMonitoringV1` 缺受管摘要、最低 session generation/watermark，Add/Update/Remove 没有 fence、Outbox/Inbox、`SafetyMonitoringAckV1`、全量重放与保守会话保留；或 credential 撤销后绕过 `SafetyBlocked`/产品授权的人工处置。
+51. `ObservedExternalPosition` 被禁止自动处置，却未计入 RiskValuationSnapshot 的保证金/净敞口/风险预算。
+52. `ResearchRunSpec` 未绑定实际 `ResearchExecutionArtifactRef`/EvaluationManifest，Completed Evidence 被误当作 promotion eligibility，或 candidate 重建为 released 后没有 `PromotionReceiptV1`。
+53. RecoveryHarness 被加入可部署 Release Unit/生产镜像，获得生产 Secret/账户/存储，或使用非临时基础设施。
+54. Program Registry 以人工 `depends_on_satisfied` 代替 predecessor Manifest/Evidence/Verdict hash 计算，或 `verdict.json` 可手工编辑、引用旧 revision/跳过 required suite。
 
 ## 7. 渐进 Ratchet
 
@@ -123,6 +195,8 @@ cargo xtask arch-check
 5. 违规总数只能下降，不能通过扩大 glob 或忽略目录恢复绿灯；
 6. 最终删除 legacy allowlist。
 
+首次进入目标物理目录前，还必须先完成 target-layout P0：所有 workspace package/path 有机器 role、未知 package fail-closed、`apps/` 与目标源码根进入扫描、baseline 变更受 Manifest 约束，并以注入违规测试证明门禁有效。仅有 legacy ratchet PASS 时，迁移 Manifest 必须保持 `blocked`，不得把它写成“架构已受保护”。
+
 小型 legacy bugfix 可以留在原位置，但不得新增跨层依赖、扩大 API 或把新能力继续堆入 legacy。新增业务能力默认进入目标架构。
 
 ## 8. Review 检查表
@@ -132,44 +206,71 @@ cargo xtask arch-check
 - 是否只有一个事实 owner；
 - 是否放入正确 Domain 和切片；
 - 是否出现跨 Domain 私有依赖、跨库 SQL 或共享 Row；
+- 是否把 Market/Account/Execution 的 freshness/session/执行可用性证据误写成 Control 的 Readiness；Control 只能发布 Release/Kill Switch 并聚合只读诊断；
+- Web 是否拥有稳定 `ExecutionAccountBindingV1`，Account 是否只发布 `AccountAdmissionEvidenceV1`/`AccountFactV1`，且 credential 轮换不改变 `ExchangeAccountRef`；
+- 用户私有流/query 是否只由 Account owner 消费并先更新 AccountProjection；Execution 是否只经 Inbox 消费 owner fact；
+- Core 的信号路径是否只把 `StrategySignal` 提交给 Web owner、没有读取候选商业明细或创建 Web 请求；Execution 是否只在 Web 已创建的请求中消费稳定授权引用；News 是否只提交可追溯、版本化的 `NewsInsightV1` 给 Strategy ingress，且仅由 `StrategyRuntimeSnapshot` 声明可消费的 evaluator 在 `available_at <= DecisionTime` 时消费；
+- 是否错误保留 Core 自营执行路径；平台 Market 公共数据材料是否被严格限制为 Adapter 内的只读能力，且与用户 `credential_reference`、私有流、账户和 mutation capability 分离；
 - 是否把技术失败误写成业务状态。
 
-### 8.2 数据库
+### 8.2 Rust 代码形态
+
+- Entity/Aggregate 是否确有 identity、生命周期或不变量，而不是 DTO 加方法；
+- Value Object 是否在构造时校验且保持不可变；
+- 无状态确定性逻辑是否优先使用纯函数；
+- Policy 对象是否只持有不可变、带版本的强类型快照；
+- Stateful Evaluator 是否显式传入/返回完整作用域 State；
+- Use Case 对象是否因为需要 Port 和流程编排而存在，而不是万能 Service；
+- Trait 是否有真实边界或多实现证据；
+- 能破坏不变量的字段是否私有，时间/随机/外部事实是否显式输入；
+- 是否把 `deal_signal` 一类跨 owner 大函数仅移动进 `impl`，而没有拆分 owner。
+
+### 8.3 数据库
 
 - SQL 是否只在 Postgres Adapter；
 - Port 是否使用业务语言；
 - 事务是否覆盖状态、幂等和 outbox；
-- Execution 下单事务是否同时覆盖 AccountOpeningSlot、不可变审批引用/父 Intent 唯一绑定、OrderIntent、完整 ExecutionPlan/ProtectionPlan、`SubmitPending`、幂等和提交 Outbox；
+- Execution live 下单事务是否同时覆盖 AccountOpeningSlot、不可变审批引用/父 Intent 与 `ExecutionPlanningValue` hash 唯一绑定、OrderIntent、由该值无损初始化的完整 `ExecutionPlan`/`ProtectionPlan`、`SubmitPending`、幂等和提交 Outbox；
 - 是否只有事务提交后才确认上游或发布提交任务，且交易所 I/O 只由 Fenced Gateway 在 Dispatcher 签发的 current MutationPermit 被原子消费后发起；
 - 查询是否有索引、范围、分页和锁评估；
 - 新表/列是否有数据库注释；
 - 删除是否符合事实保留规则。
 
-### 8.3 交易安全
+### 8.4 交易安全
 
-- 是否由 Risk owner 先持久化不可变 RiskDecision，再由 Execution owner 原子持久化稳定订单身份、完整计划、`SubmitPending`、幂等和 Outbox；
+- 是否由 Risk owner 先持久化不可变 RiskDecision，再由 Execution owner 原子持久化稳定订单身份、由 `ExecutionPlanningValue` 初始化的 live aggregate、`SubmitPending`、幂等和 Outbox；
 - 是否区分 read-only、dry-run、paper、shadow、canary、live；
-- 是否保留 lease、精度、余额、凭证、新鲜度和保护门禁；
-- 未有独立 Risk Reservation ADR 时，是否以持久 opening slot/唯一约束禁止同账户并发独立开仓，而非只依赖 worker lease；风险降低旁路是否可证明 reduce-only 并先冻结风险增加 claim；
+- 是否保留 lease、精度、余额、凭证、`MarketDecisionReadiness`/账户新鲜度和保护门禁；非 `ReadyForNewRisk` 时是否只允许可证明的 reduce-only；
+- Strategy 声明的 `RequiredMarketEvidenceV1` 是否由 Market 以 `BarFinalizationV1`/`MarketDecisionReadinessV1` 完整解析为 `ResolvedMarketEvidenceSetV1`，并满足 final/revision/source/continuity/迟到/aggregate hash/TTL 规则；多周期集合是否禁止部分满足放行；
+- `ObservedExternalPosition` 是否进入 RiskValuationSnapshot 的 unmanaged exposure/保证金占用，默认阻塞或压缩新风险；
+- `ExchangeExecutionCapabilityProfileV1` 与 `RiskValuationSnapshotV1` 是否绑定目标 exchange/product/mode，Unsupported/Unknown 是否 fail-closed；
+- 持续 RiskAction 是否以 `risk_action_decision_id = subject_binding_hash + trigger_event/evidence_hash + risk_policy_snapshot_hash + action_generation` 幂等，避免重放重复减仓/平仓；
+- 未有独立 Risk Reservation ADR 时，是否以 `ExchangeAccountRef` 为键的持久 opening slot/唯一约束禁止同一物理账户并发独立开仓，而非只依赖 worker lease、`execution_account_ref` 或 credential revision；风险降低旁路是否可证明 reduce-only 并先冻结风险增加 claim；
 - Fenced Gateway 是否在网络 I/O 边界原子消费 attempt/version/fence/generation/payload hash/expiry 均匹配的 current permit；revoked/stale/expired 是否 DefinitelyNotSent 且不触达 SDK；raw mutation SDK 是否对 Dispatcher/其他 App 物理不可达；
 - 门禁失败是否按 Expired/Blocked/可恢复分类，后者有 durable next_eligible_at/唤醒条件；
 - attempt claim、提交前取消/恢复 revoke 与 Gateway consume 是否竞争同一 version/permit；attempt ledger 是否区分 Submit/Cancel/Protect 并将 outcome、permit 终态、状态迁移、后续 Outbox 原子提交；
 - Submit/Cancel/Protect 的 mutation event、attempt、permit 是否绑定 `mutation_event_id`/`mutation_generation`/`expected_aggregate_version`，旧 delivery 是否只能 ack/no-op；
 - transient blocker、可重试 DefinitelyNotSent、lease/fence/gate 变化确认 delivery 后，是否原子 rollover 到新 generation 的 delayed Outbox/RetrySchedule；Scheduler 是否被禁止复用旧事件或直接 claim；
 - Unknown outcome 是否禁止直接生成同 kind mutation Outbox；是否只有在持久 DefinitivelyAbsent/RecoveryAuthorized 且无可发送 permit 后，recovery transaction 才保持原 mutation/目标 identity、按 Submit/Cancel/Protect kind 新建对应 Outbox；不具备稳定 client identity 与缺席证明的 live 能力是否 Unsupported；
-- 启动是否先订阅/缓冲 User Stream，再合并 signed snapshot/query watermark 并补 gap；闭合前是否 NotReady 且 Dispatcher 禁用；
+- Account 启动是否先取得单调 session generation、订阅/缓冲 User Stream，再合并 signed snapshot/query watermark 并补 gap；是否只有 `AccountRecoveryClosedV1` 有效后该账户 Dispatcher 才启用，Execution 未自行订阅；
+- Web claim 是否以 current fence/expiry 进入 Context、capability、final gate 和 permit，Renew/Release/Outcome 是否由 Web CAS；旧 fence 与越过 claim TTL 的 capability 是否无法触达 SDK；
+- SafetyObligation 是否满足完整闭合谓词，`SafetyMonitoringV1` remove 是否由 Account 以 `SafetyMonitoringAckV1` 对 current fence/session generation/watermark 确认；credential 撤销是否进入 `SafetyBlocked`，无法证明无义务时是否保守保留会话；
 - 部分成交后保护数量是否正确；
 - `Unknown`、撤单/成交竞态和重启是否可恢复；
 - 没有有效止损计划时是否 fail-closed。
 
-### 8.4 Contract
+### 8.5 Contract
 
 - Owner 与版本是否明确；
+- Contract 是否在其 owner repo 定义并发布消费端绑定；Envelope 与业务 payload 是否分离；
 - Domain 是否与 Wire DTO 解耦；
 - 是否有旧 payload、未知字段和 snapshot 测试；
 - event/correlation/causation/idempotency/aggregate/sequence 是否完整。
+- Web `ExecutionRequest` 的 Core 消费是否经过 Claim、续租、释放、撤销与 Outcome 回写的 owner Contract，而不是跨库轮询。
+- Claim receipt 是否返回单调 `claim_fence`/`claim_expires_at`；Renew/Release/Outcome 是否携带 current fence，并有迟到旧 fence Contract test。
+- `ExecutionAccountBindingV1`、`RequiredMarketEvidenceV1`、`BarFinalizationV1`/`MarketDecisionReadinessV1`/`ResolvedMarketEvidenceSetV1`、`AccountFactV1`/`AccountRecoveryClosedV1`、`SafetyMonitoringV1`/`SafetyMonitoringAckV1`、`ExchangeExecutionCapabilityProfileV1`/`RiskValuationSnapshotV1` 是否各自有唯一 owner、版本和 N/N-1 窗口。
 
-### 8.5 测试
+### 8.6 测试
 
 - Model/Policy 单元测试是否固定业务不变量；
 - Adapter 集成测试是否覆盖 SQL、约束和事务；
@@ -177,18 +278,29 @@ cargo xtask arch-check
 - Recovery test 是否覆盖重复、超时、崩溃、乱序和对账；
 - Parity test 是否证明 backtest/paper/live 使用相同业务规则。
 
-### 8.6 策略与回测防漂移
+### 8.7 策略与回测防漂移
 
-- Strategy evaluator 是否只消费 Market 证据、Strategy Runtime Snapshot 和自己的 Evaluation State；
+- Strategy evaluator 是否只消费 Market 证据、Strategy Runtime Snapshot、自身 Evaluation State，以及由该 Snapshot 声明可消费且 `available_at <= DecisionTime` 的版本化 `NewsInsightV1`；
 - 候选止损/失效价是否仍是信号证据，而不是偷偷完成最终风险审批；
 - 资金分配比例、真实 leverage、最大亏损与订单数量是否由不同 owner 明确建模；
+- `StrategyRuntimeSnapshot` 是否只包含 Strategy owner 事实，并且不含账户、用户、凭证、risk profile 或其他 owner 的政策；
+- Portfolio/Risk/Execution 是否各自发布强类型快照，Execution 是否用同一 `ExecutionDecisionContextSnapshot` 绑定四个 Published 引用；
+- backtest/paper/live 是否调用同一 Strategy entry/exit、Portfolio、Risk/final-stop 和纯 `ExecutionPlanningValue`（含 child `OrderPlan`/`ProtectionPlanningValue`）业务 symbol，且没有 `LiveRisk`/`BacktestRisk` 双实现；Research 不得创建或比较 live-only `ExecutionPlan` aggregate，Paper 如模拟 aggregate 只能验证从同一 planning value 的初始化/状态迁移；
+- fee/slippage/funding/candle path 是否只来自 SimulationProfile，未混入账户风险配置；
 - Research use case 是否调用与 paper/live 相同的 Strategy、Portfolio、Risk 和必要 Execution 公开 API；
+- Research 历史行情是否只经 Market historical API/Contract 获得，而没有直读 Market Storage、backfill、生产 Adapter 或 `MarketDataAccessCredential`；
 - `quant/backtest` 是否仍保持无 Domain 依赖的纯模拟内核；
-- 是否固定 DatasetManifest、预热长度、SimulationProfile、费用、滑点、资金费、Seed 和所有政策版本；
+- 是否由 `ResearchRunSpec` 固定 DatasetManifest、EvaluationManifest、四个 Policy Snapshot、SimulationProfile、模拟账户初态、Clock/Seed、`ResearchExecutionArtifactRef` 和 canonical hash；
+- DatasetManifest 是否保留 point-in-time universe 成员有效期、上市/退市、`available_at`/revision、缺口/修订政策和历史 InstrumentRules；EvaluationManifest 是否在看结果前固定 OOS/walk-forward、purge/embargo、参数搜索/Seed/预算、选择规则、holdout 重用和集中度审计；
+- Completed Evidence 是否只表示运行/工件完整可见，promotion eligibility 是否独立；candidate 重新构建为 released 时是否有 `PromotionReceiptV1` 串联源码/工件/Evidence 与跨构建 parity；
 - EvaluationStateKey 是否包含 EvaluationScopeId，确保并行 Run 不共享可变状态；
 - 同一 decision time 的多币信号是否先收集后统一分配，symbol 重排是否不改变结果；
-- parity 是否逐层比较 Signal、Target、RiskDecision、OrderIntent 和 FillEvent，而不是只比较最终 PnL；
+- parity 是否逐层比较 Signal、Target、RiskDecision、`ExecutionPlanningValue` 和 FillEvent，而不是只比较最终 PnL；live `OrderIntent`/`ExecutionPlan` 另以初始化/恢复集成测试验证；
+- exact parity fixture 是否同时固定 Decision Context hash、动态 Market/Account/Instrument Evidence、EvaluationState before 与 Clock，并比较 State after、`ProtectionPlanningValue` 与 decision trace；identity 不同是否只标记为 scenario comparison；
+- ResearchBar 是否先处理既有保护/working order，再写模拟 ledger、执行具有稳定 decision identity 的持续风控与 reduce-only planning，最后才在允许时评估新 entry；模拟 KillSwitch 是否只写 Research-scoped `SimulationNewRiskBlock`/Evidence，不请求 Control；
+- live `StrategyEvaluationState` 是否仅由 Redis Adapter 保存，且并行 ResearchRun 是否以 `EvaluationScopeId` 隔离内存状态；
 - ResearchBar、PaperEvent、RecoveryHarness 是否各自只声称覆盖其精度边界；
+- RecoveryHarness 是否严格 CI-only、临时存储、无生产 Secret/账户/部署资格，并被 Execution/Account/Reconciliation 变更触发；
 - 模拟成交是否只进入 SimulationLedger/ResearchEvidence，未污染生产订单/账户事实；
 - Evidence 是否通过内容寻址对象 + Research owner Completed manifest 实现原子可见，而非虚构跨存储原子；
 - 环境变量是否只在 `quant-lab` App 解析后映射成强类型 ExperimentSpec。
@@ -209,8 +321,14 @@ Vegas 的具体基线与迁移门见 [Vegas 与现有回测主链迁移实战](v
 - Postgres Adapter 拆 crate；
 - 任何架构例外。
 - SimulationProfile 能力边界、ResearchEvidence owner 或 Evidence 发布协议变化。
+- AI 架构迁移协议、Manifest schema、迁移模式、完成状态或机器 Verdict 语义变化。
+- 用户执行请求 owner、平台市场数据凭证范围、跨仓库 Contract source 或 public/private quota 语义变化。
+
+执行具体迁移时，规范性文档由 Manifest 的 `architecture_baseline_git_sha` 锁定。AI 发现规范需要变化时必须停止切片，先单独更新/替代 ADR；禁止在实现后修改规范文档为代码辩护。Manifest、Evidence、迁移状态和 legacy ledger 属于执行性文档，必须随实际证据同步。
 
 普通函数新增不要求更新架构文档；文档不应成为逐文件清单。
+
+单纯把纯函数改成零字段对象、把对象改名为 Service、或把跨 owner 大函数移入 `impl` 不属于架构迁移，也不能作为删除 legacy allowlist 的证据。
 
 ## 10. 禁止用文档代替执行
 

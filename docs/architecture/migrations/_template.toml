@@ -1,0 +1,211 @@
+# Rust Quant Owner 子 Manifest 模板。
+# 父迁移计划写在 docs/architecture/migration-plan.md；本文件只允许一个 Owner。
+# 复制到 docs/architecture/migrations/<migration-id>-<slug>/manifest.toml 后填写。
+# 未填写的占位值不能进入 implementing 状态。
+
+# legal: owner_child | historical_record。historical_record 只能配 historical_characterization，不能满足 depends_on。
+schema_version = 2
+manifest_kind = "owner_child"
+migration_id = "MIG-XXXX"
+title = "待填写"
+# legal: draft | baseline_frozen | implementing | verified | ready_for_cutover | completed | blocked
+state = "draft"
+# legal: not_applicable | research_only | candidate | promoted | rejected
+promotion_status = "not_applicable"
+# legal: not_required | not_ready | ready | in_progress | completed | rolled_back
+cutover_status = "not_required"
+mode = "structure_only"
+# truth table: structure_only/legacy_delete => false; behavior_change => true; cutover => false (semantic change must be separate Manifest).
+behavior_change = false
+verification_mode = "manual"
+production_mutation_allowed = false
+# legal: current_migration | historical_characterization。后者不能证明当前 HEAD、Cutover 或目标目录已迁完。
+evidence_scope = "current_migration"
+
+[program]
+migration_program_id = "MP-XXXX"
+registry_ref = "docs/architecture/migrations/programs/registry.toml"
+parent_plan = "docs/architecture/migration-plan.md"
+# 只能填写已登记的 Owner 子 Manifest ID；前置 Contract/Dataset 也必须有不可变 ref/hash。
+depends_on = []
+# 每项对象：{ migration_id, manifest_sha256, evidence_sha256, verdict_ref, verdict_sha256, tested_revision, verdict_schema_version }。
+# dependency 是否满足由 migration-check 读取这些不可变 Verdict 计算，不能使用 Registry 中人工布尔值。
+predecessor_verdicts = []
+# historical_characterization 永远为 false，不能作为 future current_migration 的 depends_on。
+historical_dependency_eligible = false
+
+[authority]
+architecture_baseline_git_sha = ""
+adrs = []
+normative_documents = [
+  "docs/architecture/target-architecture.md",
+  "docs/architecture/dependency-rules.md",
+  "docs/architecture/ai-coding-guardrails.md",
+  "docs/architecture/ai-migration-execution-protocol.md",
+]
+# 与 normative_documents 顺序一致的 sha256；未提交文档不可作为正式基线。
+normative_document_hashes = []
+release_unit_manifest_hashes = []
+# 每项对象：{ contract_id, version, path, sha256, producer, consumers, compatibility_window }。
+contract_snapshots = []
+# 每项对象：{ schema_id, version, path, sha256, owner }。
+schema_snapshots = []
+
+[scope]
+owner = ""
+owner_repository = ""
+source_paths = []
+target_paths = []
+allowed_change_paths = []
+forbidden_change_paths = []
+affected_cargo_packages = []
+affected_release_units = []
+owned_tables = []
+external_owner_apis = []
+
+[behavior]
+business_goal = ""
+invariants = []
+current_entrypoints = []
+target_entrypoints = []
+allowed_differences = []
+forbidden_differences = []
+characterization_evidence = []
+
+[configuration]
+strategy_runtime_snapshot_refs = []
+portfolio_policy_snapshot_refs = []
+risk_policy_snapshot_refs = []
+execution_planning_policy_snapshot_refs = []
+execution_decision_context_refs = []
+research_run_spec_refs = []
+# 每项对象至少固定 revision/patch、Cargo.lock/toolchain/target/profile/features、package/entry checksum、dependency graph、PRNG/scheduler version。
+research_execution_artifact_refs = []
+# candidate -> released 重建时由 Strategy owner 发布；缺少时不得产生 ActivationEligibilityV1。
+promotion_receipt_refs = []
+# 每项必须是运行前固定的 DatasetManifest/Snapshot/外部工件 ref + sha256，禁止引用 evidence.md。
+dynamic_input_artifacts = []
+environment_inputs_to_remove = []
+
+[contracts]
+changed = false
+current_versions = []
+target_versions = []
+compatibility_window = ""
+producer_consumers = []
+# 每项声明本 Owner 在 Contract 中生产/消费什么，以及版本化边界。
+owner_contract_boundaries = []
+# 每项对象：{ contract_id, version, kind, direction, request_fields, receipt_contract_id, receipt_fields, forbidden_fields, compatibility_window }。
+# Claim receipt 必须返回单调 claim_fence/claim_expires_at；Renew/Release/Outcome command 与 receipt 必须携带 current claim_fence。
+# Claim/Renew/Release 必须明确 Execution -> Web command 与 Web -> Execution receipt；Outcome 方向为 Execution -> Web，再由 Web 返回 receipt。
+message_contracts = []
+
+[persistence]
+changed = false
+owner = ""
+local_write_set = []
+local_transaction_boundary = ""
+transaction_invariants = []
+idempotency_identities = []
+outbox_requirements = []
+inbox_requirements = []
+# 恒为 true；跨 Owner/跨库原子事务不属于本协议允许的迁移方式。
+cross_owner_transactions_forbidden = true
+index_and_lock_evidence = []
+database_comment_requirements = []
+
+[side_effects]
+read_only = true
+database_writes = false
+external_network_writes = false
+exchange_mutations = false
+production_writes = false
+recovery_owner = ""
+# legal: not_used | market_public_read_only。后者不得参与 ExecutionRequest/Account/Risk/用户凭证或 mutation。
+fixed_service_api_key_scope = "not_used"
+# 每项对象：{ key_ref, owner, allowed_endpoints, method, observed_at, evidence_ref, evidence_sha256, no_user_credential_fallback }。
+fixed_service_api_key_access_evidence = []
+
+[build]
+expected_build_impact = []
+required_release_units = []
+forbidden_packages = []
+required_binary_allowlists = []
+
+[verification]
+required_suites = []
+commands = []
+parity_layers = []
+recovery_scenarios = []
+deploy_contracts = []
+expected_legacy_ratchet_delta = 0
+# live/C1 切片必须引用各 Owner current-revision Verdict；只读/dry-run 切片保持 false。
+live_prerequisite_verdicts_required = false
+live_prerequisite_contracts = [
+  "ExecutionAccountBindingV1",
+  "RequiredMarketEvidenceV1",
+  "BarFinalizationV1",
+  "MarketDecisionReadinessV1",
+  "ResolvedMarketEvidenceSetV1",
+  "AccountAdmissionEvidenceV1",
+  "AccountFactV1",
+  "AccountRecoveryClosedV1",
+  "RiskValuationSnapshotV1",
+  "ExchangeExecutionCapabilityProfileV1",
+  "SafetyMonitoringV1",
+  "SafetyMonitoringAckV1",
+]
+# B0 仅可在 test/dry-run 装配；其输入必须是带 ref/hash 的 immutable evidence bundle，禁止网络、数据库写入或 runtime wiring。
+test_only_evidence_provider = { required = false, contract_id = "", immutable_inputs_required = true, runtime_wiring_forbidden = true }
+
+[shadow]
+required = false
+dual_side_effects_forbidden = true
+comparison_identity = ""
+acceptance_thresholds = []
+
+[cutover]
+# truth table: only mode = "cutover" may set required = true and use not_ready/ready/in_progress/completed/rolled_back.
+required = false
+fact_source_before = ""
+fact_source_after = ""
+cutover_identity = ""
+rollback_entrypoint = ""
+rollback_window = ""
+authorization_required = false
+
+[legacy]
+allowlist_entries_before = []
+entries_to_remove = []
+callers_to_migrate = []
+configs_to_remove = []
+table_writes_to_stop = []
+monitors_to_remove = []
+deletion_gates = []
+
+[evidence]
+evidence_file = ""
+# migration-check 原子生成的规范 JSON；禁止人工编辑或由 AI 文字结论替代。
+verdict_file = ""
+verdict_schema_version = 1
+required_artifacts = []
+contains_sensitive_data = false
+# 必须是被测代码 commit SHA；不能拼接“working-tree-diff”。
+tested_revision = ""
+# 若测试依赖未提交范围补丁，必须填该精确补丁的 sha256；否则保持空字符串。
+tested_patch_sha256 = ""
+# 运行前固定的输入与运行后产出的工件，均以 ref + sha256 记录；Manifest 自身 hash 写入 evidence.md。
+input_artifact_hashes = []
+output_artifact_hashes = []
+
+[approval]
+required = false
+reason = ""
+approved_by = ""
+approved_at = ""
+reference = ""
+
+[blocking]
+# state = "blocked" 时必须非空；其余 state 时必须为空。
+reasons = []
+required_decisions = []
