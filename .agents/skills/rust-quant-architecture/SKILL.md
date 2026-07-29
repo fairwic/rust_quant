@@ -256,6 +256,23 @@ EvaluationScopeId + StrategyRuntimeSnapshotId + MarketStreamPartition
 
 危害集中在**数据一致性、可复现构建、密钥安全、静默失败**，H/J/O 直接影响迁移期环境重建。对应目标架构 §10.3 / §12 / production-runtime §11-13。三个贯穿性根因：①正例存在但未强制下沉（`task_scheduler`/`websocket_service` 会正确 join+abort，新代码却仍 fire-and-forget）；②平台迁移未收尾（MySQL→Postgres 旧债不回填，靠"当前库已是目标态"掩盖）；③静默失败链（fire-and-forget + 无 metrics + 无 health + span 不贯穿 = 进程活着但业务停摆，监控看不见）。
 
+### 旧库旧表复用前置判定
+
+- “已有表”不等于“仍在使用”。选择迁移目标前必须同时核对业务确认、冻结 revision 的
+  writer/reader、当前只读 catalog/行数和未来 Owner；空表、无 writer 更可能表示废弃，
+  不能被解释为可直接接管。
+- K 线事实默认复用现役 `{symbol}_candles_{timeframe}` 分表、熟悉旧列和
+  `UNIQUE(ts)`；`market_candles` 已废弃，Domain、Adapter、migration、App 和 cutover
+  均不得重新启用。未来若要集中存储，必须另立 ADR/Migration，证明多来源、revision
+  历史、性能、回填与回滚边界。
+- 动态分表名必须由严格 symbol/timeframe 白名单集中生成；runtime 只检查 schema，
+  禁止建表或 ALTER。schema 变化走 append-only migration，新增列带数据库原生注释。
+- 保留 `UNIQUE(ts)` 就必须显式承认旧 revision 不可回放：只有 correction generation
+  或 revision 严格增加才允许原位修正；旧 snapshot 必须按 storage generation
+  fail-closed，不能读取修正后的未来值。
+- source cursor、generation CAS、commit 幂等和物理分表来源绑定不是 K 线事实，允许由
+  Market Owner 使用独立 checkpoint 表；不得塞入 K 线行或复用 Execution checkpoint。
+
 | 键 | 坏习惯 | 存量证据 | 新架构防线 |
 | --- | --- | --- | --- |
 | H | **fire-and-forget spawn** | 48 处 spawn，生产约 20 处丢 JoinHandle；`bootstrap.rs:152-524` worker/雷达/同步循环无句柄；K线 upsert spawn 失败静默丢写 | 统一 task supervisor（JoinSet/结构化并发），禁裸 spawn 丢句柄；任务失败必须被感知记录（§12） |
