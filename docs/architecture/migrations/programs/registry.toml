@@ -25,8 +25,8 @@ manifest_kind = "owner_child"
 manifest_path = "rust_quant_alpha:docs/architecture/migrations/MIG-20260729-target-layout-p0/manifest.toml"
 evidence_path = "rust_quant_alpha:docs/architecture/migrations/MIG-20260729-target-layout-p0/evidence.md"
 verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-20260729-target-layout-p0/verdict.json"
-manifest_revision = "sha256:9c5e8b36f50bb9adbbf22e1020f5f9103f17f297a93727d69716aa04ec78f3df"
-evidence_revision = "sha256:a51a28414c79d51edf3f7216516ec1eb5f7e55133989846eed1f25d13cff5a22"
+manifest_revision = "sha256:fbe812f0c68b23d6d9ba82d052263c6d91526325a4e0f32bbdf353f08f9b66b6"
+evidence_revision = "sha256:151948d92704620dcfa8bdacc60e5010900ad9e213d202ddc2af2e42829bfd58"
 verdict_revision = "not_created"
 depends_on = []
 
@@ -40,8 +40,8 @@ manifest_kind = "owner_child"
 manifest_path = "rust_quant_alpha:docs/architecture/migrations/MIG-20260729-migration-check-p1/manifest.toml"
 evidence_path = "rust_quant_alpha:docs/architecture/migrations/MIG-20260729-migration-check-p1/evidence.md"
 verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-20260729-migration-check-p1/verdict.json"
-manifest_revision = "sha256:ae249d95682f05e4665df49d9a9b7621cb444ed0a47f6891b0281301f10099c6"
-evidence_revision = "sha256:3f1520562db51f80c17dc69e271d0394508141f78e79bafecc7b5b9179fa4059"
+manifest_revision = "sha256:e09c5d0ddfb028118e838a32582900e2b34d496718674410317063321dffb53e"
+evidence_revision = "sha256:ff253c115c041f86cf1d7b98b6eefd36794427ba9f136023dba85718b44b13f7"
 verdict_revision = "not_created"
 depends_on = []
 
@@ -60,7 +60,7 @@ contract_id = "CreateExecutionRequestFromSignalV1"
 version = "v1"
 compatibility_window = "initial_v1; producer writes v1; consumers accept v1; removal requires all registered consumer Verdicts"
 kind = "command"
-direction = "rust_quant::Strategy -> rust_quan_web::Web"
+direction = "rust_quant_alpha::Strategy -> rust_quan_web::Web"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
 required_fields = ["strategy_signal_id", "strategy_version", "symbol", "signal_time", "evidence_cutoff", "idempotency_key"]
 forbidden_fields = ["user_id", "credential_secret", "risk_profile", "prebuilt_execution_requests"]
@@ -70,7 +70,7 @@ contract_id = "ClaimExecutionRequestV1"
 version = "v1"
 compatibility_window = "initial_v1; producer writes v1; consumers accept v1; claim fence fields are mandatory"
 kind = "command"
-direction = "rust_quant::Execution -> rust_quan_web::Web"
+direction = "rust_quant_alpha::Execution -> rust_quan_web::Web"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
 required_fields = ["execution_request_id", "worker_identity", "claim_id", "requested_lease_until", "idempotency_key", "correlation_id"]
 forbidden_fields = ["credential_secret", "fixed_market_api_key"]
@@ -80,7 +80,7 @@ contract_id = "ClaimExecutionRequestReceiptV1"
 version = "v1"
 compatibility_window = "initial_v1; producer writes v1; consumers accept v1; claim fence fields are mandatory"
 kind = "receipt"
-direction = "rust_quan_web::Web -> rust_quant::Execution"
+direction = "rust_quan_web::Web -> rust_quant_alpha::Execution"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
 required_fields = ["execution_request_id", "claim_id", "claim_fence", "claim_status", "claim_expires_at", "execution_account_binding_ref", "risk_profile_ref", "risk_profile_version", "blocker_code", "idempotency_key", "correlation_id"]
 forbidden_fields = ["credential_secret", "fixed_market_api_key"]
@@ -90,7 +90,7 @@ contract_id = "RenewExecutionRequestClaimV1"
 version = "v1"
 compatibility_window = "initial_v1; producer writes v1; consumers accept v1; stale fence is rejected"
 kind = "command"
-direction = "rust_quant::Execution -> rust_quan_web::Web"
+direction = "rust_quant_alpha::Execution -> rust_quan_web::Web"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
 required_fields = ["execution_request_id", "claim_id", "claim_fence", "worker_identity", "requested_lease_until", "idempotency_key", "correlation_id"]
 forbidden_fields = ["credential_secret", "fixed_market_api_key"]
@@ -100,7 +100,7 @@ contract_id = "RenewExecutionRequestClaimReceiptV1"
 version = "v1"
 compatibility_window = "initial_v1; producer writes v1; consumers accept v1; stale fence is rejected"
 kind = "receipt"
-direction = "rust_quan_web::Web -> rust_quant::Execution"
+direction = "rust_quan_web::Web -> rust_quant_alpha::Execution"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
 required_fields = ["execution_request_id", "claim_id", "claim_fence", "renewal_status", "claim_expires_at", "blocker_code", "idempotency_key", "correlation_id"]
 
@@ -109,7 +109,7 @@ contract_id = "ReleaseExecutionRequestClaimV1"
 version = "v1"
 compatibility_window = "initial_v1; producer writes v1; consumers accept v1; stale fence is rejected"
 kind = "command"
-direction = "rust_quant::Execution -> rust_quan_web::Web"
+direction = "rust_quant_alpha::Execution -> rust_quan_web::Web"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
 required_fields = ["execution_request_id", "claim_id", "claim_fence", "worker_identity", "release_reason", "idempotency_key", "correlation_id"]
 
@@ -118,7 +118,7 @@ contract_id = "ReleaseExecutionRequestClaimReceiptV1"
 version = "v1"
 compatibility_window = "initial_v1; producer writes v1; consumers accept v1; stale fence is rejected"
 kind = "receipt"
-direction = "rust_quan_web::Web -> rust_quant::Execution"
+direction = "rust_quan_web::Web -> rust_quant_alpha::Execution"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
 required_fields = ["execution_request_id", "claim_id", "claim_fence", "release_status", "released_at", "idempotency_key", "correlation_id"]
 
@@ -127,7 +127,7 @@ contract_id = "ReportExecutionRequestOutcomeV1"
 version = "v1"
 compatibility_window = "initial_v1; producer writes v1; consumers accept v1; stale fence cannot mutate Web state"
 kind = "command"
-direction = "rust_quant::Execution -> rust_quan_web::Web"
+direction = "rust_quant_alpha::Execution -> rust_quan_web::Web"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
 required_fields = ["execution_request_id", "claim_id", "claim_fence", "outcome_type", "outcome_at", "outcome_evidence_ref", "outcome_evidence_sha256", "idempotency_key", "correlation_id"]
 forbidden_fields = ["credential_secret", "fixed_market_api_key"]
@@ -137,7 +137,7 @@ contract_id = "ExecutionRequestOutcomeReceiptV1"
 version = "v1"
 compatibility_window = "initial_v1; producer writes v1; consumers accept v1; stale fence is rejected"
 kind = "receipt"
-direction = "rust_quan_web::Web -> rust_quant::Execution"
+direction = "rust_quan_web::Web -> rust_quant_alpha::Execution"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
 required_fields = ["execution_request_id", "claim_id", "claim_fence", "acceptance_status", "blocker_code", "idempotency_key", "correlation_id"]
 
@@ -146,7 +146,7 @@ contract_id = "ExecutionAccountBindingV1"
 version = "v1"
 compatibility_window = "initial_v1; Web writes v1; Core accepts v1; removal requires drained claims and successor binding Verdicts"
 kind = "owner_value"
-direction = "rust_quan_web::Web -> rust_quant::Execution"
+direction = "rust_quan_web::Web -> rust_quant_alpha::Execution"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
 required_fields = ["execution_account_ref", "exchange_account_ref", "exchange", "product_type", "subaccount_ref", "margin_mode", "position_mode", "settlement_currency", "credential_reference", "credential_revision", "credential_revocation_generation", "binding_version", "binding_generation", "commercial_status", "authorization_evidence_ref", "authorization_evidence_hash"]
 forbidden_fields = ["credential_secret", "fixed_market_api_key"]
@@ -156,7 +156,7 @@ contract_id = "AcceptedExecutionRequestV1"
 version = "v1"
 compatibility_window = "initial_v1; C0 writes v1; B0 and downstream dry-run consumers pin the exact intake hash"
 kind = "owner_value"
-direction = "rust_quant::Execution::C0 -> rust_quant::Execution::B0"
+direction = "rust_quant_alpha::Execution::C0 -> rust_quant_alpha::Execution::B0"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
 required_fields = ["execution_request_id", "strategy_signal_id", "claim_execution_request_receipt_ref", "claim_execution_request_receipt_hash", "execution_account_binding_ref", "risk_profile_ref", "risk_profile_version", "accepted_at", "intake_hash"]
 forbidden_fields = ["credential_secret", "fixed_market_api_key", "order_intent_id", "mutation_permit"]
@@ -166,7 +166,7 @@ contract_id = "RequiredMarketEvidenceV1"
 version = "v1"
 compatibility_window = "initial_v1; Strategy requirement and Market evidence consumers pin the same schema/hash"
 kind = "owner_value"
-direction = "rust_quant::Strategy -> rust_quant::Market/Risk"
+direction = "rust_quant_alpha::Strategy -> rust_quant_alpha::Market/Risk"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
 required_fields = ["strategy_runtime_snapshot_id", "market_role", "exchange_resolution_rule", "instrument", "required_timeframes", "required_series", "market_data_source_profiles", "max_age_policy", "continuity_policy", "finality_policy", "max_lateness", "source_failover_policy", "requirements_hash"]
 
@@ -175,7 +175,7 @@ contract_id = "BarFinalizationV1"
 version = "v1"
 compatibility_window = "initial_v1; Market writes v1; Strategy/Risk accept v1 and reject unknown finality"
 kind = "event"
-direction = "rust_quant::Market -> rust_quant::Strategy/Risk"
+direction = "rust_quant_alpha::Market -> rust_quant_alpha::Strategy/Risk"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
 required_fields = ["exchange", "instrument", "timeframe", "interval_start", "interval_end", "is_final", "revision", "correction_generation", "source_identity", "source_sequence_or_comparator", "continuity_generation", "quality_status", "event_time", "available_at", "observed_at"]
 
@@ -184,7 +184,7 @@ contract_id = "MarketDecisionReadinessV1"
 version = "v1"
 compatibility_window = "initial_v1; Market writes v1; Risk/Execution reject unknown readiness or expired evidence"
 kind = "owner_value"
-direction = "rust_quant::Market -> rust_quant::Risk/Execution"
+direction = "rust_quant_alpha::Market -> rust_quant_alpha::Risk/Execution"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
 required_fields = ["exchange", "instrument", "timeframe", "market_data_source_profile_id", "reference_readiness", "last_confirmed_event_time", "observed_wall_clock", "continuity_generation", "source_identity", "fresh_until_wall_clock", "readiness_status", "readiness_hash"]
 
@@ -193,7 +193,7 @@ contract_id = "ResolvedMarketEvidenceSetV1"
 version = "v1"
 compatibility_window = "initial_v1; Market writes v1; Risk freezes the exact aggregate hash and Execution revalidates its TTL"
 kind = "owner_value"
-direction = "rust_quant::Market -> rust_quant::Risk/Execution"
+direction = "rust_quant_alpha::Market -> rust_quant_alpha::Risk/Execution"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
 required_fields = ["decision_subject_ref", "required_market_evidence_hash", "resolved_items", "aggregate_readiness", "aggregate_hash", "prepared_at", "valid_until_wall_clock"]
 
@@ -202,7 +202,7 @@ contract_id = "AccountAdmissionEvidenceV1"
 version = "v1"
 compatibility_window = "initial_v1; Account writes v1; Risk/Execution accept v1; unknown fields fail closed for new risk"
 kind = "owner_value"
-direction = "rust_quant::Account -> rust_quant::Risk/Execution"
+direction = "rust_quant_alpha::Account -> rust_quant_alpha::Risk/Execution"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
 required_fields = ["execution_account_ref", "exchange_account_ref", "binding_version", "binding_generation", "exchange", "product_type", "margin_mode", "position_mode", "settlement_currency", "credential_revision", "credential_revocation_generation", "observed_account_fingerprint_hash", "signed_preflight_status", "session_readiness", "permission_summary", "session_generation", "projection_revision", "projection_watermark", "recovery_closed_ref", "admission_status", "valid_until_wall_clock", "evidence_hash"]
 forbidden_fields = ["credential_secret", "fixed_market_api_key"]
@@ -212,7 +212,7 @@ contract_id = "AccountFactV1"
 version = "v1"
 compatibility_window = "initial_v1; Account writes v1; Execution Inbox accepts v1; raw private stream payload is forbidden"
 kind = "event"
-direction = "rust_quant::Account -> rust_quant::Execution"
+direction = "rust_quant_alpha::Account -> rust_quant_alpha::Execution"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
 required_fields = ["account_event_id", "execution_account_ref", "exchange_account_ref", "fact_kind", "source", "source_cursor_or_comparator", "session_generation", "projection_revision", "related_watermark", "causation_id", "observed_at"]
 forbidden_fields = ["credential_secret", "raw_private_stream_payload"]
@@ -222,7 +222,7 @@ contract_id = "AccountRecoveryClosedV1"
 version = "v1"
 compatibility_window = "initial_v1; Account writes v1; Execution accepts v1 only within evidence TTL"
 kind = "owner_value"
-direction = "rust_quant::Account -> rust_quant::Execution"
+direction = "rust_quant_alpha::Account -> rust_quant_alpha::Execution"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
 required_fields = ["execution_account_ref", "exchange_account_ref", "session_generation", "source_cursors_or_comparators", "source_comparator_versions", "snapshot_scope", "historical_query_coverage", "query_overlap_window", "projection_revision", "related_watermarks", "closed_predicate_version", "closed_at", "valid_until_wall_clock", "evidence_hash"]
 
@@ -231,7 +231,7 @@ contract_id = "RiskValuationSnapshotV1"
 version = "v1"
 compatibility_window = "initial_v1; Risk writes v1; Execution accepts only the exact risk evaluation binding"
 kind = "owner_value"
-direction = "rust_quant::Risk -> rust_quant::Execution"
+direction = "rust_quant_alpha::Risk -> rust_quant_alpha::Execution"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
 required_fields = ["risk_evaluation_id", "instrument_rules_revision", "contract_multiplier", "settlement_currency", "mark_price_ref", "fx_ref", "margin_mode", "liquidation_buffer", "unmanaged_exposure_reservation", "snapshot_hash"]
 
@@ -240,7 +240,7 @@ contract_id = "ExchangeExecutionCapabilityProfileV1"
 version = "v1"
 compatibility_window = "initial_v1; gateway publishes v1; Risk/Execution reject unsupported or unknown capabilities"
 kind = "capability_value"
-direction = "rust_quant::ExchangeGateway -> rust_quant::Risk/Execution"
+direction = "rust_quant_alpha::ExchangeGateway -> rust_quant_alpha::Risk/Execution"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
 required_fields = ["exchange", "product_type", "client_order_identity", "absence_proof", "private_stream_closure", "attached_stop", "reduce_only", "position_modes", "margin_modes", "quantity_price_filters", "rate_limit_profile", "clock_sync_profile", "profile_revision", "profile_hash"]
 
@@ -249,7 +249,7 @@ contract_id = "SafetyMonitoringV1"
 version = "v1"
 compatibility_window = "initial_v1; Execution writes v1 via Outbox; Account Inbox accepts v1; remove requires current fence and ack"
 kind = "command"
-direction = "rust_quant::Execution -> rust_quant::Account"
+direction = "rust_quant_alpha::Execution -> rust_quant_alpha::Account"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
 required_fields = ["safety_obligation_id", "execution_account_ref", "exchange_account_ref", "operation", "monitoring_fence", "obligation_generation", "managed_order_exposure_summary", "required_fact_kinds", "minimum_account_session_generation", "minimum_projection_watermark", "reason", "issued_at", "idempotency_key", "causation_id"]
 
@@ -258,7 +258,7 @@ contract_id = "SafetyMonitoringAckV1"
 version = "v1"
 compatibility_window = "initial_v1; Account writes v1; Execution accepts only the current monitoring fence"
 kind = "receipt"
-direction = "rust_quant::Account -> rust_quant::Execution"
+direction = "rust_quant_alpha::Account -> rust_quant_alpha::Execution"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
 required_fields = ["safety_obligation_id", "execution_account_ref", "exchange_account_ref", "operation", "monitoring_fence", "account_session_generation", "ack_status", "projection_watermark", "acked_at", "idempotency_key", "causation_id"]
 
@@ -267,7 +267,7 @@ contract_id = "RiskApprovalV1"
 version = "v1"
 compatibility_window = "initial_v1; Risk writes v1 via Outbox; Execution Inbox pins the exact decision and source claim set"
 kind = "event"
-direction = "rust_quant::Risk -> rust_quant::Execution"
+direction = "rust_quant_alpha::Risk -> rust_quant_alpha::Execution"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
 required_fields = ["risk_evaluation_id", "portfolio_evaluation_batch_id", "source_claim_receipt_hashes", "execution_account_ref", "exchange_account_ref", "execution_decision_context_ref", "pre_trade_snapshot_ref", "risk_decision_ref", "risk_decision_hash", "approval_status", "approved_quantity", "final_stop", "protection_requirements", "approval_expires_at", "idempotency_key", "causation_id"]
 forbidden_fields = ["credential_secret", "fixed_market_api_key"]
@@ -277,7 +277,7 @@ contract_id = "OrderSubmissionRequestedV1"
 version = "v1"
 compatibility_window = "initial_v1; Execution writes immutable generations; Dispatcher accepts only the current aggregate version"
 kind = "event"
-direction = "rust_quant::Execution -> rust_quant::ExecutionDispatcher"
+direction = "rust_quant_alpha::Execution -> rust_quant_alpha::ExecutionDispatcher"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
 required_fields = ["mutation_event_id", "mutation_generation", "expected_aggregate_version", "execution_plan_id", "plan_item_id", "order_id", "stable_mutation_identity", "client_order_id", "payload_hash", "source_claim_receipt_hash", "correlation_id", "causation_id"]
 forbidden_fields = ["credential_secret", "gateway_credential_capability", "fixed_market_api_key"]
@@ -287,7 +287,7 @@ contract_id = "OrderCancelRequestedV1"
 version = "v1"
 compatibility_window = "initial_v1; Execution writes immutable generations; Dispatcher accepts only the current aggregate version"
 kind = "event"
-direction = "rust_quant::Execution -> rust_quant::ExecutionDispatcher"
+direction = "rust_quant_alpha::Execution -> rust_quant_alpha::ExecutionDispatcher"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
 required_fields = ["mutation_event_id", "mutation_generation", "expected_aggregate_version", "execution_plan_id", "plan_item_id", "order_id", "stable_mutation_identity", "target_order_identity", "payload_hash", "source_authorization_hash", "correlation_id", "causation_id"]
 forbidden_fields = ["credential_secret", "gateway_credential_capability", "fixed_market_api_key"]
@@ -297,7 +297,7 @@ contract_id = "ProtectionSubmissionRequestedV1"
 version = "v1"
 compatibility_window = "initial_v1; Execution writes immutable generations; Dispatcher accepts only the current aggregate version"
 kind = "event"
-direction = "rust_quant::Execution -> rust_quant::ExecutionDispatcher"
+direction = "rust_quant_alpha::Execution -> rust_quant_alpha::ExecutionDispatcher"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
 required_fields = ["mutation_event_id", "mutation_generation", "expected_aggregate_version", "execution_plan_id", "plan_item_id", "protection_plan_id", "stable_mutation_identity", "managed_exposure_ref", "payload_hash", "source_authorization_hash", "correlation_id", "causation_id"]
 forbidden_fields = ["credential_secret", "gateway_credential_capability", "fixed_market_api_key"]
@@ -307,7 +307,7 @@ contract_id = "ExchangeMutationOutcomeV1"
 version = "v1"
 compatibility_window = "initial_v1; Fenced Gateway writes v1; Execution Inbox accepts only the bound event generation/version/permit"
 kind = "event"
-direction = "rust_quant::FencedExchangeMutationGateway -> rust_quant::Execution"
+direction = "rust_quant_alpha::FencedExchangeMutationGateway -> rust_quant_alpha::Execution"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
 required_fields = ["mutation_event_id", "mutation_generation", "expected_aggregate_version", "attempt_id", "permit_id", "outcome_class", "exchange_order_identity", "evidence_ref", "evidence_sha256", "observed_at", "correlation_id", "causation_id"]
 forbidden_fields = ["credential_secret", "gateway_credential_capability", "fixed_market_api_key"]
@@ -317,7 +317,7 @@ contract_id = "PortfolioTargetV1"
 version = "v1"
 compatibility_window = "initial_v1; Portfolio writes v1; Risk dry-run/live consumers pin the exact target hash"
 kind = "owner_value"
-direction = "rust_quant::Portfolio -> rust_quant::Risk"
+direction = "rust_quant_alpha::Portfolio -> rust_quant_alpha::Risk"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
 required_fields = ["portfolio_evaluation_batch_id", "execution_account_ref", "exchange_account_ref", "decision_time", "ordered_source_request_mappings", "target_positions", "allocation_results", "netting_results", "blockers", "target_hash"]
 forbidden_fields = ["credential_secret", "order_id", "execution_plan_id", "mutation_permit"]
@@ -327,7 +327,7 @@ contract_id = "RiskDecisionV1"
 version = "v1"
 compatibility_window = "initial_v1; Risk writes v1; Execution planning pins the exact decision/pre-trade hash"
 kind = "owner_value"
-direction = "rust_quant::Risk -> rust_quant::Execution"
+direction = "rust_quant_alpha::Risk -> rust_quant_alpha::Execution"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
 required_fields = ["risk_evaluation_id", "execution_decision_context_ref", "portfolio_target_ref", "pre_trade_snapshot_ref", "decision", "approved_quantity", "final_stop", "protection_requirements", "reason_codes", "decision_hash"]
 forbidden_fields = ["credential_secret", "order_id", "execution_plan_id", "mutation_permit"]
@@ -337,7 +337,7 @@ contract_id = "ExecutionPlanningValueV1"
 version = "v1"
 compatibility_window = "initial v1; Dry-run/Research/Paper compare canonical v1; live initialization accepts v1 during migration"
 kind = "owner_value"
-direction = "rust_quant::Execution -> rust_quant::DryRun/Research/Paper"
+direction = "rust_quant_alpha::Execution -> rust_quant_alpha::DryRun/Research/Paper"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
 required_fields = ["planning_policy_snapshot_ref", "ordered_child_order_plans", "protection_planning_value", "planning_hash"]
 forbidden_fields = ["execution_request_id", "claim_id", "order_intent_id", "execution_plan_id", "submit_pending", "outbox_id", "mutation_permit"]
@@ -347,7 +347,7 @@ contract_id = "ImmutableDecisionEvidenceBundleV1"
 version = "v1"
 compatibility_window = "test-only initial v1; producer and consumers must pin the same snapshot hash"
 kind = "test_only_query_value"
-direction = "rust_quant::Execution::B0 -> rust_quant::Portfolio/Risk/Execution::B1-B3"
+direction = "rust_quant_alpha::Execution::B0 -> rust_quant_alpha::Portfolio/Risk/Execution::B1-B3"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
 required_fields = ["market_evidence_ref", "market_evidence_sha256", "account_evidence_ref", "account_evidence_sha256", "instrument_evidence_ref", "instrument_evidence_sha256", "clock_identity", "seed", "policy_snapshot_refs"]
 forbidden_fields = ["network_fetch", "database_write", "credential_secret", "fixed_market_api_key"]
@@ -592,7 +592,7 @@ contract_id = "ResearchDecisionContextSnapshotV1"
 version = "v1"
 compatibility_window = "initial v1; ResearchRunSpec and all owner API consumers pin the same canonical hash"
 kind = "owner_value"
-direction = "rust_quant::Research -> rust_quant::Strategy/Portfolio/Risk/Execution"
+direction = "rust_quant_alpha::Research -> rust_quant_alpha::Strategy/Portfolio/Risk/Execution"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
 required_fields = ["research_scenario_ref", "strategy_runtime_snapshot_ref", "portfolio_policy_snapshot_ref", "risk_policy_snapshot_ref", "execution_planning_policy_snapshot_ref", "subject_binding_hash", "context_hash"]
 forbidden_fields = ["execution_request_id", "claim_id", "claim_fence", "credential_reference", "gateway_capability"]
@@ -602,7 +602,7 @@ contract_id = "ExecutionPlanningValueV1"
 version = "v1"
 compatibility_window = "initial v1; Dry-run/Research/Paper compare canonical v1; live initialization accepts v1 during migration"
 kind = "owner_value"
-direction = "rust_quant::Execution -> rust_quant::DryRun/Research/Paper"
+direction = "rust_quant_alpha::Execution -> rust_quant_alpha::DryRun/Research/Paper"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
 required_fields = ["planning_policy_snapshot_ref", "ordered_child_order_plans", "protection_planning_value", "planning_hash"]
 forbidden_fields = ["execution_request_id", "claim_id", "order_intent_id", "execution_plan_id", "submit_pending", "outbox_id", "mutation_permit"]
@@ -612,7 +612,7 @@ contract_id = "ResearchExecutionArtifactRefV1"
 version = "v1"
 compatibility_window = "initial v1; RunSpec pins one exact artifact; replacement creates a new ref"
 kind = "owner_value"
-direction = "rust_quant::Build -> rust_quant::Research"
+direction = "rust_quant_alpha::Build -> rust_quant_alpha::Research"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
 required_fields = ["git_revision", "patch_sha256", "cargo_lock_sha256", "toolchain", "target", "profile", "features", "package", "entry_checksum", "dependency_graph_sha256", "prng_version", "scheduler_version"]
 
@@ -621,7 +621,7 @@ contract_id = "PointInTimeDatasetManifestV1"
 version = "v1"
 compatibility_window = "initial v1; Research pins immutable Market artifact hashes; a data revision creates a new manifest"
 kind = "owner_value"
-direction = "rust_quant::Market -> rust_quant::Research"
+direction = "rust_quant_alpha::Market -> rust_quant_alpha::Research"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
 required_fields = ["dataset_id", "as_of", "available_at_policy", "universe_membership_intervals", "listing_delisting_events", "selection_algorithm_hash", "source_revisions", "gap_revision_policy", "instrument_rules_history", "funding_index_mark_refs", "content_hash"]
 
@@ -630,7 +630,7 @@ contract_id = "EvaluationManifestV1"
 version = "v1"
 compatibility_window = "initial v1; each hypothesis pins one immutable manifest before target OOS is read"
 kind = "owner_value"
-direction = "rust_quant::Research -> rust_quant::Research"
+direction = "rust_quant_alpha::Research -> rust_quant_alpha::Research"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
 required_fields = ["hypothesis_id", "train_validation_oos_windows", "walk_forward_folds", "purge_embargo", "parameter_space", "optimizer_version", "seed", "trial_budget", "selection_rule", "cost_stress", "coverage_gates", "concentration_gates", "holdout_reuse_count", "manifest_hash"]
 
@@ -639,7 +639,7 @@ contract_id = "PromotionReceiptV1"
 version = "v1"
 compatibility_window = "initial v1; Strategy writes immutable receipts; Control accepts the pinned version for ActivationEligibility"
 kind = "owner_value"
-direction = "rust_quant::Strategy -> rust_quant::Control"
+direction = "rust_quant_alpha::Strategy -> rust_quant_alpha::Control"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
 required_fields = ["candidate_definition_artifact_ref", "research_execution_artifact_ref", "completed_evidence_ref", "evaluation_gate_result_ref", "released_definition_artifact_ref", "released_build_digest", "cross_build_parity_ref", "approved_by", "approved_at", "allowed_deployment_channels", "receipt_hash"]
 

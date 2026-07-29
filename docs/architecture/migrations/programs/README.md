@@ -13,6 +13,7 @@
 
 - `repositories` 列出该 Program 的 legacy 来源、目标实现和其他参与 owner 仓库；
 - `owner_repository` 是 child Manifest 与目标实现的实际仓库，不是 legacy `source_paths` 所在仓库；
+- current-migration Contract `direction` 的仓库限定符使用实际目标 producer/consumer；Core 端为 `rust_quant_alpha::<Owner>`；
 - Core greenfield 当前迁移使用 `rust_quant_alpha`，legacy 来源通过 Manifest 中钉住 revision 的 `rust_quant@<sha>:<path>` 表达；
 - 历史 characterization 保持其实际产物仓库，不随目标仓库决策改写。
 

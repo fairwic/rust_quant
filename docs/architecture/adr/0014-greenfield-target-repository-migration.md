@@ -26,6 +26,7 @@
 
 - `program.repositories` 同时列出参与迁移的 legacy 来源、目标实现和其他 owner 仓库。
 - `program.children.owner_repository`、`manifest_path`、`evidence_path`、`verdict_path` 必须指向该子切片实际实施和保存治理工件的目标仓库。
+- current-migration Contract 的 `direction` 仓库限定符也使用实际 producer/consumer 目标仓库；Core 端统一写为 `rust_quant_alpha::<Owner>`，不能继续写成 legacy `rust_quant::<Owner>`。
 - Core 当前迁移的 Owner 子切片统一指向 `rust_quant_alpha`；历史 characterization 继续指向其实际保存位置 `rust_quant`。
 - `MP-rust-quant-alpha-migration-v1` 只登记目标仓库治理 P0/P1，不拥有 Strategy、Risk、Execution 等业务事实，也不能替代业务 Program。
 - 跨仓库 child 先以 `not_created` registration revision 冻结 identity/owner/path/依赖，目标 Manifest 钉住该 revision；Manifest 提交后 Registry 再记录内容 hash。Manifest 不回写追逐观察性 Registry commit，避免循环 hash。
