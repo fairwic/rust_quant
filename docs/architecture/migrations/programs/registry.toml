@@ -46,6 +46,76 @@ verdict_revision = "not_created"
 depends_on = []
 
 [[program]]
+program_id = "MP-market-data-foundation-v1"
+title = "Market K线同步与可重放数据地基"
+kind = "owner_dependency_foundation"
+state = "planned"
+evidence_scope = "current_migration"
+parent_plan = "docs/architecture/migration-plan.md#阶段-2"
+repositories = ["rust_quant", "rust_quant_alpha", "crypto_exc_all"]
+historical_dependency_eligible = false
+
+[[program.children]]
+child_id = "MIG-MKT-F1-CANONICAL-BAR-V1"
+short_name = "canonical-market-bar"
+owner = "Market"
+owner_repository = "rust_quant_alpha"
+manifest_status = "not_created"
+manifest_kind = "owner_child"
+manifest_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F1-CANONICAL-BAR-V1/manifest.toml"
+evidence_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F1-CANONICAL-BAR-V1/evidence.md"
+verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F1-CANONICAL-BAR-V1/verdict.json"
+manifest_revision = "not_created"
+evidence_revision = "not_created"
+verdict_revision = "not_created"
+depends_on = []
+
+[[program.children]]
+child_id = "MIG-MKT-F2-PUBLIC-KLINE-INGEST-V1"
+short_name = "public-kline-ingest"
+owner = "Market"
+owner_repository = "rust_quant_alpha"
+manifest_status = "not_created"
+manifest_kind = "owner_child"
+manifest_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F2-PUBLIC-KLINE-INGEST-V1/manifest.toml"
+evidence_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F2-PUBLIC-KLINE-INGEST-V1/evidence.md"
+verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F2-PUBLIC-KLINE-INGEST-V1/verdict.json"
+manifest_revision = "not_created"
+evidence_revision = "not_created"
+verdict_revision = "not_created"
+depends_on = ["MIG-MKT-F1-CANONICAL-BAR-V1"]
+
+[[program.children]]
+child_id = "MIG-MKT-F3-MARKET-BAR-STORAGE-V1"
+short_name = "market-bar-storage"
+owner = "Market"
+owner_repository = "rust_quant_alpha"
+manifest_status = "not_created"
+manifest_kind = "owner_child"
+manifest_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F3-MARKET-BAR-STORAGE-V1/manifest.toml"
+evidence_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F3-MARKET-BAR-STORAGE-V1/evidence.md"
+verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F3-MARKET-BAR-STORAGE-V1/verdict.json"
+manifest_revision = "not_created"
+evidence_revision = "not_created"
+verdict_revision = "not_created"
+depends_on = ["MIG-MKT-F2-PUBLIC-KLINE-INGEST-V1"]
+
+[[program.children]]
+child_id = "MIG-MKT-F4-DATASET-SNAPSHOT-V1"
+short_name = "market-dataset-snapshot"
+owner = "Market"
+owner_repository = "rust_quant_alpha"
+manifest_status = "not_created"
+manifest_kind = "owner_child"
+manifest_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F4-DATASET-SNAPSHOT-V1/manifest.toml"
+evidence_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F4-DATASET-SNAPSHOT-V1/evidence.md"
+verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F4-DATASET-SNAPSHOT-V1/verdict.json"
+manifest_revision = "not_created"
+evidence_revision = "not_created"
+verdict_revision = "not_created"
+depends_on = ["MIG-MKT-F3-MARKET-BAR-STORAGE-V1"]
+
+[[program]]
 program_id = "MP-market-velocity-execution-v1"
 title = "Market Velocity 用户执行链路"
 kind = "cross_repository_delivery"

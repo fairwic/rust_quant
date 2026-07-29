@@ -101,9 +101,30 @@
 
 验证：不迁移任何业务行为，现有构建仍可运行；legacy ratchet 只拦已覆盖旧目录中的新增违规，不因历史债务让全仓长期红灯。它不等于 target-layout 已受保护：首个 `structure_only` 目录搬迁前，P0 门禁必须对目标 package/app 注入违规能失败、未知 package 不可静默跳过，并有当前已提交 revision 的 CI/本地证据。
 
-## 6. 阶段 2：把 Golden Vertical Slice 拆成 A → C0 → B0 → B → C1 的有序 Owner 子切片
+## 6. 阶段 2：先完成 Market → Strategy → Research 上游地基，再进入执行 Golden Slice
 
-Market Velocity 是首个 Golden **计划**，不是一个同时迁移信号、商业授权、Portfolio、Risk、OMS、Paper 和恢复协议的巨型 Manifest。业务上仍是 A（交接）、B（决策）、C（恢复）三个切片；其中 C 必须先完成 `C0` 的最小 Execution intake 结构子 Manifest，随后 B0 固定 test-only Evidence Provider，B 才能使用稳定 typed Port 和不可变输入，最后按 Owner DAG 完成 `C1` 的账户绑定、市场证据、Account admission、交易所能力、风险估值、安全监测、审批与 Execution 恢复。`RecoveryHarness` 只是验证这些 live 路径的 CI-only ephemeral artifact，不是一个可部署的 C1 业务切片。每个 Owner 子 Manifest 都必须有独立 Manifest、Evidence 和 Verdict；前一依赖未验证前，后一切片不得借其名义开始。
+Market Velocity 是首个 Golden **计划**，不是第一个应落地的下游执行模块。实际业务实现必须先形成可独立验证的上游事实链：
+
+```text
+M1 canonical MarketBar / instrument / timeframe / finality
+  -> M2 public read-only K 线采集与规范化
+  -> M3 Market owner storage + historical query
+  -> M4 point-in-time DatasetSnapshot
+  -> S1 StrategyDefinition / StrategyRuntimeSnapshot / Evaluator / Signal
+  -> R1 deterministic backtest + strategy parity
+  -> A Strategy/Web handoff
+  -> C0 Execution intake
+  -> B0/B deterministic dry-run
+  -> C1 live 前置与恢复
+```
+
+平台固定 API Key 只允许在 M2 的 Market 公共只读 Adapter 配置中出现；M1、M3、M4、Strategy、Research、Risk 和 Execution 都只能看到非敏感 source profile/ref。Research/Backtest 必须通过 Market historical API/DatasetSnapshot 读取同一 canonical MarketBar，禁止定义第二套 K 线事实或直连采集凭证。
+
+下文 `A → C0 → B0 → B → C1` 只描述**上游地基完成之后**的执行 Golden Slice 内部依赖，不表示可以从 A 开始迁移整个系统。可以提前冻结防腐 Contract 草案，但在 M1～M4、S1、R1 获得当前 revision 的 Verdict 前，不得创建 A1 的数据库、Outbox、Dispatcher、Web consumer 或 runtime wiring。
+
+2026-07-29 已登记的 `MIG-MVE-A1-STRATEGY-SIGNAL-HANDOFF-V1` 错误地把 `depends_on` 冻结为空。Registry 的 child identity 与依赖不可原地改写，因此该 child 只能保留为被阻塞的 Contract/边界发现记录，不能继续充当实施前置。未来恢复 handoff 实施时必须新登记 successor child，并显式依赖 M4、S1 与 R1 的不可变 Verdict。
+
+上游地基完成后，Market Velocity 执行 Golden Slice 仍不能成为同时迁移信号、商业授权、Portfolio、Risk、OMS、Paper 和恢复协议的巨型 Manifest。业务上仍是 A（交接）、B（决策）、C（恢复）三个切片；其中 C 必须先完成 `C0` 的最小 Execution intake 结构子 Manifest，随后 B0 固定 test-only Evidence Provider，B 才能使用稳定 typed Port 和不可变输入，最后按 Owner DAG 完成 `C1` 的账户绑定、市场证据、Account admission、交易所能力、风险估值、安全监测、审批与 Execution 恢复。`RecoveryHarness` 只是验证这些 live 路径的 CI-only ephemeral artifact，不是一个可部署的 C1 业务切片。每个 Owner 子 Manifest 都必须有独立 Manifest、Evidence 和 Verdict；前一依赖未验证前，后一切片不得借其名义开始。
 
 ```text
 A Strategy/Web handoff
@@ -120,7 +141,7 @@ A Strategy/Web handoff
 
 | 业务切片 | Owner 子 Manifest | 此子 Manifest 唯一 Owner | `depends_on` | 本 Owner 本地事实/事务 | 跨 Owner Contract |
 | --- | --- | --- | --- | --- | --- |
-| A | `A1-strategy-signal-handoff` | Strategy | 无 | `StrategySignalHandoffV1`、RuntimeSnapshot 的市场输入要求、Outbox、delivery identity | `CreateExecutionRequestFromSignalV1` command v1 → Web；`RequiredMarketEvidenceV1` → Market/Risk |
+| A | `A1-strategy-signal-handoff` | Strategy | M4、S1、R1；现有错误登记的无依赖 A1 仅保留为 blocked discovery record，实施须新建 successor child | `StrategySignalHandoffV1`、RuntimeSnapshot 的市场输入要求、Outbox、delivery identity | `CreateExecutionRequestFromSignalV1` command v1 → Web；`RequiredMarketEvidenceV1` → Market/Risk |
 | A | `A2-web-execution-request` | Web | A1 | canonical `ExecutionRequestV1`、Inbox/去重、商业 blocker、claim 状态 | `ClaimExecutionRequestV1` / `RenewExecutionRequestClaimV1` / `ReleaseExecutionRequestClaimV1`：Execution → Web；对应 receipt：Web → Execution；`ReportExecutionRequestOutcomeV1` → Web；`ExecutionRequestOutcomeReceiptV1` → Execution |
 | C0 | `C0-execution-intake` | Execution | A2 | `CoreExecutionIntakeV1`、claim receipt、幂等约束 | 发起 Claim/Renew/Release 并消费对应 Web receipt；发布 Outcome 并消费 `ExecutionRequestOutcomeReceiptV1`；`AcceptedExecutionRequestV1` → B0 |
 | B0 | `B0-immutable-test-evidence-provider` | Execution（test-only Adapter） | C0 | 无业务事实；只组合带 hash 的 Market/Account/Instrument fixture 与 Snapshot | `ImmutableDecisionEvidenceBundleV1` → B1/B2/B3；禁止 runtime wiring、网络/DB 写入 |
@@ -149,6 +170,8 @@ MarketSnapshot
 ```
 
 范围只包含信号与商业交接：Market Velocity `StrategySignal` 的唯一业务 owner 是 Strategy，Market 只提供 snapshot/input。A1 固定 `StrategySignal` identity/version/evidence cutoff，并由 Strategy owner 在本地事务内持久化 `StrategySignalHandoffV1` 与自己的 Outbox；A2 再由 Web owner 通过 `CreateExecutionRequestFromSignalV1`、订阅、会员、产品资格和 verified active credential 创建 canonical `ExecutionRequestV1`，并在自己的事务中维护 claim lease 与 Outcome 投影。Claim/Renew/Release command 固定为 Execution -> Web，receipt 固定反向；Strategy handoff payload 不得携带用户、credential、risk profile 或预组装 `ExecutionRequest[]`；Strategy/Core 不查询订阅，也不参与扇出。
+
+本节只能在 M4 point-in-time DatasetSnapshot、S1 同源 Strategy evaluator 与 R1 deterministic backtest/parity 的前置 Verdict 闭合后实施。缺少任一前置时，只允许继续维护 Contract discovery，不允许新增 handoff 表、Outbox、Dispatcher 或 Web 投递。
 
 News 若参与，只能先以 `NewsInsightV1 -> Strategy evaluator -> StrategySignal` 进入，不能绕过 Strategy 直接调用 Web 的执行请求入口。
 
@@ -294,16 +317,17 @@ Vegas 不是单一可实施 Manifest。开始任何目标代码迁移前，必�
 
 推荐顺序：
 
-1. Market normalization、symbol rules、quality 与 snapshot；
-2. Strategy Definition、Registry、Evaluator 与 Signal；
-3. Portfolio allocation、冲突和净额；
-4. Pre-trade Risk 与冻结 snapshot；
-5. Execution OMS、订单状态和交易所 Gateway；
-6. FillEvent 与 AccountProjection；
-7. Continuous RiskAction；
-8. Protection saga；
-9. Reconciliation 与恢复命令；
-10. Research Domain、其他策略的 Backtest/live parity、Analytics 与 ResearchEvidence；Vegas 已作为第二验收切片先固定模板。
+1. Market canonical model、normalization、symbol rules、finality、quality、storage 与 point-in-time DatasetSnapshot；
+2. Market 公共只读 K 线同步；平台固定 API Key 只存在于公共 Market Adapter，禁止进入 Domain 或 Research；
+3. Strategy Definition、Registry、RuntimeSnapshot、Evaluator、EvaluationState 与 Signal；
+4. Research Domain + deterministic Backtest Kernel，先完成首个策略的严格时序、成本和逐层 parity；
+5. Portfolio allocation、冲突和净额的 dry-run；
+6. Pre-trade Risk 与冻结 snapshot 的 dry-run；
+7. ExecutionPlanningValue、PaperEvent 与恢复测试地基；
+8. Strategy → Web handoff、canonical ExecutionRequest 与 read-only intake；
+9. Execution OMS、订单状态和交易所 Gateway；
+10. FillEvent、AccountProjection、Continuous RiskAction 与 Protection saga；
+11. Reconciliation、恢复命令、其他策略的 Backtest/live parity、Analytics 与 ResearchEvidence；Vegas 继续作为第二个策略验收切片。
 
 每个步骤继续使用第 3 节清单，不能在同一切片中同时调整策略判断、资本分配、风险阈值和执行协议。
 
