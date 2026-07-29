@@ -213,7 +213,7 @@ cargo xtask arch-check
 5. 违规总数只能下降，不能通过扩大 glob 或忽略目录恢复绿灯；
 6. 最终删除 legacy allowlist。
 
-`rust_quant_alpha` 已建立 target-layout P0：workspace package/path role、未知 package fail-closed、`apps/` 与目标源码根扫描、baseline 约束和基础注入测试均已有实现；受跟踪 CI 仍按迁移阶段延后，因此不能形成 current-revision `pass` Verdict。ADR-0015 的 capability/API-SPI/Port/file-budget 规则属于独立 Architecture Governance P0.1；在其注入测试完成前，不得声称第 55～62 项已自动执行。
+`rust_quant_alpha` 已建立 target-layout P0，并已本地提交 Architecture Governance P0.1：workspace package/path role、未知 package fail-closed、`apps/` 与目标源码根扫描、capability/API-SPI/Port/file-budget 静态规则及正反例注入测试均已有实现。P0.1 已在 Program Registry 登记为 `created`，但受跟踪 CI 仍按迁移阶段延后，尚无 current-revision `pass` Verdict；因此第 55～62 项只能称为当前本地静态门禁已执行，不能外推为行为、恢复、依赖闭合或生产发布已验证。
 
 小型 legacy bugfix 可以留在原位置，但不得新增跨层依赖、扩大 API 或把新能力继续堆入 legacy。新增业务能力默认进入目标架构。
 
