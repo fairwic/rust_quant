@@ -25,8 +25,8 @@ manifest_kind = "owner_child"
 manifest_path = "rust_quant_alpha:docs/architecture/migrations/MIG-20260729-target-layout-p0/manifest.toml"
 evidence_path = "rust_quant_alpha:docs/architecture/migrations/MIG-20260729-target-layout-p0/evidence.md"
 verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-20260729-target-layout-p0/verdict.json"
-manifest_revision = "sha256:a1da0c5f0b1de181d499573463335060902ac23928f71fbab4d12da09ae7498f"
-evidence_revision = "sha256:07fc7cf118a291f1add8d87161d9bcfbc82c0b2fce61b019ae90a5689b0dd549"
+manifest_revision = "sha256:97391fa8a525bd03582dcda19bccd8805bb459b7f9a1732852190760d8fdf963"
+evidence_revision = "sha256:9ad4c808fba3b857018a231f55f61bd74aec3a33e853d1a382796abbf6ed835a"
 verdict_revision = "not_created"
 depends_on = []
 
@@ -61,9 +61,9 @@ version = "v1"
 compatibility_window = "initial_v1; producer writes v1; consumers accept v1; removal requires all registered consumer Verdicts"
 kind = "command"
 direction = "rust_quant_alpha::Strategy -> rust_quan_web::Web"
-snapshot = { status = "not_created", ref = "", sha256 = "" }
-required_fields = ["strategy_signal_id", "strategy_version", "symbol", "signal_time", "evidence_cutoff", "idempotency_key"]
-forbidden_fields = ["user_id", "credential_secret", "risk_profile", "prebuilt_execution_requests"]
+snapshot = { status = "created", ref = "rust_quant_alpha@c867e03f3913b4b695a30122e5c7bb97dd717043:crates/contracts/snapshots/create_execution_request_from_signal_v1.json", sha256 = "8690193e52f63465da0c3303fda2ed5e5ea9cb1ab86369d0335dbaf933df528c" }
+required_fields = ["strategy_signal_id", "strategy_key", "strategy_version", "strategy_definition_hash", "strategy_runtime_snapshot_id", "strategy_runtime_snapshot_hash", "symbol", "timeframe", "direction", "signal_time", "evidence_cutoff", "signal_evidence_ref", "signal_evidence_sha256", "required_market_evidence_ref", "required_market_evidence_sha256", "idempotency_key"]
+forbidden_fields = ["user_id", "combo_id", "credential_secret", "risk_profile", "prebuilt_execution_requests", "fixed_market_api_key"]
 
 [[program.contracts]]
 contract_id = "ClaimExecutionRequestV1"
@@ -167,7 +167,7 @@ version = "v1"
 compatibility_window = "initial_v1; Strategy requirement and Market evidence consumers pin the same schema/hash"
 kind = "owner_value"
 direction = "rust_quant_alpha::Strategy -> rust_quant_alpha::Market/Risk"
-snapshot = { status = "not_created", ref = "", sha256 = "" }
+snapshot = { status = "created", ref = "rust_quant_alpha@c867e03f3913b4b695a30122e5c7bb97dd717043:crates/contracts/snapshots/required_market_evidence_v1.json", sha256 = "672d393a6f3606a46ff24d59a4e0f23bf56729b0db0b4779fb9c43bac9c70715" }
 required_fields = ["strategy_runtime_snapshot_id", "market_role", "exchange_resolution_rule", "instrument", "required_timeframes", "required_series", "market_data_source_profiles", "max_age_policy", "continuity_policy", "finality_policy", "max_lateness", "source_failover_policy", "requirements_hash"]
 
 [[program.contracts]]
@@ -362,8 +362,8 @@ manifest_kind = "owner_child"
 manifest_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MVE-A1-STRATEGY-SIGNAL-HANDOFF-V1/manifest.toml"
 evidence_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MVE-A1-STRATEGY-SIGNAL-HANDOFF-V1/evidence.md"
 verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MVE-A1-STRATEGY-SIGNAL-HANDOFF-V1/verdict.json"
-manifest_revision = "sha256:f2481e460f1860f65595095c437adf331c5d65bb897263f9015844f7eb0cb1d1"
-evidence_revision = "sha256:735669c0e8bce0091430428f27a4864d5a945f64233316eda4a335f53477e804"
+manifest_revision = "sha256:0e6b03fc44f6c2a65846ea868dc41a9cfce21d4bba6c41b958ba455c2446284c"
+evidence_revision = "sha256:14943e4ee295ad883d980b3c3ac8df2e314d2a86cdfe1f049b7a467861776cd2"
 verdict_revision = "not_created"
 depends_on = []
 
