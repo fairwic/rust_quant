@@ -137,6 +137,7 @@ docs/architecture/migrations/<migration-id>-<slug>/
 - source、target、允许和禁止修改路径；
 - 受影响的 Cargo package、Release Unit、`contract_snapshots` object array、表和本地事务/InBox/Outbox；
 - 必须保持的业务不变量；
+- legacy 完整调用链与语义处置工件；每项旧行为必须记录业务目的、前置状态、时序/失败语义、`保留/优化/废弃/延期` 决策、理由、目标落点和验证方式；
 - 配置、事务、外部副作用和恢复边界；
 - 必需测试、parity 层和证据；
 - shadow、cutover、rollback 和 legacy 删除门；
@@ -144,11 +145,25 @@ docs/architecture/migrations/<migration-id>-<slug>/
 
 Manifest 未填写完整、字段互相冲突或无法映射到真实调用链时，不得开始修改。
 
+#### 4.2.1 语义继承门禁
+
+目标架构允许重新分层和重写实现，但不得把“没有复制旧代码”误写成“旧业务语义不存在”。每个涉及 legacy 业务代码的 Owner 子迁移，在写目标代码前必须形成独立的语义处置工件，并由 Manifest/Evidence 的 `required_artifacts` 引用。工件至少覆盖：
+
+1. 先枚举全部 App/CLI/Scheduler/Consumer 入口及绕过 Service 的直接 SDK/SQL/env 调用，再追到 Use Case、数据库、外部副作用和最终消费者；
+2. identity、状态机、时间边界、默认值、排序、幂等、事务、失败、重试、恢复、限频、并发、审计和清理行为；
+3. 每项 legacy 行为的真实业务目的，而不是只描述函数或目录；
+4. `保留`、`优化`、`废弃` 或 `延期` 的唯一处置；`废弃` 必须说明为何没有业务价值或为何不安全，`延期` 必须指向承接该语义的后续 Manifest/Gate；
+5. 目标语义、首个差异层、允许差异、验证命令/fixture 和 legacy 删除门。
+6. 调用点搜索式、命中数量和闭包证明：每个命中必须绑定一个矩阵 ID；同一目的存在互相冲突的 legacy 实现时，必须选出 canonical 语义并把其余实现标为优化或废弃。
+
+只列 source path、hash、类型名或“已参考旧代码”不满足该门禁。分析范围必须先闭合，实施范围才允许按 Owner/阶段缩小；切片只实施链路的一部分时，未实施的闭环语义仍必须进入处置矩阵并绑定后续切片，不得借切片边界静默丢弃。目标实现与 legacy 行为不同时，必须先在矩阵中把差异批准为 `优化` 或 `废弃`，再写测试固定新语义。
+
 ### 4.3 Evidence
 
 `evidence.md` 保存人可读、可复核的结果；它不能作为机器依赖边的唯一输入：
 
 - 迁移前真实调用链和 characterization；
+- legacy 语义处置矩阵及所有 `延期` 项的后续承接关系；
 - 迁移前后 Cargo 依赖图摘要；
 - 实际变更文件与 Manifest allowlist 对比；
 - unit/integration/contract/parity/recovery 命令和结果；
