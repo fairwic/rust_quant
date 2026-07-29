@@ -2,7 +2,7 @@
 # Program 只编排 Owner 子 Manifest 和 Contract；它不拥有代码、表或跨 Owner 事务。
 schema_version = 2
 registry_id = "rust-quant-migration-programs"
-registry_revision = "2026-07-29"
+registry_revision = "2026-07-30"
 dependency_resolution = "computed_from_manifest_evidence_verdict"
 
 [[program]]
@@ -163,6 +163,21 @@ manifest_revision = "sha256:a61b5d9353d9085480bab1abaf9a8bf4d3788f387846a6c53eba
 evidence_revision = "sha256:d74cb6629ade7967824556b943af6ca89d4159d8fc2105c19560602cab3f8746"
 verdict_revision = "not_created"
 depends_on = ["MIG-MKT-F2R-CAPABILITY-API-SPI-V1"]
+
+[[program.children]]
+child_id = "MIG-MKT-F3B-MARKET-CANDLE-SHARD-LIFECYCLE-V1"
+short_name = "market-candle-shard-lifecycle"
+owner = "Market"
+owner_repository = "rust_quant_alpha"
+manifest_status = "not_created"
+manifest_kind = "owner_child"
+manifest_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F3B-MARKET-CANDLE-SHARD-LIFECYCLE-V1/manifest.toml"
+evidence_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F3B-MARKET-CANDLE-SHARD-LIFECYCLE-V1/evidence.md"
+verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F3B-MARKET-CANDLE-SHARD-LIFECYCLE-V1/verdict.json"
+manifest_revision = "not_created"
+evidence_revision = "not_created"
+verdict_revision = "not_created"
+depends_on = ["MIG-MKT-F3A-MARKET-BAR-STORAGE-V1"]
 
 [[program.children]]
 child_id = "MIG-MKT-F4A-DATASET-SNAPSHOT-V1"
