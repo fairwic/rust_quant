@@ -45,6 +45,21 @@ evidence_revision = "sha256:c01f56c18db1763b3bf2528376b1941737334796f4c66d8ae553
 verdict_revision = "not_created"
 depends_on = []
 
+[[program.children]]
+child_id = "MIG-20260729-MODULE-BOUNDARY-GUARDRAILS-P0-1"
+short_name = "module-boundary-guardrails-p0-1"
+owner = "Architecture Governance"
+owner_repository = "rust_quant_alpha"
+manifest_status = "not_created"
+manifest_kind = "owner_child"
+manifest_path = "rust_quant_alpha:docs/architecture/migrations/MIG-20260729-MODULE-BOUNDARY-GUARDRAILS-P0-1/manifest.toml"
+evidence_path = "rust_quant_alpha:docs/architecture/migrations/MIG-20260729-MODULE-BOUNDARY-GUARDRAILS-P0-1/evidence.md"
+verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-20260729-MODULE-BOUNDARY-GUARDRAILS-P0-1/verdict.json"
+manifest_revision = "not_created"
+evidence_revision = "not_created"
+verdict_revision = "not_created"
+depends_on = ["MIG-MVE-A1R-REMOVE-FAKE-ONLY-PORT-V1"]
+
 [[program]]
 program_id = "MP-market-data-foundation-v1"
 title = "Market K线同步与可重放数据地基"
@@ -75,16 +90,35 @@ child_id = "MIG-MKT-F2-PUBLIC-KLINE-INGEST-V1"
 short_name = "public-kline-ingest"
 owner = "Market"
 owner_repository = "rust_quant_alpha"
-manifest_status = "not_created"
+manifest_status = "created"
 manifest_kind = "owner_child"
 manifest_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F2-PUBLIC-KLINE-INGEST-V1/manifest.toml"
 evidence_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F2-PUBLIC-KLINE-INGEST-V1/evidence.md"
 verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F2-PUBLIC-KLINE-INGEST-V1/verdict.json"
-manifest_revision = "not_created"
-evidence_revision = "not_created"
+manifest_revision = "sha256:e50d0b19aea28ba05abdca24c00999014f11c53f6a17d809fd2e74cb8e2bb5f4"
+evidence_revision = "sha256:a248c740e4e028b3b492ab6395de96db2ce886d2f3003ece90328a16c851fde3"
 verdict_revision = "not_created"
 depends_on = ["MIG-MKT-F1-CANONICAL-BAR-V1"]
 
+[[program.children]]
+child_id = "MIG-MKT-F2R-CAPABILITY-API-SPI-V1"
+short_name = "market-capability-api-spi-refactor"
+owner = "Market"
+owner_repository = "rust_quant_alpha"
+manifest_status = "not_created"
+manifest_kind = "owner_child"
+manifest_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F2R-CAPABILITY-API-SPI-V1/manifest.toml"
+evidence_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F2R-CAPABILITY-API-SPI-V1/evidence.md"
+verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F2R-CAPABILITY-API-SPI-V1/verdict.json"
+manifest_revision = "not_created"
+evidence_revision = "not_created"
+verdict_revision = "not_created"
+depends_on = [
+  "MIG-MKT-F2-PUBLIC-KLINE-INGEST-V1",
+  "MIG-20260729-MODULE-BOUNDARY-GUARDRAILS-P0-1",
+]
+
+# 早期 F3/F4 registration 的依赖边不可改写；实际实施使用后面的 F3A/F4A successor。
 [[program.children]]
 child_id = "MIG-MKT-F3-MARKET-BAR-STORAGE-V1"
 short_name = "market-bar-storage"
@@ -114,6 +148,36 @@ manifest_revision = "not_created"
 evidence_revision = "not_created"
 verdict_revision = "not_created"
 depends_on = ["MIG-MKT-F3-MARKET-BAR-STORAGE-V1"]
+
+[[program.children]]
+child_id = "MIG-MKT-F3A-MARKET-BAR-STORAGE-V1"
+short_name = "market-bar-storage-after-module-hardening"
+owner = "Market"
+owner_repository = "rust_quant_alpha"
+manifest_status = "not_created"
+manifest_kind = "owner_child"
+manifest_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F3A-MARKET-BAR-STORAGE-V1/manifest.toml"
+evidence_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F3A-MARKET-BAR-STORAGE-V1/evidence.md"
+verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F3A-MARKET-BAR-STORAGE-V1/verdict.json"
+manifest_revision = "not_created"
+evidence_revision = "not_created"
+verdict_revision = "not_created"
+depends_on = ["MIG-MKT-F2R-CAPABILITY-API-SPI-V1"]
+
+[[program.children]]
+child_id = "MIG-MKT-F4A-DATASET-SNAPSHOT-V1"
+short_name = "market-dataset-snapshot-after-module-hardening"
+owner = "Market"
+owner_repository = "rust_quant_alpha"
+manifest_status = "not_created"
+manifest_kind = "owner_child"
+manifest_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F4A-DATASET-SNAPSHOT-V1/manifest.toml"
+evidence_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F4A-DATASET-SNAPSHOT-V1/evidence.md"
+verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F4A-DATASET-SNAPSHOT-V1/verdict.json"
+manifest_revision = "not_created"
+evidence_revision = "not_created"
+verdict_revision = "not_created"
+depends_on = ["MIG-MKT-F3A-MARKET-BAR-STORAGE-V1"]
 
 [[program]]
 program_id = "MP-market-velocity-execution-v1"
@@ -421,6 +485,21 @@ direction = "rust_quant_alpha::Execution::B0 -> rust_quant_alpha::Portfolio/Risk
 snapshot = { status = "not_created", ref = "", sha256 = "" }
 required_fields = ["market_evidence_ref", "market_evidence_sha256", "account_evidence_ref", "account_evidence_sha256", "instrument_evidence_ref", "instrument_evidence_sha256", "clock_identity", "seed", "policy_snapshot_refs"]
 forbidden_fields = ["network_fetch", "database_write", "credential_secret", "fixed_market_api_key"]
+
+[[program.children]]
+child_id = "MIG-MVE-A1R-REMOVE-FAKE-ONLY-PORT-V1"
+short_name = "A1R-remove-fake-only-port"
+owner = "Strategy"
+owner_repository = "rust_quant_alpha"
+manifest_status = "not_created"
+manifest_kind = "owner_child"
+manifest_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MVE-A1R-REMOVE-FAKE-ONLY-PORT-V1/manifest.toml"
+evidence_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MVE-A1R-REMOVE-FAKE-ONLY-PORT-V1/evidence.md"
+verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MVE-A1R-REMOVE-FAKE-ONLY-PORT-V1/verdict.json"
+manifest_revision = "not_created"
+evidence_revision = "not_created"
+verdict_revision = "not_created"
+depends_on = []
 
 [[program.children]]
 child_id = "MIG-MVE-A1-STRATEGY-SIGNAL-HANDOFF-V1"

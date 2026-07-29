@@ -137,6 +137,7 @@ docs/architecture/migrations/<migration-id>-<slug>/
 - source、target、允许和禁止修改路径；
 - 受影响的 Cargo package、Release Unit、`contract_snapshots` object array、表和本地事务/InBox/Outbox；
 - 必须保持的业务不变量；
+- capability、`api`/`spi` 可见面、生产 Use Case/Port/Adapter 完整性和文件预算；
 - legacy 完整调用链与语义处置工件；每项旧行为必须记录业务目的、前置状态、时序/失败语义、`保留/优化/废弃/延期` 决策、理由、目标落点和验证方式；
 - 配置、事务、外部副作用和恢复边界；
 - 必需测试、parity 层和证据；
@@ -316,10 +317,11 @@ AI 在修改文件前必须完成：
 
 ```text
 入口映射
-  -> Use Case
-  -> Model / Policy
-  -> Port
-  -> Adapter
+  -> Owner capability
+  -> API Input / Output
+  -> Use Case + Model / Policy
+  -> SPI Port
+  -> production Adapter
   -> 必要 Contract
   -> Tests
 ```
@@ -332,6 +334,15 @@ AI 在修改文件前必须完成：
 - 把跨 Owner 大函数整体移动到新 `impl`；
 - 为通过编译临时增加生产到 Research 的反向依赖；
 - 同时维护两套会独立演化的业务规则。
+
+目标 Domain/Adapter 的内部拆分遵守 [ADR-0015](adr/0015-capability-first-modules-and-api-spi-boundaries.md)：
+
+- 其他 Domain/Research 只经 `api`，Adapter 只经 `spi`，App 只在 wiring/composition root 使用 `spi`；
+- 非测试 Port 进入 `verified` 前必须有生产 Use Case 调用方、生产 Adapter 和失败/原子性/恢复证据；Fake-only Port 只能作为有承接项的 `implementing` 中间态；
+- Domain/Adapter 生产代码、任意 Rust 文件、façade 与测试文件执行 ADR-0015 预算；
+- Owner 级 `enums.rs`/`types.rs`/`common.rs`、provider 级 Gateway 大文件和万能 Use Case 不属于有效拆分。
+
+如果发现新规则尚未进入已提交 governance baseline，必须先停止业务切片并提交 ADR/规范；不得在同一未冻结工作树中一边修改规范、一边让目标 Manifest 引用这些规则。Architecture Governance 的门禁修改、Market 结构拆分、Strategy Fake-only Port 处置属于不同 Owner/范围，必须使用独立 Manifest，不能合并为一个“P0.1 大切片”。
 
 ### 8.3 B0：不可变 test-only Evidence Provider
 
@@ -413,17 +424,18 @@ CI 变绿、镜像构建成功或 AI 判断安全，都不能替代生产切换�
 3. 当前架构基线、规范文档 hash、Release Unit/`contract_snapshots` object array 是否一致；
 4. Git diff 是否完全落在允许路径；
 5. 新增依赖是否符合 Domain、Quant、Contract、Adapter 和 App 方向；
-6. Cargo 反向依赖与 Release Unit build-impact；
-7. 生产镜像 binary allowlist 与 forbidden package；
-8. Owner、本地事务、表、Outbox/InBox 和跨 Owner Contract 边界；Claim/Renew/Release/Outcome 的方向、current `claim_fence`、expiry、CAS 与 receipt 是否符合 Registry，最终 capability/permit TTL 是否被 claim 截断；
-9. Strategy/Portfolio/Risk/Execution 快照与 Decision Context 边界；Market Velocity Signal 是否由 Strategy owner 产生；
-10. B0 immutable test-only Evidence Provider 是否只消费 hash 输入、且物理不可达 runtime/Paper/Live/scheduler；
-11. 固定 Market 公共 Key 是否只有 Market owner 的只读 access evidence，且无用户 credential fallback；
-12. unit、integration、contract、parity、recovery 和 deploy contract；
-13. legacy allowlist 增减；
-14. cutover、rollback 和生产授权；
-15. Evidence 的 Manifest/Evidence hash、代码 revision/补丁 hash、动态输入和输出工件是否可重放，且动态输入未自引用 `evidence.md`；规范 `verdict.json` 是否由当前 HEAD 的 checker 生成、引用全部 predecessor Verdict，并且不存在 skipped required suite。
-16. C1 live 子 Manifest 是否依赖 Web account binding/claim、Market required/resolved evidence、Account admission/fact/recovery、Risk valuation、Exchange capability、Safety monitoring 的 current-revision Verdict；`C1-execution-recovery` 自身 Verdict 是否包含 CI-only RecoveryHarness required suite 且无 skipped。
+6. capability/API-SPI 可见面、façade 内容、文件预算、Port/生产 Adapter 登记与 Fake-only 中间态是否符合 ADR-0015；
+7. Cargo 反向依赖与 Release Unit build-impact；
+8. 生产镜像 binary allowlist 与 forbidden package；
+9. Owner、本地事务、表、Outbox/InBox 和跨 Owner Contract 边界；Claim/Renew/Release/Outcome 的方向、current `claim_fence`、expiry、CAS 与 receipt 是否符合 Registry，最终 capability/permit TTL 是否被 claim 截断；
+10. Strategy/Portfolio/Risk/Execution 快照与 Decision Context 边界；Market Velocity Signal 是否由 Strategy owner 产生；
+11. B0 immutable test-only Evidence Provider 是否只消费 hash 输入、且物理不可达 runtime/Paper/Live/scheduler；
+12. 固定 Market 公共 Key 是否只有 Market owner 的只读 access evidence，且无用户 credential fallback；
+13. unit、integration、contract、parity、recovery 和 deploy contract；
+14. legacy allowlist 增减；
+15. cutover、rollback 和生产授权；
+16. Evidence 的 Manifest/Evidence hash、代码 revision/补丁 hash、动态输入和输出工件是否可重放，且动态输入未自引用 `evidence.md`；规范 `verdict.json` 是否由当前 HEAD 的 checker 生成、引用全部 predecessor Verdict，并且不存在 skipped required suite。
+17. C1 live 子 Manifest 是否依赖 Web account binding/claim、Market required/resolved evidence、Account admission/fact/recovery、Risk valuation、Exchange capability、Safety monitoring 的 current-revision Verdict；`C1-execution-recovery` 自身 Verdict 是否包含 CI-only RecoveryHarness required suite 且无 skipped。
 
 任一无法判定的架构、依赖或工件结果必须 fail closed。纯历史债务使用 ratchet：保存基线、禁止新增、逐切片减少，不允许一次把全仓永久置红。
 
@@ -462,6 +474,7 @@ CI 变绿、镜像构建成功或 AI 判断安全，都不能替代生产切换�
 - exact parity 所需 Snapshot、Context 或 Evidence identity 不一致；
 - 需要扩大 legacy allowlist 或关闭测试才能继续；
 - 架构基线、ADR 或 Release Unit Manifest 已漂移；
+- 计划使用尚未提交的 ADR/规范作为实现基线，或把 Architecture Governance、Market/Adapter、Strategy 的结构修改塞进同一 Owner Manifest；
 - 需要真实下单、撤单、平仓、生产写入或拓扑切换但没有显式授权；
 - 回滚路径、数据兼容或删除门无法证明。
 

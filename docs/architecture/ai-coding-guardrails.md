@@ -2,10 +2,11 @@
 
 - 状态：已接受
 - 日期：2026-07-23
-- 最近修订：2026-07-28
+- 最近修订：2026-07-29
 - 上位文档：[Rust Quant 长期目标架构](target-architecture.md)
 - 放置规则：[业务代码与数据访问放置规范](business-code-and-data-access.md)
 - 迁移协议：[AI 架构迁移执行协议](ai-migration-execution-protocol.md)
+- 模块与可见面：[ADR-0015](adr/0015-capability-first-modules-and-api-spi-boundaries.md)
 
 ## 1. 目标
 
@@ -31,6 +32,7 @@
 ```text
 业务目标：
 唯一 Owner：
+Capability / 子领域：
 切片：Command / Query / Event Consumer / Pure Policy
 代码形态：Entity / Value Object / Pure Function / Policy / Stateful Transition / Use Case / Port / Adapter
 为何不能使用更简单的纯函数或 module：
@@ -39,7 +41,10 @@
 Use Case：
 Model / Policy：
 Ports：
+Port 完整性：生产 Use Case 调用方 / 生产 Adapter / 失败与恢复证据
 Adapters：
+公开面：`api` 消费者 / `spi` 实现者 / 私有 module
+预计文件预算：生产行数 / 总行数 / façade / tests
 运行模式与替换的 Adapter：
 Backtest/Paper/Live 共用的业务 symbol、四个 Policy Snapshot 与 Decision Context：
 Context 类型：live `ExecutionDecisionContextSnapshot` / Research `ResearchDecisionContextSnapshot`（不得混用）：
@@ -78,6 +83,10 @@ SafetyObligation / SafetyMonitoring 闭合与监测交接：
 - `execution_account_ref` 无法解析为 Web owner 的稳定 `ExecutionAccountBindingV1`，或 lease/shard/fence 仍以可轮换 credential 作为账户身份。
 - 多周期策略没有 `RequiredMarketEvidenceV1`/Bar finality，或准备以短周期新鲜替代必需长周期未闭合证据。
 - 计划在仍有 ManagedExposure、开放订单、Unknown/attempt/permit 或未闭合 Account evidence 时删除 `SafetyObligation`/关闭监测会话。
+- 计划先写 Port/Trait 和 Fake，无法指出同一切片中的生产 Use Case 调用方、生产 Adapter 与恢复证据。
+- 计划让其他 Domain/Research 导入 `spi`，让 Adapter 访问 Domain 私有 capability，或让 App 在 wiring 以外使用 `spi`。
+- 计划建立 Owner 级 `enums.rs`、`types.rs`、`common.rs`、`shared.rs`，或继续向已超过 ADR-0015 Error 预算的目标文件增加业务。
+- 一个 Use Case 需要四个及以上有副作用 Port、两个独立恢复结果，且无法拆出清晰的后续 Command/Consumer/process manager。
 
 ## 4. 默认生成单位：垂直切片
 
@@ -85,15 +94,16 @@ AI 不按“先建所有 model，再建所有 repository，再建所有 service�
 
 ```text
 入口映射
-  -> Use Case
-  -> Model/Policy
-  -> Port
-  -> Adapter
+  -> Owner capability
+  -> API Input/Output
+  -> Use Case + Model/Policy
+  -> SPI Port
+  -> production Adapter
   -> 必要 Contract
   -> Tests
 ```
 
-每个切片必须能独立说明：输入、业务结果、数据库变化、外部副作用、失败状态和恢复方式。
+每个切片必须能独立说明：输入、业务结果、数据库变化、外部副作用、失败状态和恢复方式。只创建实际需要的 capability 目录；不先建空 `model/ports/use_cases` 骨架。Fake-only Port 不是完整切片。
 
 ## 5. 三个 Golden Template
 
@@ -181,6 +191,14 @@ cargo xtask arch-check
 52. `ResearchRunSpec` 未绑定实际 `ResearchExecutionArtifactRef`/EvaluationManifest，Completed Evidence 被误当作 promotion eligibility，或 candidate 重建为 released 后没有 `PromotionReceiptV1`。
 53. RecoveryHarness 被加入可部署 Release Unit/生产镜像，获得生产 Secret/账户/存储，或使用非临时基础设施。
 54. Program Registry 以人工 `depends_on_satisfied` 代替 predecessor Manifest/Evidence/Verdict hash 计算，或 `verdict.json` 可手工编辑、引用旧 revision/跳过 required suite。
+55. 其他 Domain/Research 导入目标 Domain `spi`，Adapter 绕过 `spi` 访问私有 capability，或 App 在 wiring/composition root 以外导入 `spi`。
+56. `api` 重导出 Port/Adapter/Row/SDK，`spi` 暴露私有 Aggregate/Use Case，或 crate 根绕过双门面平铺公开类型。
+57. Domain/Adapter 生产代码、任意 Rust 文件、façade 或测试文件超过 ADR-0015 预算，或通过宽生成文件豁免、`part1.rs`/`helpers.rs` 掩盖。
+58. `lib.rs`、`mod.rs`、`api.rs`、`spi.rs` 承载业务分支、SQL、SDK 映射或大段测试。
+59. 新增 Domain 级 `enums.rs`、`types.rs`、`common.rs`、`shared.rs`，把不同 capability/owner 的状态或不同 Wire/Row/SDK 表示混在一起。
+60. 非测试 Port 没有生产 Use Case 调用方、生产 Adapter、失败/原子性/恢复证据，或 Fake-only Port 被标为 `verified`/下游已满足依赖。
+61. 一个 Use Case 持有四个及以上有副作用 Port、两个可独立恢复的主要结果，或通过万能 `Services`/`EverythingPort` 隐藏依赖。
+62. `exchange-gateway` 以 provider 大文件重新混合 public-market、private-account、fenced-mutation capability。
 
 ## 7. 渐进 Ratchet
 
@@ -195,7 +213,7 @@ cargo xtask arch-check
 5. 违规总数只能下降，不能通过扩大 glob 或忽略目录恢复绿灯；
 6. 最终删除 legacy allowlist。
 
-首次进入目标物理目录前，还必须先完成 target-layout P0：所有 workspace package/path 有机器 role、未知 package fail-closed、`apps/` 与目标源码根进入扫描、baseline 变更受 Manifest 约束，并以注入违规测试证明门禁有效。仅有 legacy ratchet PASS 时，迁移 Manifest 必须保持 `blocked`，不得把它写成“架构已受保护”。
+`rust_quant_alpha` 已建立 target-layout P0：workspace package/path role、未知 package fail-closed、`apps/` 与目标源码根扫描、baseline 约束和基础注入测试均已有实现；受跟踪 CI 仍按迁移阶段延后，因此不能形成 current-revision `pass` Verdict。ADR-0015 的 capability/API-SPI/Port/file-budget 规则属于独立 Architecture Governance P0.1；在其注入测试完成前，不得声称第 55～62 项已自动执行。
 
 小型 legacy bugfix 可以留在原位置，但不得新增跨层依赖、扩大 API 或把新能力继续堆入 legacy。新增业务能力默认进入目标架构。
 
@@ -221,7 +239,13 @@ cargo xtask arch-check
 - Policy 对象是否只持有不可变、带版本的强类型快照；
 - Stateful Evaluator 是否显式传入/返回完整作用域 State；
 - Use Case 对象是否因为需要 Port 和流程编排而存在，而不是万能 Service；
-- Trait 是否有真实边界或多实现证据；
+- Trait 是否有真实生产边界或多实现证据，而不是只为 Fake/Mock 创建；
+- 非测试 Port 是否有生产 Use Case 调用方、生产 Adapter、失败/原子性/恢复证据；
+- 一个 Use Case 是否只有一个主要结果和恢复 Owner；四个及以上副作用 Port 是否已拆分或有明确理由；
+- Domain 是否按 capability 导航，其他 Domain 是否只见 `api`、Adapter 是否只见 `spi`、App 是否仅在 wiring 使用 `spi`；
+- `api`/`spi`/crate root 是否泄漏 Port、私有 Model、Row、SDK 或万能 glob re-export；
+- enum/error 是否与状态机/用例/Port 共置，Wire/Row/SDK 表示是否仍在各自边界；
+- 生产代码、总文件、façade 和测试文件是否满足 ADR-0015 预算；
 - 能破坏不变量的字段是否私有，时间/随机/外部事实是否显式输入；
 - 是否把 `deal_signal` 一类跨 owner 大函数仅移动进 `impl`，而没有拆分 owner。
 
@@ -230,6 +254,7 @@ cargo xtask arch-check
 - SQL 是否只在 Postgres Adapter；
 - Port 是否使用业务语言；
 - 事务是否覆盖状态、幂等和 outbox；
+- Outbox 的业务语义/恢复是否仍由原 Owner Use Case 决定，Publisher/App/Adapter 是否只负责通用投递机制；
 - Execution live 下单事务是否同时覆盖 AccountOpeningSlot、不可变审批引用/父 Intent 与 `ExecutionPlanningValue` hash 唯一绑定、OrderIntent、由该值无损初始化的完整 `ExecutionPlan`/`ProtectionPlan`、`SubmitPending`、幂等和提交 Outbox；
 - 是否只有事务提交后才确认上游或发布提交任务，且交易所 I/O 只由 Fenced Gateway 在 Dispatcher 签发的 current MutationPermit 被原子消费后发起；
 - 查询是否有索引、范围、分页和锁评估；

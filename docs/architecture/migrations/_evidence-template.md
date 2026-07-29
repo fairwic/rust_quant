@@ -54,6 +54,7 @@
 - Manifest 外修改：
 - 受影响 Cargo package：
 - 受影响 Release Unit：
+- Capability / `api` / `spi` 可见面：
 - Contract/表/运行入口：
 - Contract producer/consumer/version/兼容窗口：
 - Claim/Renew/Release/Outcome command 与 receipt 方向、current `claim_fence`、expiry/CAS 字段：
@@ -93,7 +94,9 @@
 - 保持的业务不变量：
 - 允许差异：
 - 实际差异：
-- Owner/Port/Adapter 变化：
+- Owner/capability/API-SPI/Port/Adapter 变化：
+- 非测试 Port 的生产 Use Case 调用方、生产 Adapter、失败/原子性/恢复证据：
+- 文件预算：生产代码行 / 总行数 / façade / tests；超限文件的 structure-only 处置：
 - Contract/Schema 变化：
 - 本 Owner 事务、Inbox/Outbox 与恢复变化：
 - 跨 Owner Contract/版本交接：
@@ -113,6 +116,7 @@
 | Build impact | 待填写 | 未验证 | |
 | Deploy contract | 待填写 | 未验证 | |
 | `git diff --check` | 待填写 | 未验证 | |
+| API/SPI + Port completeness + file budget | 待填写 | 未验证 | |
 
 ## 6. Parity
 

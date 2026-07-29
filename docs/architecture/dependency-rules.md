@@ -36,27 +36,28 @@
 
 ```text
 apps
-  ├──> domains::use_cases / domains::api
+  ├──> domains::api（Handler/Consumer/Scheduler 的业务调用）
+  ├──> domains::spi（仅 wiring/composition root）
   ├──> contracts（只在进程边界映射）
   ├──> adapters（装配实现）
   └──> platform（配置、生命周期、观测）
 
 adapters
-  ├──> domains::ports / domains::model
+  ├──> 所实现 Domain 的 spi
   ├──> contracts（仅协议适配需要）
   └──> platform 的薄技术能力
 
-production domains::use_cases
-  ├──> 本 Domain model / policies / ports
+production domains::<capability>::commands/queries/consumers
+  ├──> 本 capability model / policies / ports
   ├──> 上游 Domain api
   └──> quant::math / indicators 的稳定纯计算 API
 
-domains::research::use_cases
-  ├──> Research model / policies / ports
+domains::research::<capability>::commands/queries
+  ├──> Research capability model / policies / ports
   ├──> Market historical API（唯一历史行情入口）+ Strategy / Portfolio / Risk / Execution 的稳定 API
   └──> quant::backtest / analytics / math 的纯 API
 
-domains::model / policies
+domains::<capability>::model / policies
   └──> platform::kernel 或 quant::math / indicators 的批准 API
 
 quant::math / indicators / backtest / analytics
@@ -66,7 +67,7 @@ contracts
   └──> 序列化依赖与极小 wire primitives
 ```
 
-关键约束：Domain 内部不得依赖 `contracts`。Wire DTO 必须在 App 或入站 Adapter 映射为用例 Input；用例 Output 再在边界映射为 Contract。这样 HTTP/消息版本不会渗入业务模型。
+关键约束：Domain 内部不得依赖 `contracts`。Wire DTO 必须在 App 或入站 Adapter 映射为用例 Input；用例 Output 再在边界映射为 Contract。这样 HTTP/消息版本不会渗入业务模型。`api` 是业务消费门面，`spi` 是 Adapter/组合根门面；二者不是新的业务层，也不能互相复制类型。
 
 没有列出的依赖默认禁止。App 可以装配多个 Domain，但不能因此访问其私有 module 或数据库表。
 
@@ -75,7 +76,8 @@ contracts
 - `quant/*` 禁止依赖任何业务 Domain、Adapter、数据库 Row、环境变量或真实交易所；
 - 生产 Domain 只依赖需要的 `quant/math`、`quant/indicators`，禁止依赖 Research；
 - Research 是终端离线 Domain，可以调用生产 Domain 的稳定 API 和 Quant Kernel；历史行情只能经 Market historical API/Contract 读取，禁止访问私有 module、Repository Port、Market Storage、生产 Adapter、backfill 命令或 `MarketDataAccessCredential`；
-- `quant-lab` 只装配 Research use case 与 Adapter，不直接实现逐事件交易编排。
+- `quant-lab` 只装配 Research use case 与 Adapter，不直接实现逐事件交易编排；
+- 其他 Domain、Research 与业务调用方不得导入目标 Domain 的 `spi`；Adapter 不得绕过 `spi` 导入该 Domain 的私有 capability module；App 对 `spi` 的导入只允许出现在 composition root/wiring。
 
 ## 4. Domain 依赖顺序
 
@@ -146,16 +148,23 @@ Use case 负责编排一个完整业务动作。禁止：
 - 直接写 SQL 或处理数据库 Row；
 - 读取环境变量决定业务行为；
 - 把 Wire Contract 当作内部模型贯穿；
-- 绕过 owner use case 修改其他 Domain 状态。
+- 绕过 owner use case 修改其他 Domain 状态；
+- 同时拥有两个可独立重试、补偿或审计的主要业务结果；
+- 用 `EverythingPort`、`Services` 或万能 Context 隐藏依赖数量。
 
 Use case 可以定义事务必须原子完成哪些业务结果，但不能接收或传递 `sqlx::Transaction`。
+
+一个公开 Use Case 只表达一个业务动词、一个主要结果和一个恢复 Owner。第二次事务提交、等待外部 receipt 或跨 Owner 状态机应由后续 Use Case/Consumer 或同 Owner durable process manager 承接。注入四个及以上有副作用 Port 时必须重新审查边界；读取类 Port 较多但仍服务同一原子结果时，必须在 Review 中解释。
 
 ### 5.4 Ports
 
 - Port 由使用能力的 Domain 定义，不由 Adapter 反向定义；
 - 方法使用业务语言，例如 `stage_order_submission_with_outbox`，禁止泛型 `Repository<T>`、`update_by_id`、`save_json`；
 - Port 不暴露 SQL、表名、数据库事务类型、HTTP status 或 SDK 类型；
-- 写 Port 与 Query Port 分开，避免一张万能 Repository 接口无限膨胀。
+- 写 Port 与 Query Port 分开，避免一张万能 Repository 接口无限膨胀；
+- 非测试 Port 进入 `verified` 前必须有生产 Use Case 调用方、至少一个生产 Adapter，以及失败、原子性/幂等与恢复证据；
+- Fake/Mock 不是生产 Adapter。Fake-only Port 只允许在活跃 `implementing` Manifest 中短暂存在，并必须记录承接 Manifest/删除条件；它不能产生 `pass` Verdict 或被下游当作已完成依赖；
+- 纯 Policy、单一算法或“以后可能替换”的实现不创建 Port/Trait，测试替身本身不是抽象理由。
 
 ### 5.5 Adapters
 
@@ -164,14 +173,16 @@ Use case 可以定义事务必须原子完成哪些业务结果，但不能接�
 - 不承载策略判断、资本分配、风险政策或订单状态机；
 - 禁止跨 owner 直接读写其他模块表；
 - 不得静默丢弃交易所不支持的字段；
-- 重试、超时和错误映射不得改变业务 identity。
+- 重试、超时和错误映射不得改变业务 identity；
+- 先按 capability/safety boundary，再按 provider 拆 module。`exchange-gateway` 固定为 `public_market/<exchange>`、`private_account/<exchange>`、`fenced_mutation/<exchange>`，不得重新堆成 provider 级大文件。
 
 ### 5.6 Apps
 
 - 只负责配置、Contract 映射、装配、循环、健康检查和关闭；
 - Handler/CLI/Consumer 只做输入校验、鉴权上下文提取、DTO 映射和 use case 调用；
 - 禁止在 `main.rs`、bootstrap、scheduler callback 或 consumer loop 中实现业务规则；
-- 一个 App 只初始化本职责需要的连接、Secret 和 Adapter。
+- 一个 App 只初始化本职责需要的连接、Secret 和 Adapter；
+- 只有 wiring/composition root 可以导入 Domain `spi`；运行 loop 只能持有并调用 Domain `api` 暴露的稳定能力。
 
 ### 5.7 Contracts、Platform 与 Testkit
 
@@ -212,9 +223,28 @@ Use case 可以定义事务必须原子完成哪些业务结果，但不能接�
 - 跨市场事件维护滚动状态时，使用带完整 scope identity 的显式 State，并让 backtest/live 调用同一纯 transition；
 - Use Case 可以是持有 Port 的对象；没有状态和依赖时，不得仅为了 `XxxService::method()` 语法创建零字段 Service；
 - Adapter 可以持有连接池、Client、限流器和协议配置，但不得因此接管业务不变量；
-- Trait 只用于真实多实现、消费方 Port、稳定 Domain API 或测试替身，不建立继承式 `BaseService`、万能 `Manager` 或每类型一个空 Trait。
+- Trait 只用于真实生产多实现、消费方 I/O Port 或稳定可替换边界；测试替身本身不是创建 Trait 的理由。不建立继承式 `BaseService`、万能 `Manager` 或每类型一个空 Trait。
 
 Aggregate 中能够破坏不变量的字段不得向任意调用方公开可变访问；时间、随机值和外部事实必须作为参数或 Port 输入。把一个跨 owner 大函数移动到 `impl TradingState`、`TradingEngineService` 或其他对象中，不会改变其违规性质。
+
+### 5.10 Capability、API/SPI 与类型共置
+
+- Domain 一级内部目录按业务 capability/子领域组织，capability 内再按需要建立 `model`、`policies`、`commands`、`queries`、`consumers`、`ports`；
+- `lib.rs` 只公开 `api` 与 `spi`。`api` 不重导出 Port，`spi` 不重导出私有 Use Case/Aggregate；接收 Port 的构造入口属于 `spi`；
+- `lib.rs`、`mod.rs`、`api.rs`、`spi.rs` 只包含文档、module 声明、稳定 re-export 和极薄装配类型，不承载业务分支、SQL、SDK 映射或大段测试；
+- 禁止 Domain 级 `enums.rs`、`types.rs`、`common.rs`、`shared.rs`。业务 enum/error 与 Aggregate、Use Case 或 Port 共置；Wire/Row/SDK 表示分别留在 Contract/Postgres Adapter/`crypto_exc_all`；
+- 只为真实代码创建目录，不创建空 capability、空 Port、空 App 或“未来扩展”骨架。
+
+目标仓库新增或触碰文件的静态预算：
+
+| 范围 | Warning | Error |
+| --- | ---: | ---: |
+| Domain/Adapter `src` 生产代码行 | `> 400` | `> 600` |
+| 任意 Rust 文件总行数 | 无 | `> 1000` |
+| `lib.rs`、`mod.rs`、`api.rs`、`spi.rs` 总行数 | `> 100` | `> 150` |
+| 独立测试文件或 `tests.rs` | `> 250` | `> 500` |
+
+精确生成文件豁免必须登记在 role map，禁止宽 glob。触碰 Error 级超限文件时，先用独立 `structure_only` Manifest 按 capability 拆分并做 characterization；不能用 `part1.rs`、`helpers.rs` 或搬走测试掩盖大文件。完整理由见 [ADR-0015](adr/0015-capability-first-modules-and-api-spi-boundaries.md)。
 
 ## 6. Owner 规则
 
@@ -405,6 +435,7 @@ CI/CD 通过 Git diff、owning package、`cargo metadata` 反向传递依赖和 
 | 门禁类别 | 必须由谁执行 |
 |---|---|
 | 目录、依赖方向、禁止 API、role map、未知 package、静态 Contract/Manifest 与测试注册 | `cargo xtask arch-check` |
+| API/SPI 可见面、文件预算、门面文件形态、Port/Adapter 实现登记 | `arch-check` 注入测试 + `migration-check`/调用点证据 |
 | owner 单事务、唯一约束、`ExecutionPlanningValue` 到 live aggregate 的无损初始化、RiskAction 去重 | Postgres/Adapter 集成测试 |
 | 外部 owner binding、Envelope、N/N-1、`ActivationEligibilityV1` | Contract/compatibility test |
 | Strategy/Portfolio/Risk/Planning value parity、ResearchBar 安全顺序与模拟 KillSwitch | 确定性 parity/safety harness |
@@ -456,10 +487,22 @@ CI/CD 通过 Git diff、owning package、`cargo metadata` 反向传递依赖和 
 41. `SafetyObligation` 是否在仍有 ManagedExposure、开放订单、Unknown/attempt/permit 或未闭合 Account evidence 时结束，或 SafetyMonitoring remove 未经 current fence ack 就关闭会话。
 42. `ObservedExternalPosition` 是否既禁止自动 mutation 又未计入保证金/净敞口/风险预算，形成可继续新增风险的未管理盲区。
 43. live 交易所/产品是否缺少版本化 `ExchangeExecutionCapabilityProfileV1` 或 `RiskValuationSnapshotV1`，却仍以通用 SDK 支持为由放行。
+44. 其他 Domain/Research 是否导入目标 Domain `spi`，Adapter 是否绕过 `spi` 访问私有 capability，或 App 在 wiring 以外导入 `spi`。
+45. `api` 是否重导出 Port/Adapter/SDK/Row，`spi` 是否暴露私有 Aggregate/Use Case，crate 根是否绕过 `api`/`spi` 平铺公开类型。
+46. Domain/Adapter 生产代码、任意 Rust 文件、门面文件和测试文件是否超过 ADR-0015 的 400/600、1000、100/150、250/500 预算。
+47. `lib.rs`、`mod.rs`、`api.rs`、`spi.rs` 是否承载业务分支、SQL、SDK 映射或大段测试；是否出现无业务边界的 `part1.rs`/`helpers.rs` 拆分。
+48. 是否新增 Domain 级 `enums.rs`、`types.rs`、`common.rs`、`shared.rs`，把不同 owner/capability 的状态、Wire、Row 或 SDK 表示混在一起。
+49. 非测试 Port 是否缺少真实生产 Use Case 调用方、生产 Adapter 和失败/原子性/恢复证据；Fake-only Port 是否被当作 `verified` 或下游已完成依赖。
+50. Use Case 是否持有四个及以上有副作用 Port、两个可独立恢复的主要结果，或通过万能组合 Port/Context 隐藏依赖。
+51. `exchange-gateway` 是否重新按 provider 汇总公共行情、用户私有读取与 mutation，绕过 `public_market`/`private_account`/`fenced_mutation` capability boundary。
 
 迁移期采用 ratchet：保存当前 legacy 违规基线，CI 只允许违规数下降，禁止新增。不得在门禁尚未实现时把本文写成“已经自动执行”。首次代码进入目标物理目录前，必须先完成 target-layout P0：role map、未知 package fail-closed、`apps/`/目标源码根扫描、baseline 完整性和注入违规证据；legacy ratchet PASS 不能替代它。
 
-门禁落地状态（2026-07-28）：`cargo xtask arch-check` 已对 legacy package/path 实现跨库直连、依赖方向、legacy signed read-only、文件行数、SDK DTO、热路径 panic 和 runtime DDL 的静态 ratchet；其 package layer 与若干扫描目录仍硬编码 legacy 名称/路径，未知 package 被跳过，`apps/` 未纳入文件大小扫描，baseline SHA 漂移只提示。因此第 28/29 项和目标目录覆盖仍是 P0，其他需要 AST/语义分析或运行时证据的项也仍为 TODO。精确边界、当前运行证据和实施路线见 [baseline-2026-07/README.md](migrations/baseline-2026-07/README.md) 与 [xtask-roadmap.md](migrations/baseline-2026-07/xtask-roadmap.md)，未实现的项不得声称已自动执行。
+门禁落地状态（2026-07-29）：
+
+- `rust_quant` 的 legacy `arch-check` 仍只对旧 package/path 做 ratchet，存在硬编码 legacy 名称/路径等局限；精确边界见 [baseline-2026-07/README.md](migrations/baseline-2026-07/README.md) 与 [xtask-roadmap.md](migrations/baseline-2026-07/xtask-roadmap.md)；
+- `rust_quant_alpha` 已有 target-layout P0，覆盖 role map、未知 package fail-closed、`apps/`/目标源码根与注入测试，但受跟踪 CI 按迁移阶段延后，不能产生 current-revision `pass` Verdict；
+- ADR-0015 新增的 capability-first、API/SPI、Port 完整性和提前文件预算属于后续 Architecture Governance P0.1，当前尚未实现。F3A 前必须以独立治理 Manifest 落地，再由 Market 的 `structure_only` Manifest 拆分现有目标代码；文档不得提前宣称这些新门禁已生效。
 
 ## 14. 例外流程
 

@@ -278,7 +278,7 @@ flowchart TB
 ### 4.2 目标物理目录
 
 ```text
-rust_quant/
+rust_quant_alpha/
 ├── apps/
 │   ├── control-api/                 # Core 控制面与 internal API
 │   ├── market-worker/               # 参考数据(fail-closed)与实时行情流(可降级),质量和快照
@@ -407,29 +407,49 @@ Experiment、BacktestRun、Checkpoint、DatasetManifest、SimulationProfile 和 
 
 ## 6. Domain 内部标准结构
 
-每个 Domain 默认使用同一种导航结构：
+每个 Domain 先按真实业务 capability/子领域组织，再在 capability 内按需要使用 Model、Policy、Command、Query、Consumer 与 Port。禁止先建立一个横跨整个 Owner 的大 `model/`、`use_cases/`、`ports/`，再让所有能力向其中堆积：
 
 ```text
 crates/domains/execution/src/
-├── model/                           # 实体、值对象、状态机和不变量
-├── policies/                        # 纯决策规则，不执行 I/O
-├── use_cases/
-│   ├── commands/                    # 改变状态的业务动作
-│   ├── queries/                     # 只读业务查询
-│   └── consumers/                   # 消费事件后调用 command/query
-├── ports/                           # 本 Domain 需要的外部能力 Trait
-├── api/                             # 允许其他 Domain 使用的稳定进程内 API
-└── lib.rs                           # 只重导出 api 与必要稳定类型
+├── api.rs | api/                    # 业务消费方稳定门面
+├── spi.rs | spi/                    # Adapter 与组合根实现门面
+├── planning/
+│   ├── model/
+│   ├── policies/
+│   └── queries/
+├── order_lifecycle/
+│   ├── model/
+│   ├── commands/
+│   ├── consumers/
+│   └── ports/
+├── mutation/
+├── protection/
+├── safety_obligation/
+└── lib.rs                           # 只公开 api 与 spi
 ```
 
-放置判断：
+只为已经存在的能力创建目录；一个能力只有一个模型或查询时可以保留为单文件。放置判断：
 
-- “任何情况下都必须成立”放 `model`；
-- “基于输入作出可替换的纯决策”放 `policies`；
-- “按顺序读取、判断、写入、发事件”放 `use_cases`；
-- “需要数据库、交易所、HTTP、时钟或消息能力”先在 `ports` 表达；
+- “任何情况下都必须成立”放该 capability 的 `model`；
+- “基于输入作出可替换的纯决策”放该 capability 的 `policies`；
+- “按顺序读取、判断、写入、发事件”放该 capability 的 `commands`、`queries` 或 `consumers`；
+- “需要数据库、交易所、HTTP、时钟或消息能力”由真实 Use Case 在同一 capability 的 `ports` 表达；
 - SQLx、Reqwest、Redis 和 SDK 实现放 `adapters`；
 - HTTP/消息 DTO 到用例 Input 的映射放 App 或入站 Adapter。
+
+公共可见面固定为：
+
+- 其他 Domain、Research 与普通业务调用方只使用 `<domain>::api`；
+- Adapter 只使用所实现 Domain 的 `<domain>::spi`；
+- App 仅在 `wiring`/composition root 使用 `spi`，Handler、Consumer 与 Scheduler loop 只调用 `api`；
+- `api` 不重导出 Port，`spi` 不暴露私有 Aggregate/Use Case 实现，crate 根不再平铺重导出全部类型；
+- `api.rs`、`spi.rs`、`lib.rs` 与 `mod.rs` 只负责文档、module 声明和经过审查的稳定重导出，不承载业务分支、SQL 或 SDK 映射。
+
+Port 不能先于业务长期空置。进入 `verified` 前，非测试 Port 必须同时存在真实生产 Use Case 调用方、至少一个生产 Adapter，以及失败、幂等/原子性和恢复 Owner 证据；只有 Fake/Mock 的 Port 只能停在带承接项的 `implementing` Manifest，不能作为已完成能力。一个公开 Use Case 只表达一个业务动词、一个主要结果和一个恢复 Owner；注入四个及以上有副作用 Port 时必须重新审查边界，禁止用 `EverythingPort` 隐藏依赖。
+
+业务 enum/error 与其状态机或边界共置：Aggregate 状态放 capability model，用例选择放 Input 附近，Port 失败放 Port 附近，Wire/Row/SDK enum 分别留在 Contract/Postgres Adapter/`crypto_exc_all`。禁止 Domain 级 `enums.rs`、`types.rs`、`common.rs` 收纳不相关定义。
+
+目标文件执行 ADR-0015 的生产代码、总文件、façade 与测试预算。触碰 Error 级超限目标文件时，必须先以纯结构 Manifest 按 capability 拆分，不能继续增加业务。
 
 详细 CRUD、事务和代码示例见[业务代码与数据访问放置规范](business-code-and-data-access.md)。
 
@@ -446,17 +466,17 @@ Rust 不采用“所有业务逻辑都包装成 Service 对象”的 Java 式分
 | 跨事件维护滚动或生命周期状态 | 显式状态对象或纯 transition | 状态 identity 完整；backtest/live 调用同一 transition |
 | 编排读取、判断、持久化和事件 | Use Case 对象 | 只持有所需 Port；不承载数据库/SDK 实现 |
 | 数据库、HTTP、Redis、交易所技术状态 | Adapter 对象 | 实现消费方定义的 Port，不作业务决策 |
-| 存在真实多实现、进程内稳定 API 或测试替身 | Trait | 不为单一实现或“以后可能扩展”创建基类式 Trait |
+| 存在真实生产多实现、消费方 I/O Port 或稳定可替换边界 | Trait | 测试替身本身不是创建 Trait 的理由；不为单一实现或“以后可能扩展”创建基类式 Trait |
 
 `impl` 只在“数据与行为必须一起保护语义”或“对象需要持有依赖/配置”时使用。仅为了 `Type::function()` 语法创建的零状态结构体应改为 module + function；一个函数同时修改 Strategy、Portfolio、Risk、Execution、Research 多个 owner 状态时，也不能通过移动进某个 `impl` 伪装成 Aggregate。
 
-一个 Domain 内部允许再按子领域切 module,以承载 SLA/职责显著不同的子部分,而不必立刻拆成独立 crate:
+一个 Domain 内部按子领域/capability 切 module，以承载独立变化原因与 SLA，而不必立刻拆成独立 crate：
 
 - `domains/market` 内部分 `reference/`(参考数据,fail-closed)与 `stream/`(实时行情流,可降级),两者各自的 model/policies/ports,共享 domain 的 `api`;
 - `domains/account` 内部含 `exchange_session`(会话 readiness 语义)子领域,与账户投影正交;
 - `domains/strategy` 内部含 signal handoff/提交子领域(handoff 消费、向 Web 提交 `StrategySignal`、处理幂等 receipt),与信号评估纯逻辑分开 module,不混在同一处；订阅匹配和 `ExecutionRequest` 扇出仍是 Web 内部业务。
 
-子领域 module 只是 domain 内部组织,不改变"对外只暴露 domain `api`、跨 domain 不碰对方私有 module"的约束(§7.1);出现独立编译、重依赖或独立发布证据时,才升级为独立 crate。
+子领域 module 只是 domain 内部组织，不改变“业务调用只经 `api`、Adapter 实现只经 `spi`、跨 domain 不碰对方私有 module”的约束（§7.1）；出现独立编译、重依赖或独立发布证据时，才升级为独立 crate。完整决策见 [ADR-0015](adr/0015-capability-first-modules-and-api-spi-boundaries.md)。
 
 详细判定、代码示例和禁止模式见[业务代码与数据访问放置规范](business-code-and-data-access.md)。
 
@@ -866,7 +886,9 @@ Clock / Seed
 - 禁止在 Strategy evaluator、Portfolio/Risk/Execution planning 等决策纯逻辑里读取系统当前时间(`SystemTime::now`/`Utc::now`/`Instant::now`)或随机源;`DecisionTime` 必须来自注入 Clock,`WallClock` 只允许出现在运行时时效路径(lease/permit/心跳/stale/调度),不进决策与 parity(§10);
 - 禁止 Domain 层出现 `serde_json::Value` 业务字段/端口签名,禁止业务 crate `use` 交易所 SDK DTO(`okx::*`)或 sqlx Row 类型,类型映射只在 Adapter 边界(§10.1);
 - 交易/执行/风控热路径禁止 `.unwrap()`/`.expect()`/`panic!` 与金额相关的 `unwrap_or_default()`/`.ok()` 压平(§10.2);金额类型在 Domain 层用 Decimal 定义,禁止 f64 定义金额字段(§10);
-- 默认收敛可见性:Domain/业务 crate 对外只经 `api`/`lib.rs` 重导出稳定类型,内部 module 用 `pub(crate)` 或私有,禁止 `pub mod` 全敞开 + 大面积 `pub use` glob re-export 制造隐式耦合;
+- 默认收敛可见性：Domain/业务 crate 根只公开 `api` 与 `spi`；其他 Domain/Research 只依赖 `api`，Adapter 与 App 组合根只为实现/装配依赖 `spi`。内部 capability module 使用 `pub(crate)` 或私有，禁止 `pub mod` 全敞开、大面积 glob re-export 或从 `api` 泄漏 Port；
+- 目标 Domain/Adapter 文件执行 ADR-0015 的提前预算；触碰 Error 级超限文件先做纯结构拆分；
+- 非测试 Port 进入 `verified` 前必须有真实生产 Use Case 调用方、至少一个生产 Adapter，以及失败/原子性/恢复证据；Fake-only Port、四个以上副作用 Port 的万能 Use Case 和全局 `enums.rs/types.rs/common.rs` 必须被门禁或 Review 阻塞；
 - 测试必须确定性且带断言:禁止把参数扫描/研究脚本塞进 `#[test]` 再 `#[ignore]` 沉淀,禁止只 `println!` 无断言的"假测试";依赖真实交易所/网络/生产 DB 的测试归 integration 且不作为默认 CI 门禁;
 - 决策开关必须是带规范 hash 的显式配置输入,禁止在热路径读 `std::env::var`(见 §10 与坏味道防线);交易标的范围、风控阈值等业务规则走配置,不硬编码进逻辑常量;
 - 表结构只由 `migrations/` 定义(禁运行时 DDL 与旁路整库脚本并存),迁移 append-only、可空库重放、新表新列带 COMMENT,一表一 `FromRow` 归属;禁 `SELECT *` 与拼接列值 SQL(§10.3);
@@ -904,6 +926,7 @@ Clock / Seed
 - 单账户 opening slot 经 integration/recovery test 证明：第二个独立新增风险只能得到 `Deferred`/`Blocked`，不影响 reduce-only safety tail；只有新的 Risk Reservation ADR 与对应 Evidence 才可改变该产品/SLO 基线；
 - 控制面不可用不会产生无版本交易；
 - CI 能拒绝新增非法依赖、跨 owner SQL、未版本化 Contract 和 testkit 生产依赖；
+- CI 能拒绝其他 Domain 导入 `spi`、Adapter 绕过 `spi` 访问私有 module、`api` 重导出 Port、目标文件预算超限和未登记的 Fake-only Port；
 - `core-runtime`、`core-maintenance`、`quant-lab` 有独立 Release Unit Manifest；生产镜像只包含六个生产 App binary，Research-only 变更不能获得生产部署资格；
 - golden vertical slice 经 shadow/parity/recovery 验证后再迁移下一切片；
 - Vegas 在相同 `ResearchRunSpec`、`ResearchDecisionContextSnapshot`、动态 Evidence 与 EvaluationState before 下可逐层确定重放；
@@ -913,7 +936,8 @@ Clock / Seed
 - Strategy evaluator 不接收账户风险配置，`position_leverage` 等历史混合字段完成语义拆分。
 - backtest、paper、shadow、canary、live 的策略 entry/exit、组合、风险/final-stop 和纯 `ExecutionPlanningValue`（含 child OrderPlan）指向同一业务实现；live `ExecutionPlan` aggregate 只验证由该值无损初始化及恢复，Research 不创建 OMS aggregate；exact parity 必须同时证明四个 Policy Snapshot、Context 与动态 Evidence identity 一致；
 - 新增仅 Research 使用的实验编排或模拟机制不会进入生产 App 依赖图；共享 Domain 规则变化仍会触发生产构建和 parity 门禁；
-- 新增代码能够按身份、状态、不变量、纯度和 I/O 唯一选择 Entity/Value Object、纯函数、Policy、Use Case、Port 或 Adapter，不新增零状态万能 Service/Calculator。
+- 新增代码能够按身份、状态、不变量、纯度和 I/O 唯一选择 Entity/Value Object、纯函数、Policy、Use Case、Port 或 Adapter，不新增零状态万能 Service/Calculator；
+- Domain/Adapter 能按 capability 局部理解，业务调用只经 `api`、实现装配只经 `spi`；一个公开 Use Case 只有一个主要业务结果和恢复 Owner，enum/error/Row/Wire/SDK 表示各自留在正确边界。
 
 ## 14. 相关决策
 
@@ -929,3 +953,6 @@ Clock / Seed
 - [ADR-0010：基于依赖图的构建影响与生产工件隔离](adr/0010-build-impact-and-artifact-isolation.md)
 - [ADR-0011：分层运行快照与完整决策上下文](adr/0011-layered-runtime-snapshots-and-decision-context.md)
 - [ADR-0012：多租户私有流连接管理与容量分阶段](adr/0012-multi-tenant-private-stream-management.md)
+- [ADR-0013：用户执行请求与公共市场数据凭证边界](adr/0013-user-execution-request-and-public-market-data-credentials.md)
+- [ADR-0014：采用 rust_quant_alpha 作为 Core 目标实现仓库](adr/0014-greenfield-target-repository-migration.md)
+- [ADR-0015：Capability-first 模块、API/SPI 双门面与 Port 完整性](adr/0015-capability-first-modules-and-api-spi-boundaries.md)

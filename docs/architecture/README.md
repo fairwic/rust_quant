@@ -4,7 +4,7 @@
 
 目标架构采用“模块化单体 + 五类物理目录 + Ports/Adapters + 控制面/数据面 + 可恢复交易闭环”。离线研究由独立 Research Domain 负责，`quant/backtest` 只提供确定性回放内核，并按 ResearchBar、PaperEvent、RecoveryHarness 三种保真度分别验证策略表现、订单事件和故障恢复。长期目标和现有实现迁移已经分开：目标文档不接受历史目录污染，兼容窗口只记录在迁移计划中。
 
-发生冲突时，以已接受 ADR 为决策依据，以目标架构为总纲，以依赖规则和数据访问规范为具体落地规则。当前实现与目标不一致时，必须标记为 legacy，不得反向修改目标文档来迁就现状。
+发生冲突时，以已接受 ADR 为决策依据，以目标架构为总纲，以依赖规则和数据访问规范为具体落地规则。当前实现与目标不一致时，必须标记为 legacy，不得反向修改目标文档来迁就现状。Domain/Adapter 的内部拆分、API/SPI 可见面、Port 完整性与目标文件预算以 [ADR-0015](adr/0015-capability-first-modules-and-api-spi-boundaries.md) 为准。
 
 订单、撤单和保护单外部 mutation 的持久化与提交顺序，以 [ADR-0006](adr/0006-at-least-once-idempotency-and-recovery.md) 为唯一权威；owner-scoped 数据库事务的实现边界以 [ADR-0007](adr/0007-owner-scoped-persistence-and-transaction-boundaries.md) 为准。其他文档只解释各自视角，不得另立一套顺序。
 
@@ -46,13 +46,14 @@ Research 与 live 的同名术语不得混用：ResearchBar 以 `ResearchDecisio
 | [ADR-0012](adr/0012-multi-tenant-private-stream-management.md) | 已接受 | 用账户私有流、分片/lease 与配额协同定义 ExchangeSession 的容量和故障边界 |
 | [ADR-0013](adr/0013-user-execution-request-and-public-market-data-credentials.md) | 已接受 | Web 是唯一执行请求 creator；平台固定 API Key 仅用于 Market 公共只读数据 |
 | [ADR-0014](adr/0014-greenfield-target-repository-migration.md) | 已接受 | `rust_quant` 保留 legacy/治理基线，Core 目标实现和当前迁移工件统一进入 `rust_quant_alpha` |
+| [ADR-0015](adr/0015-capability-first-modules-and-api-spi-boundaries.md) | 已接受 | Domain 内 capability-first、API/SPI 双门面、Port 完整性、Outbox 责任与提前文件预算 |
 
 ## 阅读顺序
 
 1. 先阅读[长期目标架构](target-architecture.md)与 [ADR-0013](adr/0013-user-execution-request-and-public-market-data-credentials.md)，确认业务 owner、唯一的用户执行请求路径，以及平台公共数据凭证边界。
 2. 涉及 Worker、订单、成交或故障处理时，阅读[生产运行与恢复](production-runtime.md)。
-3. 新增 crate、App 或跨域依赖前，先按 [ADR-0010](adr/0010-build-impact-and-artifact-isolation.md)判断 Release Unit，再检查[依赖与代码归属规则](dependency-rules.md)。
-4. 新增业务逻辑、决定使用对象还是函数、编写 CRUD/事务/SQL/Consumer 前，检查[业务代码与数据访问放置规范](business-code-and-data-access.md)。
+3. 新增 crate、App、跨域依赖或 Domain/Adapter 子目录前，先按 [ADR-0010](adr/0010-build-impact-and-artifact-isolation.md)判断 Release Unit，再按 [ADR-0015](adr/0015-capability-first-modules-and-api-spi-boundaries.md)确定 capability 与 API/SPI 可见面，最后检查[依赖与代码归属规则](dependency-rules.md)。
+4. 新增业务逻辑、Port、Use Case，决定使用对象还是函数，或编写 CRUD/事务/SQL/Consumer 前，检查[业务代码与数据访问放置规范](business-code-and-data-access.md)。
 5. 使用 AI 修改架构相关代码前，执行[AI 编码与架构防腐护栏](ai-coding-guardrails.md)中的放置声明。
 6. AI 迁移 legacy、crate、事实源或运行入口时，先按 [ADR-0014](adr/0014-greenfield-target-repository-migration.md)确认源仓库与目标仓库，再按 [Migration Program 注册表](migrations/programs/README.md)登记跨仓库依赖，按 [AI 架构迁移执行协议](ai-migration-execution-protocol.md)创建单 Owner Manifest，最后按[架构迁移计划](migration-plan.md)执行。
 7. 修改 Vegas、回测或实盘配置时，先按 [ADR-0011](adr/0011-layered-runtime-snapshots-and-decision-context.md)固定完整决策上下文，再按 [ADR-0009](adr/0009-research-domain-and-tiered-simulation.md)确认 Research、Quant 和三种模拟边界，最后按 [Vegas 与现有回测主链迁移实战](vegas-backtest-migration.md)执行逐层 parity。

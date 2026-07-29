@@ -88,16 +88,17 @@
 - 建立最小 command/query/event-consumer 三个模板；
 - 建立 `cargo xtask arch-check` 的只读报告；
 - 在任何代码首次迁入 `apps/` 或 `crates/{domains,quant,contracts,adapters,platform}` 前，先补齐 target-layout P0 门禁：机器可读 package/path role map、未知 workspace package fail-closed、`apps/` 与全部目标源码根扫描、target Domain/Quant/Adapter 路径规则、以及 baseline/allowlist 变更必须关联独立 Manifest 的完整性校验；
+- P0 之后、继续扩展已落地 Domain/Adapter 之前，执行独立 P0.1 模块硬化：按 [ADR-0015](adr/0015-capability-first-modules-and-api-spi-boundaries.md)增加 capability/API-SPI、façade、文件预算、Port 完整性和 Gateway capability 注入式门禁。Architecture Governance 只修改 `xtask`/role map/违规登记，不能同时重排 Market 或 Strategy 业务代码；
 - 建立 Migration Manifest 模板、人工 Evidence 和 `cargo xtask migration-check --manifest <path>` 的 schema/基线/diff-scope 只读报告；
 - 建立 `release-units/{core-runtime,core-maintenance,quant-lab}.toml`，先记录 root package、binary allowlist、forbidden package、生产部署资格和测试集；
-- 将六个生产组合根拆为独立 Cargo package，但先继续打入同一个 `core-runtime` 镜像；schema-tool 与 quant-lab 分别使用独立工件；
+- 在 Release Unit Manifest 中登记六个生产组合根的目标 identity；每个 App 只有在首个真实 Use Case + Adapter + runtime loop 一起到达时才创建独立 Cargo package，禁止阶段 1 先生成空 App。形成后仍可打入同一个 `core-runtime` 镜像；schema-tool 与 quant-lab 分别使用独立工件；
 - 保存 legacy allowlist，CI 先禁止新增违规；
 - 对新增零字段 Service/Manager/Calculator、Aggregate 公开可变不变量、Model/Policy 隐式时间/环境变量/全局业务缓存建立 ratchet；
 - 建立由 Git diff、Cargo 反向传递依赖和 Release Unit Manifest 推导的 build-impact 报告：Research-only 改动不构建或部署 `core-runtime`，共享 Domain 改动不得漏掉生产构建和 parity，无法判断时 fail closed；
 - 增加生产镜像内容检查：实际 binary 与 `core-runtime` allowlist 完全一致，禁止 Research/Backtest/Paper/candidate/schema-tool；
 - 只有 build-impact 基线证明候选策略与已发布策略确有独立编译/发布生命周期时，才在 Strategy owner 内建立 api/released/candidates 三个 catalog 级 package；`signal-worker` 不依赖 candidates，`quant-lab` 可以依赖 released + candidates；
-- 建立一个 Postgres Adapter crate 的 owner module 骨架；
-- 建立 Research Domain 最小骨架，只含 Experiment/Run/Evidence identity、Port 与状态机，不先搬回测交易逻辑；
+- 第一个真实 persistence slice 到达时才建立 Postgres Adapter crate 及所需 owner/capability module，不预建空 owner 目录；
+- R1 首个真实 Research Use Case 到达时才建立 Research Domain，并在同一切片包含 Experiment/Run/Evidence identity、实际调用方、必要 Port/Adapter 与状态机；不以只有 Trait/Fake 的“最小骨架”冒充完成；
 - RecoveryHarness 只建立 CI-only ephemeral integration-test artifact；不加入任何可部署 Release Unit，不获得生产 environment、Secret 或真实交易所 Adapter；
 - Migration 采用单一有序目录和 owner 文件名。
 
@@ -110,8 +111,11 @@ Market Velocity 是首个 Golden **计划**，不是第一个应落地的下游�
 ```text
 M1 canonical MarketBar / instrument / timeframe / finality
   -> M2 public read-only K 线采集与规范化
-  -> M3 Market owner storage + historical query
-  -> M4 point-in-time DatasetSnapshot
+  -> A1R Strategy Fake-only Port 纯结构移除
+  -> G2 Architecture Governance P0.1 门禁
+  -> M2R Market public-Kline structure-only 模块/API-SPI 拆分
+  -> M3A Market owner storage + historical query
+  -> M4A point-in-time DatasetSnapshot
   -> S1 StrategyDefinition / StrategyRuntimeSnapshot / Evaluator / Signal
   -> R1 deterministic backtest + strategy parity
   -> A Strategy/Web handoff
@@ -120,11 +124,21 @@ M1 canonical MarketBar / instrument / timeframe / finality
   -> C1 live 前置与恢复
 ```
 
-平台固定 API Key 只允许在 M2 的 Market 公共只读 Adapter 配置中出现；M1、M3、M4、Strategy、Research、Risk 和 Execution 都只能看到非敏感 source profile/ref。Research/Backtest 必须通过 Market historical API/DatasetSnapshot 读取同一 canonical MarketBar，禁止定义第二套 K 线事实或直连采集凭证。
+平台固定 API Key 只允许在 M2 的 Market 公共只读 Adapter 配置中出现；M1、M3A、M4A、Strategy、Research、Risk 和 Execution 都只能看到非敏感 source profile/ref。Research/Backtest 必须通过 Market historical API/DatasetSnapshot 读取同一 canonical MarketBar，禁止定义第二套 K 线事实或直连采集凭证。
 
-下文 `A → C0 → B0 → B → C1` 只描述**上游地基完成之后**的执行 Golden Slice 内部依赖，不表示可以从 A 开始迁移整个系统。可以提前冻结防腐 Contract 草案，但在 M1～M4、S1、R1 获得当前 revision 的 Verdict 前，不得创建 A1 的数据库、Outbox、Dispatcher、Web consumer 或 runtime wiring。
+M2 已暴露出两个会在 M3A 继续放大的结构风险：canonical bar 与 OKX public-market Gateway 单文件过大，以及 Domain 根门面同时公开业务 API 与 Adapter Port。因此 M3A 前增加三个互相独立的 `structure_only` 子 Manifest：
 
-2026-07-29 已登记的 `MIG-MVE-A1-STRATEGY-SIGNAL-HANDOFF-V1` 错误地把 `depends_on` 冻结为空。Registry 的 child identity 与依赖不可原地改写，因此该 child 只能保留为被阻塞的 Contract/边界发现记录，不能继续充当实施前置。未来恢复 handoff 实施时必须新登记 successor child，并显式依赖 M4、S1 与 R1 的不可变 Verdict。
+1. `MIG-MVE-A1R-REMOVE-FAKE-ONLY-PORT-V1` 的唯一 Owner 是 Strategy；先以调用点闭包证明当前 handoff Port/Use Case 只有测试 Fake、没有生产 Adapter/运行入口，再从生产编译面移除，保留 blocked A1 的 Contract/边界发现记录供未来 successor 使用；
+2. `MIG-20260729-MODULE-BOUNDARY-GUARDRAILS-P0-1` 的唯一 Owner 是 Architecture Governance，只实现 ADR-0015 的静态门禁和注入测试；
+3. `MIG-MKT-F2R-CAPABILITY-API-SPI-V1` 的唯一 Owner 是 Market，在不改变请求、Decimal、时间、finality、错误与输出语义的前提下，把 Market 和 public-market/OKX 按 capability 拆分并建立 `api`/`spi` 双门面。
+
+当前 Strategy signal-handoff 只有测试 Fake、没有生产 Adapter，不能被 G2 误判为完成能力，也不能用通用 allowlist 永久豁免。A1R、G2 与 M2R 不能合成跨 Owner 的“P0.1 大 Manifest”。
+
+Registry 已登记的 `MIG-MKT-F3-MARKET-BAR-STORAGE-V1` 与 `MIG-MKT-F4-DATASET-SNAPSHOT-V1` 依赖边不能原地改写，因此保留为不可实施的早期登记；实际后续使用新 successor `MIG-MKT-F3A-MARKET-BAR-STORAGE-V1 -> MIG-MKT-F4A-DATASET-SNAPSHOT-V1`，其中 F3A 显式依赖 M2R。不得通过修改旧 child 的 `depends_on` 绕过 registration revision。
+
+下文 `A → C0 → B0 → B → C1` 只描述**上游地基完成之后**的执行 Golden Slice 内部依赖，不表示可以从 A 开始迁移整个系统。可以提前冻结防腐 Contract 草案，但在 M1～M4A、S1、R1 获得当前 revision 的 Verdict 前，不得创建 A1 的数据库、Outbox、Dispatcher、Web consumer 或 runtime wiring。
+
+2026-07-29 已登记的 `MIG-MVE-A1-STRATEGY-SIGNAL-HANDOFF-V1` 错误地把 `depends_on` 冻结为空。Registry 的 child identity 与依赖不可原地改写，因此该 child 只能保留为被阻塞的 Contract/边界发现记录，不能继续充当实施前置。未来恢复 handoff 实施时必须新登记 successor child，并显式依赖 M4A、S1 与 R1 的不可变 Verdict。
 
 上游地基完成后，Market Velocity 执行 Golden Slice 仍不能成为同时迁移信号、商业授权、Portfolio、Risk、OMS、Paper 和恢复协议的巨型 Manifest。业务上仍是 A（交接）、B（决策）、C（恢复）三个切片；其中 C 必须先完成 `C0` 的最小 Execution intake 结构子 Manifest，随后 B0 固定 test-only Evidence Provider，B 才能使用稳定 typed Port 和不可变输入，最后按 Owner DAG 完成 `C1` 的账户绑定、市场证据、Account admission、交易所能力、风险估值、安全监测、审批与 Execution 恢复。`RecoveryHarness` 只是验证这些 live 路径的 CI-only ephemeral artifact，不是一个可部署的 C1 业务切片。每个 Owner 子 Manifest 都必须有独立 Manifest、Evidence 和 Verdict；前一依赖未验证时，后一切片只能在“实施输入门”下钉住已提交工件并编写目标源码，不能声称依赖满足、进入 `verified`、装配 runtime 或实施切换。
 
@@ -143,7 +157,7 @@ A Strategy/Web handoff
 
 | 业务切片 | Owner 子 Manifest | 此子 Manifest 唯一 Owner | `depends_on` | 本 Owner 本地事实/事务 | 跨 Owner Contract |
 | --- | --- | --- | --- | --- | --- |
-| A | `A1-strategy-signal-handoff` | Strategy | M4、S1、R1；现有错误登记的无依赖 A1 仅保留为 blocked discovery record，实施须新建 successor child | `StrategySignalHandoffV1`、RuntimeSnapshot 的市场输入要求、Outbox、delivery identity | `CreateExecutionRequestFromSignalV1` command v1 → Web；`RequiredMarketEvidenceV1` → Market/Risk |
+| A | `A1-strategy-signal-handoff` | Strategy | M4A、S1、R1；现有错误登记的无依赖 A1 仅保留为 blocked discovery record，实施须新建 successor child | `StrategySignalHandoffV1`、RuntimeSnapshot 的市场输入要求、Outbox、delivery identity | `CreateExecutionRequestFromSignalV1` command v1 → Web；`RequiredMarketEvidenceV1` → Market/Risk |
 | A | `A2-web-execution-request` | Web | A1 | canonical `ExecutionRequestV1`、Inbox/去重、商业 blocker、claim 状态 | `ClaimExecutionRequestV1` / `RenewExecutionRequestClaimV1` / `ReleaseExecutionRequestClaimV1`：Execution → Web；对应 receipt：Web → Execution；`ReportExecutionRequestOutcomeV1` → Web；`ExecutionRequestOutcomeReceiptV1` → Execution |
 | C0 | `C0-execution-intake` | Execution | A2 | `CoreExecutionIntakeV1`、claim receipt、幂等约束 | 发起 Claim/Renew/Release 并消费对应 Web receipt；发布 Outcome 并消费 `ExecutionRequestOutcomeReceiptV1`；`AcceptedExecutionRequestV1` → B0 |
 | B0 | `B0-immutable-test-evidence-provider` | Execution（test-only Adapter） | C0 | 无业务事实；只组合带 hash 的 Market/Account/Instrument fixture 与 Snapshot | `ImmutableDecisionEvidenceBundleV1` → B1/B2/B3；禁止 runtime wiring、网络/DB 写入 |
@@ -173,7 +187,7 @@ MarketSnapshot
 
 范围只包含信号与商业交接：Market Velocity `StrategySignal` 的唯一业务 owner 是 Strategy，Market 只提供 snapshot/input。A1 固定 `StrategySignal` identity/version/evidence cutoff，并由 Strategy owner 在本地事务内持久化 `StrategySignalHandoffV1` 与自己的 Outbox；A2 再由 Web owner 通过 `CreateExecutionRequestFromSignalV1`、订阅、会员、产品资格和 verified active credential 创建 canonical `ExecutionRequestV1`，并在自己的事务中维护 claim lease 与 Outcome 投影。Claim/Renew/Release command 固定为 Execution -> Web，receipt 固定反向；Strategy handoff payload 不得携带用户、credential、risk profile 或预组装 `ExecutionRequest[]`；Strategy/Core 不查询订阅，也不参与扇出。
 
-本节只能在 M4 point-in-time DatasetSnapshot、S1 同源 Strategy evaluator 与 R1 deterministic backtest/parity 的前置 Verdict 闭合后实施。缺少任一前置时，只允许继续维护 Contract discovery，不允许新增 handoff 表、Outbox、Dispatcher 或 Web 投递。
+本节只能在 M4A point-in-time DatasetSnapshot、S1 同源 Strategy evaluator 与 R1 deterministic backtest/parity 的前置 Verdict 闭合后实施。缺少任一前置时，只允许继续维护 Contract discovery，不允许新增 handoff 表、Outbox、Dispatcher 或 Web 投递。
 
 News 若参与，只能先以 `NewsInsightV1 -> Strategy evaluator -> StrategySignal` 进入，不能绕过 Strategy 直接调用 Web 的执行请求入口。
 

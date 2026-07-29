@@ -238,25 +238,31 @@ Owner 边界固定为：
 
 ```text
 crates/domains/execution/src/
-├── model/
-│   ├── order_intent.rs
-│   └── order_state.rs
-├── policies/
-│   └── execution_plan_policy.rs
-├── use_cases/commands/create_order_intent/
-│   ├── input.rs
-│   ├── output.rs
-│   ├── handler.rs
-│   └── tests.rs
-└── ports/
-    ├── execution_write_port.rs
-    └── account_snapshot_port.rs
+├── api.rs                           # 业务调用方只见稳定 Input/Output/API
+├── spi.rs                           # Adapter/组合根只见 Port 与装配入口
+├── order_lifecycle/
+│   ├── model/
+│   │   ├── order_intent.rs
+│   │   └── order_state.rs
+│   ├── commands/create_order_intent/
+│   │   ├── input.rs
+│   │   ├── output.rs
+│   │   ├── handler.rs
+│   │   └── tests.rs
+│   └── ports/
+│       ├── execution_write_port.rs
+│       └── account_snapshot_port.rs
+├── planning/
+│   └── policies/
+│       └── execution_plan_policy.rs
+└── lib.rs                           # 只公开 api 与 spi
 
 crates/adapters/postgres/src/execution/
-├── rows.rs
-├── queries.rs
-├── execution_write_adapter.rs
-└── tests.rs
+└── order_lifecycle/
+    ├── rows.rs
+    ├── queries.rs
+    ├── execution_write_adapter.rs
+    └── tests.rs
 
 apps/execution-worker/src/
 ├── config.rs
@@ -272,7 +278,31 @@ apps/execution-worker/src/
 - `model` 决定状态是否合法；
 - `port` 用业务语言表达必须持久化的原子结果；
 - Postgres Adapter 使用 SQLx 实现 SQL、锁与事务；
-- App 把 Contract 转成 Input 并注入具体 Adapter。
+- App 把 Contract 转成 Input 并注入具体 Adapter；
+- 其他 Domain/Handler/Consumer 只调用 `api`；Postgres Adapter 只实现 `spi`；App 只有 `wiring.rs` 可以看到 `spi`；
+- 不建立 Owner 级全局 `model/`、`ports/`、`enums.rs` 或 provider 级大文件来容纳所有 capability。
+
+### 4.1 Port 与 Use Case 的完成门
+
+Port 是完整垂直切片中的 I/O 边界，不是先占位的目录资产。非测试 Port 进入 `verified` 前必须同时存在：
+
+1. 调用它的生产 Use Case；
+2. 至少一个生产 Adapter；
+3. 业务命名的 Input/Output；
+4. 失败、幂等/原子性、超时和恢复 Owner 测试。
+
+Fake/Mock 只用于测试，不算生产实现。只有 Fake 的 Port 必须停在带后续承接的 `implementing` Manifest；不能被 re-export 成已经稳定的业务能力。纯 Policy、单一算法或“以后可能替换”的代码使用函数/对象，不创建 Trait。
+
+一个公开 Use Case 只处理一个业务动词、一个主要业务结果和一个恢复 Owner。出现第二次事务提交、等待外部 receipt、第二个可独立补偿结果时，拆为同 Owner 的后续 Command/Consumer 或 durable process manager；App 不接管这段业务状态机。四个及以上有副作用 Port 是强制 Review 信号，禁止用万能 `Services`/`EverythingPort` 隐藏。
+
+### 4.2 Enum、错误与表示类型
+
+- Aggregate 状态和值枚举与 capability model 共置；
+- Command/Query 选择枚举与 Input 共置；
+- Port 技术失败分类与 Port 共置，再由 Use Case 映射为稳定业务错误；
+- Wire、数据库 Row、交易所 SDK enum 分别留在版本化 Contract、owner-scoped Postgres Adapter、`crypto_exc_all`；
+- `api.rs`/`spi.rs` 只重导出，不定义第二套同义 enum；
+- 禁止 Domain 级 `enums.rs`、`types.rs`、`common.rs`、`shared.rs` 混装无关概念。
 
 ## 5. 数据库 CRUD 放置规则
 
@@ -442,6 +472,27 @@ Research complete/publish use case
 - 同一 `BacktestRunId + evidence kind + content hash` 必须幂等；
 - Research Adapter 不得写生产 Order、Fill、Position 或 AccountProjection 表；
 - Strategy 发布用例只能保存已完成 EvidenceManifest 的稳定引用，不能复制或改写证据内容。
+
+### 6.5 Outbox、幂等、投递与恢复的 Owner
+
+Outbox 不是一个可以接管业务的“消息服务”。职责固定如下：
+
+| 责任 | 放置位置 |
+| --- | --- |
+| Event/Command 业务含义、幂等 identity、何时重试/补偿 | 原 Owner Model/Use Case |
+| State + Inbox/幂等 + Outbox + Audit 原子写集 | 原 Owner Write Port 定义；owner-scoped Postgres Adapter 实现 |
+| 通用轮询、投递、Ack、退避、transport telemetry | Messaging/Postgres Adapter 或 Platform |
+| 连接、配置、循环监督、关闭 | App |
+| 投递失败后的业务恢复决定 | 原 Owner Recovery Use Case |
+| 跨 Owner 差异检测 | Reconciliation；发送 typed owner command |
+
+因此：
+
+- Publisher 只能投递已提交 Outbox，不根据 payload 内容决定业务状态；
+- App 的 loop/callback 不通过 `match error` 发明重试、补偿或状态迁移；
+- Adapter 可以归一技术错误与执行通用退避，但不能改变业务 identity、生成新的业务命令或越权更新 Aggregate；
+- Reconciliation 不直接更新原 Owner 表；它提交带证据与幂等 identity 的恢复 Command，由原 Owner 决定 no-op、重试、补偿或人工升级；
+- 跨 Owner 等待 receipt 的长流程属于发起 Owner 的 durable process manager/状态机，不属于 App 内存 Task。
 
 ## 7. Query 与 Command 分离的边界
 
@@ -631,9 +682,14 @@ Risk                        超过未保护窗口后发 Reduce/Close 与 Kill Sw
 禁止：Handler -> SQL
 禁止：Use Case -> SQLx/Reqwest/Redis/SDK
 禁止：Domain -> Wire Contract
+禁止：其他 Domain/Research -> Domain SPI 或私有 capability
+禁止：Adapter -> Domain 私有 model/use_case（只能实现 SPI）
 禁止：Adapter -> 策略/组合/风险决策
 禁止：Repository<T> / BaseService / update_by_id / save_json
 禁止：零字段 Service/Manager/Calculator 仅作为函数命名空间
+禁止：只有 Fake/Mock、没有生产 Use Case + Adapter 的 Port 被标为 verified
+禁止：万能 Services/EverythingPort 隐藏大 Use Case 的副作用依赖
+禁止：Domain 级 enums.rs/types.rs/common.rs/shared.rs 混装无关语义
 禁止：把跨 owner 大函数移动进 impl 后冒充 Aggregate
 禁止：Aggregate 公开可绕过状态机的可变字段
 禁止：Model/Policy 读取系统时间、环境变量或全局业务缓存
@@ -644,4 +700,5 @@ Risk                        超过未保护窗口后发 Reduce/Close 与 Kill Sw
 禁止：Reconciliation 直接修表
 禁止：把数据库 Row 当 Domain 或 API DTO
 禁止：没有 Outbox 的跨进程“先写库再发消息”
+禁止：Outbox Publisher/App callback 自行决定业务重试或补偿
 ```
