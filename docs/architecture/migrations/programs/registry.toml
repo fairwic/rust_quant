@@ -25,8 +25,8 @@ manifest_kind = "owner_child"
 manifest_path = "rust_quant_alpha:docs/architecture/migrations/MIG-20260729-target-layout-p0/manifest.toml"
 evidence_path = "rust_quant_alpha:docs/architecture/migrations/MIG-20260729-target-layout-p0/evidence.md"
 verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-20260729-target-layout-p0/verdict.json"
-manifest_revision = "sha256:fbe812f0c68b23d6d9ba82d052263c6d91526325a4e0f32bbdf353f08f9b66b6"
-evidence_revision = "sha256:151948d92704620dcfa8bdacc60e5010900ad9e213d202ddc2af2e42829bfd58"
+manifest_revision = "sha256:a1da0c5f0b1de181d499573463335060902ac23928f71fbab4d12da09ae7498f"
+evidence_revision = "sha256:07fc7cf118a291f1add8d87161d9bcfbc82c0b2fce61b019ae90a5689b0dd549"
 verdict_revision = "not_created"
 depends_on = []
 
@@ -41,7 +41,7 @@ manifest_path = "rust_quant_alpha:docs/architecture/migrations/MIG-20260729-migr
 evidence_path = "rust_quant_alpha:docs/architecture/migrations/MIG-20260729-migration-check-p1/evidence.md"
 verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-20260729-migration-check-p1/verdict.json"
 manifest_revision = "sha256:e09c5d0ddfb028118e838a32582900e2b34d496718674410317063321dffb53e"
-evidence_revision = "sha256:ff253c115c041f86cf1d7b98b6eefd36794427ba9f136023dba85718b44b13f7"
+evidence_revision = "sha256:710da39eea26e117f75feb80b84680e00ed5e4b520bd26025f6c2e3d953116e3"
 verdict_revision = "not_created"
 depends_on = []
 
@@ -362,8 +362,8 @@ manifest_kind = "owner_child"
 manifest_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MVE-A1-STRATEGY-SIGNAL-HANDOFF-V1/manifest.toml"
 evidence_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MVE-A1-STRATEGY-SIGNAL-HANDOFF-V1/evidence.md"
 verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MVE-A1-STRATEGY-SIGNAL-HANDOFF-V1/verdict.json"
-manifest_revision = "sha256:94c968d1332172953f0b7bbf4bae1284ac8f9a795702081ae75ae28fff701daa"
-evidence_revision = "sha256:a68dafe9e2da0fc1473246fa0c79ecd2ea16874a180efa9e17269572aaf6611a"
+manifest_revision = "sha256:f2481e460f1860f65595095c437adf331c5d65bb897263f9015844f7eb0cb1d1"
+evidence_revision = "sha256:735669c0e8bce0091430428f27a4864d5a945f64233316eda4a335f53477e804"
 verdict_revision = "not_created"
 depends_on = []
 
