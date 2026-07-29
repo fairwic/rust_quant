@@ -75,7 +75,11 @@ Manifest 必须固定：
 
 Registry 只声明依赖边，不能保存一个可人工改成 `true` 的 `depends_on_satisfied` 缓存作为授权。`migration-check` 必须读取每个 predecessor 的不可变 Manifest hash、Evidence hash、当前 revision 机器 Verdict 及其 `verdict_schema_version`，确认状态/范围/兼容窗口满足后计算依赖是否闭合；任一引用缺失、hash 漂移、Verdict 非 current revision 或仍是 historical/not-created 时 fail closed。
 
+跨仓库 child 创建采用两阶段登记：父 Registry 先以 `not_created` 提交并冻结 child identity、目标 owner repository、artifact path 与 `depends_on`，目标 Manifest 的 `registry_ref` 钉住这次 registration revision；目标 Manifest/Evidence 提交后，Registry 再以 `created` 记录其内容 hash。Manifest 不回写去追逐这个观察性 Registry revision，否则会形成循环 hash。Checker 必须同时验证 registration revision 与当前 Registry：identity/owner/path/依赖不得被改写，当前 Registry 记录的 Manifest/Evidence hash 必须匹配目标仓库，依赖仍按当前 Verdict 计算。
+
 每个可实施的子 Manifest 必须只有一个 `scope.owner`。`secondary_owners` 不是合法字段：原先需要写在该字段中的内容必须改为父计划中的子 Manifest、`depends_on` 或版本化 Contract。子 Manifest 只可声明该 Owner 的代码、表、App 装配和本地事务边界；消费者的适配、投影或状态转换由消费者自己的子 Manifest 完成。
+
+Core 采用跨仓库 greenfield 迁移时，`owner_repository` 表示子 Manifest 和目标实现的**实际落点**，不能填 legacy 来源仓库。当前约定是：规范基线和 legacy `source_paths` 可引用已提交的 `rust_quant@<sha>`，但 Core 当前迁移的 `owner_repository`、Manifest/Evidence/Verdict 与目标代码必须位于 `rust_quant_alpha`。`program.repositories` 应同时登记 legacy 来源、目标仓库和其他参与 owner；历史 characterization 仍保留在它实际产生的仓库。完整决策见 [ADR-0014](adr/0014-greenfield-target-repository-migration.md)。
 
 跨 Owner 协作只能经版本化 Command/Query/Event Contract：
 
@@ -116,6 +120,7 @@ docs/architecture/migrations/<migration-id>-<slug>/
 
 - migration program identity、`depends_on`、技术状态与唯一 Owner；
 - Program registry ref、owner repository 与 `historical_dependency_eligible`；
+- legacy source repository、target owner repository 与 governance baseline 必须可区分；跨仓库迁移不得把三者压成同一个可变路径；
 - 迁移模式与 `behavior_change`；
 - source、target、允许和禁止修改路径；
 - 受影响的 Cargo package、Release Unit、`contract_snapshots` object array、表和本地事务/InBox/Outbox；
@@ -377,7 +382,7 @@ CI 变绿、镜像构建成功或 AI 判断安全，都不能替代生产切换�
 `migration-check` 目标上必须组合以下结果：
 
 1. Manifest schema、`manifest_kind`、mode/state/cutover 真值表、合法状态枚举、`blocked`/`[blocking]` 一致性与字段完整性；
-2. Program Registry/父计划/Owner 子 Manifest 图、owner repository、child revision、唯一 Owner、`depends_on` 和 Contract/version 是否闭合；依赖状态必须由 predecessor Manifest/Evidence/Verdict hash 计算，`not_created`、`historical_record` 或 Registry 中人工缓存的布尔值不得满足 current-migration dependency；
+2. Program Registry/父计划/Owner 子 Manifest 图、owner repository、legacy source/target repository、child revision、唯一 Owner、`depends_on` 和 Contract/version 是否闭合；依赖状态必须由 predecessor Manifest/Evidence/Verdict hash 计算，`not_created`、`historical_record` 或 Registry 中人工缓存的布尔值不得满足 current-migration dependency；
 3. 当前架构基线、规范文档 hash、Release Unit/`contract_snapshots` object array 是否一致；
 4. Git diff 是否完全落在允许路径；
 5. 新增依赖是否符合 Domain、Quant、Contract、Adapter 和 App 方向；

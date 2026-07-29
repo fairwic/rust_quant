@@ -2,7 +2,7 @@
 
 - 状态：已接受
 - 首次接受：2026-07-18
-- 最近修订：2026-07-28
+- 最近修订：2026-07-29
 - 适用范围：中低频、多策略、多账户、多交易所的生产量化平台
 - 代码放置细则：[业务代码与数据访问放置规范](business-code-and-data-access.md)
 - 生产运行规范：[生产运行与恢复](production-runtime.md)
@@ -10,7 +10,7 @@
 
 ## 1. 文档目的
 
-本文定义 `rust_quant` 的长期目标，不以当前 `services`、`orchestration`、`infrastructure`、单一 CLI 或 Web 执行任务表为目标形态。历史实现如何迁入目标架构只记录在[架构迁移计划](migration-plan.md)，不得为了兼容旧代码污染长期业务模型。
+本文定义 Rust Quant Core 的长期目标，不以当前 `rust_quant` 中的 `services`、`orchestration`、`infrastructure`、单一 CLI 或 Web 执行任务表为目标形态。`rust_quant` 是迁移前 legacy 来源与过渡期治理基线，目标实现仓库是 `rust_quant_alpha`；仓库边界以 [ADR-0014](adr/0014-greenfield-target-repository-migration.md) 为准。历史实现如何迁入目标架构只记录在[架构迁移计划](migration-plan.md)，不得为了兼容旧代码污染长期业务模型。
 
 目标架构必须让开发者和 AI 在修改前明确回答：
 

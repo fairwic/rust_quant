@@ -1,8 +1,8 @@
 # Rust Quant 架构迁移计划
 
-- 状态：计划中（阶段 0 的 legacy 架构基线已记录；Vegas current-migration 数据/实验/工件基线与目标目录门禁尚未冻结，业务搬迁未开始）
+- 状态：实施中（`rust_quant_alpha` target-layout P0 与 `migration-check` P1 已提交但 CI/CD 按用户决定延后；业务搬迁尚未开始）
 - 首次制定：2026-07-18
-- 最近修订：2026-07-28
+- 最近修订：2026-07-29
 - 目标架构：[Rust Quant 长期目标架构](target-architecture.md)
 - 数据访问规则：[业务代码与数据访问放置规范](business-code-and-data-access.md)
 - AI 执行协议：[AI 架构迁移执行协议](ai-migration-execution-protocol.md)
@@ -14,6 +14,16 @@
 
 当前已确认的 legacy 基线包括扁平 `common/core/domain/infrastructure/services/orchestration` crate、单一 CLI 多运行角色，以及 Web `execution_tasks/exchange_order_results` 同时承载商业交接与交易结果的历史边界。迁移必须正面处理这些事实，不能只移动目录。
 
+### 1.1 仓库迁移边界
+
+- `rust_quant` 是 legacy 源仓库与过渡期架构规范基线；迁移前现有生产行为仍以它为准。
+- `rust_quant_alpha` 是 Core 目标实现仓库。当前迁移的 Core Owner Manifest/Evidence/Verdict、目标业务代码、Migration SQL、Release Unit 和 App 都在该仓库创建。
+- Core Manifest 的 legacy `source_paths` 必须钉住 `rust_quant@<commit>`；目标路径只允许 `rust_quant_alpha` 当前仓库相对路径。
+- `rust_quan_web` 等其他 owner 仓库不迁入 Core 目标仓库，仍通过各自 Manifest 和版本化 Contract 协作。
+- 最终仓库/生产入口切换是独立 Cutover，不因目录迁完、Cargo 通过或本地 parity 自动发生。
+
+完整决策与 Registry 字段语义见 [ADR-0014](adr/0014-greenfield-target-repository-migration.md)。
+
 ## 2. 迁移原则
 
 - 先冻结行为和数据证据，再移动代码；
@@ -24,6 +34,7 @@
 - 小型 legacy bugfix 可留原位，但不能新增依赖或扩大旧抽象；
 - 不通过跨库读取、共享 ORM、万能 Service 或中央 Scheduler 缩短路径；
 - 未获得显式实盘授权时，迁移验证只使用 contract、fixture、paper、dry-run、shadow 和 signed read-only。
+- legacy 来源与目标实现必须分仓冻结；不得把 `rust_quant` 未提交工作树复制为目标基线，也不得继续在 legacy 仓库创建目标架构业务包。
 - 自动执行只可以从 Web owner 创建的 canonical `ExecutionRequest` 进入；不存在 Core 自营/系统自营执行路径，也不得以技术迁移名义补建该路径。
 - 固定服务 API Key 只服务于 Market 公共只读行情采集；它不能作为 Account、Risk、用户 credential 或 `ExecutionRequest` 的输入、回退或前置条件。
 - 每次固定 Market Key 访问都必须记录非敏感 key ref、Market owner、只读 endpoint/method、观察时间、权限/响应 evidence ref + hash 与“无用户 credential fallback”；Research 只读消费已发布 DatasetManifest。

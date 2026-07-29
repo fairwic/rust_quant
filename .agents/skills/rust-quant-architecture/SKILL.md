@@ -1,6 +1,6 @@
 ---
 name: rust-quant-architecture
-description: 约束 rust_quant 的领域归属、代码放置、数据库 CRUD、Ports/Adapters、Research/回测和生产运行边界。用于设计、评审、实现或迁移后端模块、Vegas、策略/组合/风险/执行链路、分级模拟、运行入口和架构文档，检查代码是否违反目标架构，以及识别并防止六类结构坏味道（空 struct 服务、指标层做决策、同名两义配置、依赖反向拉直连、env flag 热路径、时间戳内联）、七类工程纪律坏习惯（f64 金额、无类型 JSON 端口、SDK DTO 穿透、热路径 panic、压平错误、pub 泛滥、假测试）、八类基础设施/数据/运维坏习惯（fire-and-forget spawn、schema 三真相源、迁移改写、密钥裸传、配置散读、无可观测性、依赖不复用、契约无版本）、七类重复造轮子/未用外部标准版（手写重试、指标绕过、精度舍入脱节、回测/信号多路镜像、K线结构体泛滥、变体整文件复制、f64 金额）与研究/生产未隔离。
+description: 约束 Rust Quant Core 在 rust_quant legacy 源仓库与 rust_quant_alpha 目标仓库之间迁移时的领域归属、代码放置、数据库 CRUD、Ports/Adapters、Research/回测和生产运行边界。用于设计、评审、实现或迁移后端模块、Vegas、策略/组合/风险/执行链路、分级模拟、运行入口和架构文档，检查代码是否违反目标架构，以及识别并防止六类结构坏味道（空 struct 服务、指标层做决策、同名两义配置、依赖反向拉直连、env flag 热路径、时间戳内联）、七类工程纪律坏习惯（f64 金额、无类型 JSON 端口、SDK DTO 穿透、热路径 panic、压平错误、pub 泛滥、假测试）、八类基础设施/数据/运维坏习惯（fire-and-forget spawn、schema 三真相源、迁移改写、密钥裸传、配置散读、无可观测性、依赖不复用、契约无版本）、七类重复造轮子/未用外部标准版（手写重试、指标绕过、精度舍入脱节、回测/信号多路镜像、K线结构体泛滥、变体整文件复制、f64 金额）与研究/生产未隔离。
 ---
 
 # Rust Quant 架构规范
@@ -12,9 +12,10 @@ description: 约束 rust_quant 的领域归属、代码放置、数据库 CRUD�
 ## 先定位仓库
 
 1. 将 `/Users/mac2/onions/crypto_quant` 视为 umbrella workspace。
-2. 将 `rust_quant/` 视为 Core owning repo；只在该目录执行 Git、Cargo、测试和提交。
-3. 先检查当前分支、工作树和目标文件，保留用户已有改动。
-4. 涉及 Web、Admin、News 或交易所 SDK 时，先确认 owner；跨仓库只使用 owner service API 或稳定 contract，不新增跨库读写。
+2. 将 `rust_quant/` 视为 legacy 来源、迁移前现有生产实现和过渡期架构规范仓库；不得在其中新增目标架构业务包。
+3. 将 `rust_quant_alpha/` 视为 Core 目标实现仓库；当前 Core Owner Manifest/Evidence/Verdict、目标代码、Migration SQL、Release Unit 和 App 只在该目录实施。
+4. 分别检查实际 owning repo 的分支、工作树和目标文件；Git、Cargo、测试和提交必须在对应子仓库执行，保留用户已有改动。
+5. 涉及 Web、Admin、News 或交易所 SDK 时，先确认 owner；跨仓库只使用 owner service API 或稳定 contract，不新增跨库读写。
 
 ## 按任务加载权威文档
 
@@ -26,7 +27,7 @@ description: 约束 rust_quant 的领域归属、代码放置、数据库 CRUD�
 | 业务逻辑、CRUD、SQL、事务、Consumer | [业务代码与数据访问](../../../docs/architecture/business-code-and-data-access.md)、[ADR-0007](../../../docs/architecture/adr/0007-owner-scoped-persistence-and-transaction-boundaries.md) |
 | Research、Vegas、回测或模拟交易 | [ADR-0009](../../../docs/architecture/adr/0009-research-domain-and-tiered-simulation.md)、[Vegas 迁移实战](../../../docs/architecture/vegas-backtest-migration.md)、[通用量化逻辑归属](../../../docs/architecture/common-logic-placement.md) |
 | Worker、订单、保护单、对账、账户或公共 Market 凭证 | [生产运行与恢复](../../../docs/architecture/production-runtime.md)、[ADR-0004](../../../docs/architecture/adr/0004-portfolio-and-trading-domain-boundaries.md)、[ADR-0006](../../../docs/architecture/adr/0006-at-least-once-idempotency-and-recovery.md)、[ADR-0012](../../../docs/architecture/adr/0012-multi-tenant-private-stream-management.md)、[ADR-0013](../../../docs/architecture/adr/0013-user-execution-request-and-public-market-data-credentials.md) |
-| 新增代码、迁移 legacy、架构 Review | [AI 架构护栏](../../../docs/architecture/ai-coding-guardrails.md)、[AI 迁移执行协议](../../../docs/architecture/ai-migration-execution-protocol.md)、[迁移计划](../../../docs/architecture/migration-plan.md) |
+| 新增代码、迁移 legacy、架构 Review | [ADR-0014](../../../docs/architecture/adr/0014-greenfield-target-repository-migration.md)、[AI 架构护栏](../../../docs/architecture/ai-coding-guardrails.md)、[AI 迁移执行协议](../../../docs/architecture/ai-migration-execution-protocol.md)、[迁移计划](../../../docs/architecture/migration-plan.md) |
 
 ADR-0008 只保留为决策历史。遇到 Research 或 backtest 设计冲突时，以 ADR-0009 为准。
 
@@ -37,6 +38,8 @@ ADR-0008 只保留为决策历史。遇到 Research 或 backtest 设计冲突时
 区分分析、诊断、设计、修改、迁移和运行态验证；分析/诊断保持只读，实盘 mutation 必须取得明确授权。先声明假设、歧义和成功标准；存在多个合理 owner 或会改变产品语义时，停止并说明选择影响。
 
 legacy、crate、Owner、事实源、运行入口或 Backtest/Live 双实现迁移必须先创建 Migration Manifest，锁定已提交架构基线、单一迁移模式、允许路径、业务不变量、验证和删除门。聊天计划不能替代 Manifest；diff 越界、模式混合、基线漂移或需要未授权 cutover 时立即停止。首次把代码迁入 `apps/` 或 `crates/{domains,quant,contracts,adapters,platform}` 前，先确认 target role map、未知 package fail-closed、`apps/` 扫描、baseline 完整性和注入违规证据已完成；legacy `arch-check PASS` 不是目标目录迁移许可。
+
+Core greenfield 迁移还必须确认：Registry 的 `owner_repository` 和 child artifact path 指向 `rust_quant_alpha`，legacy `source_paths` 使用已提交的 `rust_quant@<sha>`，二者引用同一已提交架构基线。Registry 未登记、仓库指向冲突或来源包含未提交工作树时，先修治理基线，不写业务代码。
 
 #### 目标设计 / 迁移文档审计模式
 

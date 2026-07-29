@@ -1,6 +1,6 @@
 # Rust Quant 架构文档索引
 
-本目录是 `rust_quant` 长期参考架构、生产运行规范、依赖规则、迁移计划和架构决策记录（ADR）的唯一正式入口。
+本目录是 Rust Quant 长期参考架构、生产运行规范、依赖规则、迁移计划和架构决策记录（ADR）的唯一正式入口。迁移过渡期由 legacy 源仓库 `rust_quant` 承载规范基线，Core 目标实现统一进入 `rust_quant_alpha`；两者的仓库职责以 [ADR-0014](adr/0014-greenfield-target-repository-migration.md) 为准。
 
 目标架构采用“模块化单体 + 五类物理目录 + Ports/Adapters + 控制面/数据面 + 可恢复交易闭环”。离线研究由独立 Research Domain 负责，`quant/backtest` 只提供确定性回放内核，并按 ResearchBar、PaperEvent、RecoveryHarness 三种保真度分别验证策略表现、订单事件和故障恢复。长期目标和现有实现迁移已经分开：目标文档不接受历史目录污染，兼容窗口只记录在迁移计划中。
 
@@ -45,6 +45,7 @@ Research 与 live 的同名术语不得混用：ResearchBar 以 `ResearchDecisio
 | [ADR-0011](adr/0011-layered-runtime-snapshots-and-decision-context.md) | 已接受 | 用领域政策快照、执行决策上下文和 ResearchRunSpec 定义完整运行配置 |
 | [ADR-0012](adr/0012-multi-tenant-private-stream-management.md) | 已接受 | 用账户私有流、分片/lease 与配额协同定义 ExchangeSession 的容量和故障边界 |
 | [ADR-0013](adr/0013-user-execution-request-and-public-market-data-credentials.md) | 已接受 | Web 是唯一执行请求 creator；平台固定 API Key 仅用于 Market 公共只读数据 |
+| [ADR-0014](adr/0014-greenfield-target-repository-migration.md) | 已接受 | `rust_quant` 保留 legacy/治理基线，Core 目标实现和当前迁移工件统一进入 `rust_quant_alpha` |
 
 ## 阅读顺序
 
@@ -53,7 +54,7 @@ Research 与 live 的同名术语不得混用：ResearchBar 以 `ResearchDecisio
 3. 新增 crate、App 或跨域依赖前，先按 [ADR-0010](adr/0010-build-impact-and-artifact-isolation.md)判断 Release Unit，再检查[依赖与代码归属规则](dependency-rules.md)。
 4. 新增业务逻辑、决定使用对象还是函数、编写 CRUD/事务/SQL/Consumer 前，检查[业务代码与数据访问放置规范](business-code-and-data-access.md)。
 5. 使用 AI 修改架构相关代码前，执行[AI 编码与架构防腐护栏](ai-coding-guardrails.md)中的放置声明。
-6. AI 迁移 legacy、crate、事实源或运行入口时，先按 [Migration Program 注册表](migrations/programs/README.md)登记跨仓库依赖，再按 [AI 架构迁移执行协议](ai-migration-execution-protocol.md)创建单 Owner Manifest，最后按[架构迁移计划](migration-plan.md)执行。
+6. AI 迁移 legacy、crate、事实源或运行入口时，先按 [ADR-0014](adr/0014-greenfield-target-repository-migration.md)确认源仓库与目标仓库，再按 [Migration Program 注册表](migrations/programs/README.md)登记跨仓库依赖，按 [AI 架构迁移执行协议](ai-migration-execution-protocol.md)创建单 Owner Manifest，最后按[架构迁移计划](migration-plan.md)执行。
 7. 修改 Vegas、回测或实盘配置时，先按 [ADR-0011](adr/0011-layered-runtime-snapshots-and-decision-context.md)固定完整决策上下文，再按 [ADR-0009](adr/0009-research-domain-and-tiered-simulation.md)确认 Research、Quant 和三种模拟边界，最后按 [Vegas 与现有回测主链迁移实战](vegas-backtest-migration.md)执行逐层 parity。
 8. 如果需求与已接受 ADR 冲突，先新增替代 ADR，不得直接绕过现有决策。
 
