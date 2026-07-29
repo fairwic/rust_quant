@@ -65,8 +65,8 @@ manifest_kind = "owner_child"
 manifest_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F1-CANONICAL-BAR-V1/manifest.toml"
 evidence_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F1-CANONICAL-BAR-V1/evidence.md"
 verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F1-CANONICAL-BAR-V1/verdict.json"
-manifest_revision = "sha256:ef98ecb6af77def2618540a7d5913c5ef59937fd291de7f5c92093a57051403b"
-evidence_revision = "sha256:10ea1d71818b4349973335bda9be7bb4e68873ea74276861088999f8da17e94c"
+manifest_revision = "sha256:df1387729fe3ad805189355fa5021667147b6e63b7188ca68c8a1715ac2ff3b6"
+evidence_revision = "sha256:96e1b33f344826bffe7a40e009e164a4257a2ab6aaab752e9efc38a432af1048"
 verdict_revision = "not_created"
 depends_on = []
 
