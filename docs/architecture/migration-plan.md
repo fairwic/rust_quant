@@ -1,6 +1,6 @@
 # Rust Quant 架构迁移计划
 
-- 状态：实施中（`rust_quant_alpha` target-layout P0 与 `migration-check` P1 已提交但 CI/CD 按用户决定延后；业务搬迁尚未开始）
+- 状态：实施中（`rust_quant_alpha` target-layout P0、`migration-check` P1 与 Market F1 canonical `MarketBar` 已提交；CI/CD 按用户决定延后，尚无业务切片获得 current-revision Verdict，F2 尚未开始）
 - 首次制定：2026-07-18
 - 最近修订：2026-07-29
 - 目标架构：[Rust Quant 长期目标架构](target-architecture.md)
@@ -60,7 +60,9 @@
 | 删除门 | 调用方、配置、表、监控和白名单的删除条件 |
 | 验证 | unit、integration、contract、parity、recovery、deploy contract |
 
-该清单必须保存为 `docs/architecture/migrations/<migration-id>-<slug>/manifest.toml`，使用 [`migrations/_template.toml`](migrations/_template.toml) 的机器可读 schema；聊天计划不能替代 Manifest。每个实施型子切片只能选择 `structure_only`、`behavior_change`、`cutover`、`legacy_delete` 中一个主模式，并固定已提交的 `architecture_baseline_git_sha`、规范/Release Unit/Contract snapshot hash、输入与输出工件 hash。没有填写完整清单、基线未冻结、依赖未满足或模式混合时，不开始迁移。
+该清单必须保存为 `docs/architecture/migrations/<migration-id>-<slug>/manifest.toml`，使用 [`migrations/_template.toml`](migrations/_template.toml) 的机器可读 schema；聊天计划不能替代 Manifest。每个实施型子切片只能选择 `structure_only`、`behavior_change`、`cutover`、`legacy_delete` 中一个主模式，并固定已提交的 `architecture_baseline_git_sha`、规范/Release Unit/Contract snapshot hash、输入与输出工件 hash。没有填写完整清单、基线未冻结、依赖未满足或模式混合时，正常路径不开始迁移。
+
+本计划已按用户决定延后受跟踪 CI，因此实施期采用 [AI 执行协议的“实施输入门”](ai-migration-execution-protocol.md#延后受跟踪-ci-时的实施输入门)：已提交且 Registry 为 `created` 的 predecessor，在 Manifest/Evidence/hash 与本地验证完整时，可以被 successor 钉住为源码实施输入；这不表示 `depends_on` 满足。successor 最高只能处于 `implementing`，不得部署 App/runtime、切换事实源、写生产数据库、触发跨 Owner 副作用或交易所 mutation；predecessor 漂移时 descendant Evidence 必须失效并重验。
 
 ## 4. 阶段 0：冻结当前基线与 Owner Ledger
 
@@ -124,7 +126,7 @@ M1 canonical MarketBar / instrument / timeframe / finality
 
 2026-07-29 已登记的 `MIG-MVE-A1-STRATEGY-SIGNAL-HANDOFF-V1` 错误地把 `depends_on` 冻结为空。Registry 的 child identity 与依赖不可原地改写，因此该 child 只能保留为被阻塞的 Contract/边界发现记录，不能继续充当实施前置。未来恢复 handoff 实施时必须新登记 successor child，并显式依赖 M4、S1 与 R1 的不可变 Verdict。
 
-上游地基完成后，Market Velocity 执行 Golden Slice 仍不能成为同时迁移信号、商业授权、Portfolio、Risk、OMS、Paper 和恢复协议的巨型 Manifest。业务上仍是 A（交接）、B（决策）、C（恢复）三个切片；其中 C 必须先完成 `C0` 的最小 Execution intake 结构子 Manifest，随后 B0 固定 test-only Evidence Provider，B 才能使用稳定 typed Port 和不可变输入，最后按 Owner DAG 完成 `C1` 的账户绑定、市场证据、Account admission、交易所能力、风险估值、安全监测、审批与 Execution 恢复。`RecoveryHarness` 只是验证这些 live 路径的 CI-only ephemeral artifact，不是一个可部署的 C1 业务切片。每个 Owner 子 Manifest 都必须有独立 Manifest、Evidence 和 Verdict；前一依赖未验证前，后一切片不得借其名义开始。
+上游地基完成后，Market Velocity 执行 Golden Slice 仍不能成为同时迁移信号、商业授权、Portfolio、Risk、OMS、Paper 和恢复协议的巨型 Manifest。业务上仍是 A（交接）、B（决策）、C（恢复）三个切片；其中 C 必须先完成 `C0` 的最小 Execution intake 结构子 Manifest，随后 B0 固定 test-only Evidence Provider，B 才能使用稳定 typed Port 和不可变输入，最后按 Owner DAG 完成 `C1` 的账户绑定、市场证据、Account admission、交易所能力、风险估值、安全监测、审批与 Execution 恢复。`RecoveryHarness` 只是验证这些 live 路径的 CI-only ephemeral artifact，不是一个可部署的 C1 业务切片。每个 Owner 子 Manifest 都必须有独立 Manifest、Evidence 和 Verdict；前一依赖未验证时，后一切片只能在“实施输入门”下钉住已提交工件并编写目标源码，不能声称依赖满足、进入 `verified`、装配 runtime 或实施切换。
 
 ```text
 A Strategy/Web handoff

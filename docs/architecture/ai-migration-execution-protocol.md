@@ -77,6 +77,18 @@ Registry 只声明依赖边，不能保存一个可人工改成 `true` 的 `depe
 
 跨仓库 child 创建采用两阶段登记：父 Registry 先以 `not_created` 提交并冻结 child identity、目标 owner repository、artifact path 与 `depends_on`，目标 Manifest 的 `registry_ref` 钉住这次 registration revision；目标 Manifest/Evidence 提交后，Registry 再以 `created` 记录其内容 hash。Manifest 不回写去追逐这个观察性 Registry revision，否则会形成循环 hash。Checker 必须同时验证 registration revision 与当前 Registry：identity/owner/path/依赖不得被改写，当前 Registry 记录的 Manifest/Evidence hash 必须匹配目标仓库，依赖仍按当前 Verdict 计算。
 
+#### 延后受跟踪 CI 时的实施输入门
+
+“可以作为后续源码实施输入”不等于 `depends_on` 已满足。只有父迁移计划明确记录用户决定延后受跟踪 CI，且同时满足以下条件时，successor 才可在 predecessor 尚无 current-revision `pass` Verdict 的情况下进入 `implementing`：
+
+1. predecessor 属于当前迁移、已提交、Registry 状态为 `created`，Manifest/Evidence hash 与当前内容匹配，且 Evidence 已记录要求的本地验证；`not_created`、`draft`、`blocked` 和 `historical_record` 均不合格；
+2. successor 的 `dynamic_input_artifacts` 钉住 predecessor 的代码 revision、Manifest/Evidence hash，以及实际消费的公开 API、schema 或 `Cargo.lock` hash；`predecessor_verdicts` 必须保持为空，并在 Evidence 中明确记录依赖尚未满足；
+3. 只允许实现目标仓库源码、schema、纯/离线逻辑、公共只读 Adapter 和 disposable integration test；禁止部署 App/runtime、切换事实源、删除 legacy、执行生产数据库写入、触发跨 Owner 副作用或交易所 mutation；
+4. successor 最高只能停在 `implementing`；在 predecessor 获得 current-revision `pass` Verdict 前，不得进入 `verified`、`ready`、`completed`，不得生成 `pass` Verdict 或声明可切换；
+5. predecessor 任一被钉住的 revision/hash 漂移，必须使 descendant Evidence 失效，并重新执行受影响的本地验证与后续 CI。
+
+该门只解决“CI 延后期间能否继续编写有依赖的目标源码”，不改变 DAG，也不把本地测试冒充依赖闭合。若父计划未显式启用该门，仍按正常规则保持 `blocked`。
+
 每个可实施的子 Manifest 必须只有一个 `scope.owner`。`secondary_owners` 不是合法字段：原先需要写在该字段中的内容必须改为父计划中的子 Manifest、`depends_on` 或版本化 Contract。子 Manifest 只可声明该 Owner 的代码、表、App 装配和本地事务边界；消费者的适配、投影或状态转换由消费者自己的子 Manifest 完成。
 
 Core 采用跨仓库 greenfield 迁移时，`owner_repository` 表示子 Manifest 和目标实现的**实际落点**，不能填 legacy 来源仓库。当前约定是：规范基线和 legacy `source_paths` 可引用已提交的 `rust_quant@<sha>`，但 Core 当前迁移的 `owner_repository`、Manifest/Evidence/Verdict 与目标代码必须位于 `rust_quant_alpha`。`program.repositories` 应同时登记 legacy 来源、目标仓库和其他参与 owner；历史 characterization 仍保留在它实际产生的仓库。完整决策见 [ADR-0014](adr/0014-greenfield-target-repository-migration.md)。
@@ -186,7 +198,7 @@ verdict
 
 Verdict 只能由当前 revision、Manifest、Evidence hash、不可变 predecessor Verdict 和新鲜验证计算。`verdict` 只允许 `pass` 或 `blocked`；任何 required suite 缺失、skipped、hash/revision 漂移或 compatibility window 不闭合都必须是 `blocked`。AI 的文字总结不是 Verdict。
 
-现有 `arch-check` 的 legacy ratchet PASS 也不是 target-layout Verdict。任何 source/target 含 `apps/`、`crates/domains/`、`crates/quant/`、`crates/contracts/`、`crates/adapters/` 或 `crates/platform/` 的 Manifest，在以下条件全部具备前必须保持 `blocked`：
+现有 `arch-check` 的 legacy ratchet PASS 也不是 target-layout Verdict。任何 source/target 含 `apps/`、`crates/domains/`、`crates/quant/`、`crates/contracts/`、`crates/adapters/` 或 `crates/platform/` 的 Manifest，在以下条件全部具备前不得生成 `pass` Verdict。正常路径必须保持 `blocked`；若父计划明确延后受跟踪 CI，并满足上文“实施输入门”，则只允许停在 `implementing`，仍不得进入 `verified`：
 
 1. 当前 revision 的 workspace package/path 已由机器 role map 分类，未知 package fail-closed；
 2. 依赖、文件大小、SDK DTO、panic、DDL、跨库规则覆盖目标源码根和 `apps/`；

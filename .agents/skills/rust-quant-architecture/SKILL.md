@@ -110,6 +110,8 @@ Adapters：
 
 不要顺手清理相邻 legacy，不建立无真实调用方的兼容层或扩展点。
 
+当父迁移计划明确记录用户决定延后受跟踪 CI 时，必须区分“实施输入”与“已满足依赖”：successor 只能钉住已提交、Registry 为 `created`、Manifest/Evidence/hash 和本地验证完整的 predecessor，并在 `dynamic_input_artifacts` 记录其代码/API/schema/lockfile hash；`predecessor_verdicts` 仍为空，状态最高为 `implementing`。此时只可编写源码、schema、纯/离线逻辑、公共只读 Adapter 和 disposable integration test，不得部署 runtime、切换事实源、写生产数据库、触发跨 Owner 副作用或交易所 mutation；predecessor 漂移时 descendant Evidence 必须失效并重验。
+
 ### 5. 按风险验证
 
 - Pure Model/Policy：单元测试、边界测试、确定性测试；

@@ -43,4 +43,11 @@ Checker 规则：
 9. 同一 owner Contract 被多个 Program 复用时，重复的 `contract_id` 记录必须具有完全相同的 version、direction、required/forbidden fields、compatibility window 与 snapshot ref/hash；checker 必须拒绝任一 Program 私自改写副本。`ExecutionPlanningValueV1` 等共享 Contract 只允许复用，不允许形成 Program 私有方言。
 10. Core 当前迁移必须遵守 [ADR-0014](../../adr/0014-greenfield-target-repository-migration.md)：Registry 的目标 child 指向 `rust_quant_alpha`，Manifest 的 source path 再独立钉住 `rust_quant` legacy revision；两者不得互换。
 
+当父计划明确记录用户决定延后受跟踪 CI 时，可以启用“实施输入门”，但它不改变 Checker 对 `depends_on` 的判定：
+
+- predecessor 必须属于当前迁移、已提交、Registry 为 `created`，Manifest/Evidence hash 匹配并记录本地验证；`not_created`、`draft`、`blocked`、`historical_record` 不可作为实施输入；
+- successor 必须在 `dynamic_input_artifacts` 钉住 predecessor 的代码 revision、Manifest/Evidence 和实际消费的 API/schema/lockfile hash；`predecessor_verdicts` 仍为空；
+- successor 最高停在 `implementing`，只可实现源码、schema、纯/离线逻辑、公共只读 Adapter 与 disposable integration test；不得部署 runtime、切换事实源、删除 legacy、写生产数据库、触发跨 Owner 副作用或交易所 mutation；
+- predecessor 工件漂移时，所有 descendant Evidence 失效；获得 current-revision `pass` Verdict 后，才可计算真正的依赖闭合并进入后续状态。
+
 未来创建 child Manifest 时，必须先有已提交的 `not_created` registration 条目和实际路径；目标 Manifest 提交后再把 Registry 更新为 `created` 并记录内容 hash。不要通过增加一个未登记目录绕过 Program 依赖图，也不要让 Manifest 和 Registry 互相追逐最新 commit 形成不可解的自引用。
