@@ -40,8 +40,8 @@ manifest_kind = "owner_child"
 manifest_path = "rust_quant_alpha:docs/architecture/migrations/MIG-20260729-migration-check-p1/manifest.toml"
 evidence_path = "rust_quant_alpha:docs/architecture/migrations/MIG-20260729-migration-check-p1/evidence.md"
 verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-20260729-migration-check-p1/verdict.json"
-manifest_revision = "sha256:e09c5d0ddfb028118e838a32582900e2b34d496718674410317063321dffb53e"
-evidence_revision = "sha256:710da39eea26e117f75feb80b84680e00ed5e4b520bd26025f6c2e3d953116e3"
+manifest_revision = "sha256:65f6bef8b080164f7087d994e27bd1d8596c3aa08741834656215331a3bb905a"
+evidence_revision = "sha256:c01f56c18db1763b3bf2528376b1941737334796f4c66d8ae553eaf0db604527"
 verdict_revision = "not_created"
 depends_on = []
 
