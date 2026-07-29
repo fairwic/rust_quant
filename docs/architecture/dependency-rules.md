@@ -503,7 +503,7 @@ CI/CD 通过 Git diff、owning package、`cargo metadata` 反向传递依赖和 
 - `rust_quant` 的 legacy `arch-check` 仍只对旧 package/path 做 ratchet，存在硬编码 legacy 名称/路径等局限；精确边界见 [baseline-2026-07/README.md](migrations/baseline-2026-07/README.md) 与 [xtask-roadmap.md](migrations/baseline-2026-07/xtask-roadmap.md)；
 - `rust_quant_alpha` 已有 target-layout P0，覆盖 role map、未知 package fail-closed、`apps/`/目标源码根与注入测试，但受跟踪 CI 按迁移阶段延后，不能产生 current-revision `pass` Verdict；
 - Architecture Governance P0.1 已在 `rust_quant_alpha` 本地提交并登记为 `created`，capability-first、API/SPI、Port 完整性、façade 与提前文件预算已有静态门禁和正反例测试；受跟踪 CI/Verdict 仍未形成，因此只能作为执行协议所定义的 successor 源码实施输入，不能解释为依赖已满足或 `verified`；
-- Market M2R 必须删除其已偿还的精确过渡登记并保持实时 Policy 可演进；P0.1 的历史 Evidence 绑定实施 commit，不得通过改写旧 Manifest 追逐 successor。M2R 完成前不得进入 F3A。
+- Market M2R 的源码与本地 Evidence 已提交并登记，7 条已偿还的 Market 过渡项已从实时 Policy 删除；P0.1 的历史 Evidence 仍绑定原实施 commit，不通过改写旧 Manifest 追逐 successor。由于 M2R 尚无 current-revision Verdict，`state=implementing` 不等于前序依赖已满足，F3A 仍不得开始。
 
 ## 14. 例外流程
 

@@ -1,6 +1,6 @@
 # Rust Quant 架构迁移计划
 
-- 状态：实施中（`rust_quant_alpha` target-layout P0、`migration-check` P1、Market F1/F2、Strategy A1R 与 Architecture Governance P0.1 已提交并登记；CI/CD 按用户决定延后，尚无业务切片获得 current-revision Verdict，Market M2R 尚未开始）
+- 状态：实施中（`rust_quant_alpha` target-layout P0、`migration-check` P1、Market F1/F2/M2R、Strategy A1R 与 Architecture Governance P0.1 的源码和本地 Evidence 已提交并登记；CI/CD 按用户决定延后，尚无 Owner 子切片获得 current-revision Verdict，F3A 尚未开始）
 - 首次制定：2026-07-18
 - 最近修订：2026-07-29
 - 目标架构：[Rust Quant 长期目标架构](target-architecture.md)
