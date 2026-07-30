@@ -169,15 +169,30 @@ child_id = "MIG-MKT-F3B-MARKET-CANDLE-SHARD-LIFECYCLE-V1"
 short_name = "market-candle-shard-lifecycle"
 owner = "Market"
 owner_repository = "rust_quant_alpha"
-manifest_status = "not_created"
+manifest_status = "created"
 manifest_kind = "owner_child"
 manifest_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F3B-MARKET-CANDLE-SHARD-LIFECYCLE-V1/manifest.toml"
 evidence_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F3B-MARKET-CANDLE-SHARD-LIFECYCLE-V1/evidence.md"
 verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F3B-MARKET-CANDLE-SHARD-LIFECYCLE-V1/verdict.json"
+manifest_revision = "sha256:f58080391652ca33e80131f3b4933e07b0694a96e229d5b6bb78a276ea46bf7a"
+evidence_revision = "sha256:53622026a1a779617b0a30a4710d72eeb8318c39595e6cbf16bafefe324e3217"
+verdict_revision = "not_created"
+depends_on = ["MIG-MKT-F3A-MARKET-BAR-STORAGE-V1"]
+
+[[program.children]]
+child_id = "MIG-MKT-F3C-MARKET-DATABASE-ROLE-BOUNDARY-V1"
+short_name = "market-database-role-boundary"
+owner = "Market"
+owner_repository = "rust_quant_alpha"
+manifest_status = "not_created"
+manifest_kind = "owner_child"
+manifest_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F3C-MARKET-DATABASE-ROLE-BOUNDARY-V1/manifest.toml"
+evidence_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F3C-MARKET-DATABASE-ROLE-BOUNDARY-V1/evidence.md"
+verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F3C-MARKET-DATABASE-ROLE-BOUNDARY-V1/verdict.json"
 manifest_revision = "not_created"
 evidence_revision = "not_created"
 verdict_revision = "not_created"
-depends_on = ["MIG-MKT-F3A-MARKET-BAR-STORAGE-V1"]
+depends_on = ["MIG-MKT-F3B-MARKET-CANDLE-SHARD-LIFECYCLE-V1"]
 
 [[program.children]]
 child_id = "MIG-MKT-F4A-DATASET-SNAPSHOT-V1"
