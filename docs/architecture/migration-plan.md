@@ -83,6 +83,8 @@
 
 验证：同一基线可以在迁移前后重复执行，并能识别策略结论、订单参数、状态机和 Contract 漂移。
 
+<a id="stage-1"></a>
+
 ## 5. 阶段 1：先建立防腐骨架，不搬业务
 
 - 建立 `apps` 与 `crates/{domains,quant,contracts,adapters,platform}` 目录约定；
@@ -104,6 +106,8 @@
 - Migration 采用单一有序目录和 owner 文件名。
 
 验证：不迁移任何业务行为，现有构建仍可运行；legacy ratchet 只拦已覆盖旧目录中的新增违规，不因历史债务让全仓长期红灯。它不等于 target-layout 已受保护：首个 `structure_only` 目录搬迁前，P0 门禁必须对目标 package/app 注入违规能失败、未知 package 不可静默跳过，并有当前已提交 revision 的 CI/本地证据。
+
+<a id="stage-2"></a>
 
 ## 6. 阶段 2：先完成 Market → Strategy → Research 上游地基，再进入执行 Golden Slice
 
@@ -140,7 +144,80 @@ Registry 已登记的 `MIG-MKT-F3-MARKET-BAR-STORAGE-V1` 与 `MIG-MKT-F4-DATASET
 
 M4A 只冻结 canonical bar，不能把 legacy 当前 `exchange_symbols` 或 current-live 币池冒充历史 universe。`MIG-MKT-F4B-INSTRUMENT-LIFECYCLE-FACTS-V1` 仅由 Market 发布 listing/status/availability/revision 事实；历史 universe 的纳入/剔除算法、成员关系和 `DatasetManifest` 仍归 Research。F4B 因新增 Market owner storage/DDL 而依赖已经建立 schema-tool 与数据库角色边界的 F3C；它不读取 F4A 的 bar snapshot，因此不伪造 F4A 代码依赖。未来 Research successor 必须同时引用 F4A 与 F4B，并按实际策略需要继续依赖独立的历史 InstrumentRules、funding/index/mark Market successor，不能把这些能力塞进 F4B。
 
-F4B 首个实现只允许复用 legacy `exchange_symbols` current-state、`exchange_symbol_listing_events` first-seen 和 raw payload 做可审计回填，并以真实 Postgres Adapter 提供 append/query；不得在 Market target 中复制裸 `reqwest` 交易所接口。当前 SDK 已覆盖 Binance/OKX/Bitget/Bybit 的相关 public endpoint，但 Gate 缺少全量 contracts、KuCoin 尚无对应 SDK domain；持续采集必须由 Exchange SDK owner 先补齐端点，再由独立 Market ingest successor 接入。缺失 SDK 能力不得在 F4B 中用临时 HTTP 绕过。
+F4B 首个实现只允许复用 legacy `exchange_symbols` current-state、
+`exchange_symbol_listing_events` first-seen 和 raw payload 做可审计回填，并以真实
+Postgres Adapter 提供 append/query；不得在 Market target 中复制裸 `reqwest` 交易所
+接口。F4B 为保全旧库事实可以解析 legacy 六家存量 payload，但迁移发布 V1 的持续采集、
+readiness、SDK 验收和生产 inventory 精确限定为 `binance_usdm + okx_swap`。任何其他
+provider 配置必须显式 Unsupported，不能静默跳过或回退裸 HTTP。
+
+当前 `MIG-20260729-migration-check-p1` 只能以 `rust_quant_alpha` 根目录、role map、
+Release Unit 和 `owner_repository` 规则检查本仓库 Manifest，不能对
+`crypto_exc_all` 的 Git diff、Cargo package、Evidence 路径和 Owner 仓库身份形成有效
+预检。必须先由 Architecture Governance 的
+`MIG-20260730-CROSS-REPOSITORY-MIGRATION-CHECK-P2` 增加显式目标仓库根与仓库身份、
+目标仓库本地 diff/package/path 校验，以及“纯 library workspace 无部署 Release Unit”
+的 fail-closed 规则；它不得修改 SDK 业务代码，也不得把外部仓库 diff 混入
+`rust_quant_alpha` 的 diff。
+
+P2 必须把三个仓库上下文分开：checker 与 repository profile 仍归
+`rust_quant_alpha`，被检查的 Manifest/Evidence/Cargo/Git diff 归
+`scope.owner_repository`，registration/current Registry 与父计划归其不可变
+repository ref。CLI 只接受显式的
+`--repository-root <repository-id>=<path>` 映射和
+`<repository-id>:<manifest-path>`，不得猜测 sibling 路径、读取环境变量 fallback 或把
+绝对路径保存进 Manifest。每个 root 规范化后必须与该目录的
+`git rev-parse --show-toplevel` 完全一致；Manifest、Evidence、required artifact 和
+working-tree diff 都只能相对目标 owner root 解析。
+
+目标仓库的 package/path 规则由 Architecture Governance 维护并由 Manifest 固定
+ref/hash 的 repository profile 提供，必须覆盖 Cargo root package `.`、全部 workspace
+package 和通用源码路径，不能继续硬编码 `apps/`、`crates/domains/` 或
+`rust_quant_alpha`。profile 同时把构建工件分为
+`deployable_release_units` 与 `non_deployable_library_workspace`：后者必须拒绝伪造
+Release Unit、binary allowlist 和部署资格，允许
+`release_unit_manifest_hashes = []` 的前提是 profile ref/hash 已冻结、所有受影响 library
+package/feature/test matrix 已声明且实际 Cargo target 没有被冒充为生产 App。
+
+P2 还必须同时读取 `registry_ref` 指向的 registration revision 和显式 Registry root 的
+当前 HEAD：目标 child 的 Program、ID、kind、owner、owner repository、三条 artifact
+path 与 `depends_on` 不得改变；当前状态为 `created` 时 Manifest/Evidence hash 必须匹配
+目标仓库内容。`not_created` 只允许当前 child 在两阶段创建期间接受只读 preflight，永远
+不能满足 predecessor；依赖结果必须分别报告 registration 存在、实施输入资格和
+current-revision Verdict 闭合，不能折成一个人工布尔值。单 child 检查阻断该 child、其
+传递依赖闭包及全局 child ID 唯一性错误；无关 Program 的完整状态矩阵由独立 Registry
+一致性检查报告，不能伪装成 SDK I1 的依赖失败。合法 active Program 的未完成 sibling
+不得阻塞 SDK I1。
+
+`depends_on` 必须按整个 Registry 中全局唯一的 `child_id` 解析，不能只在当前 Program
+的 sibling 中查找。跨 Program 依赖只允许连接两个 `current_migration` Program，且
+predecessor 的 `owner_repository` 必须已经列入 successor Program 的 `repositories`；
+缺失、重复、指向 historical child 或形成全局依赖环都必须 fail closed。父 Program 的
+`planned` / `active` 状态不能替代 predecessor child 的 Manifest/Evidence/Verdict。
+
+Exchange SDK owner 的
+`MIG-EXSDK-I1-BINANCE-OKX-PUBLIC-INSTRUMENT-V1` 独立补齐两家 public instrument
+endpoint、typed DTO、scope/completeness、错误/限频和 public-only facade；其业务语义
+不依赖 Market 的 F4B 事实模型，但实施治理依赖上述 P2 提供 `crypto_exc_all` 本地只读
+预检。Market 的
+`MIG-MKT-F4C-BINANCE-OKX-INSTRUMENT-INGEST-V1` 同时依赖 F4B 与该 SDK child，才承接
+scheduler、lease、cursor、run ledger 和持续写入。Bitget、Bybit、Gate、KuCoin 以及其他
+交易所分别延期到后续 Manifest，不阻塞两家 V1，也不得在 V1 中删除其 legacy 路径或宣称
+已迁移。
+
+SDK I1 只新增 Binance USDⓈ-M 与 OKX SWAP 的 typed public instrument capability，不
+禁用、删除或宣称迁移 `crypto_exc_all` 已有的其他 provider module，也不解释 Market
+runtime provider 配置。`binance_usdm + okx_swap` inventory、`UnsupportedProvider`、
+perpetual/settle/quote 选择和 source completeness policy 归 Market F4C；SDK 只忠实返回
+endpoint 的 typed response、provider error 与 quota evidence。Binance response 中的
+`contractType` 与 filters、OKX 请求中的 `instType=SWAP` 及返回规则不得被 SDK 静默丢弃
+或先转为 `f64`，由 Market Adapter 在版本化 source profile 下无损转换为 `Decimal` 和
+canonical observation。
+
+既有 `MIG-MKT-F2-PUBLIC-KLINE-INGEST-V1` 只完成 OKX K 线垂直切片，不代表迁移发布 V1
+已经满足 Binance 覆盖。发布 V1 完成前仍须另行登记 Binance public Kline 的 SDK/Gateway
+successor，并证明与 canonical MarketBar 的时间、finality、Decimal、volume、cursor 和
+错误 parity；不得把“只做两家”误写成“只需把现有 OKX 做完”。
 
 下文 `A → C0 → B0 → B → C1` 只描述**上游地基完成之后**的执行 Golden Slice 内部依赖，不表示可以从 A 开始迁移整个系统。可以提前冻结防腐 Contract 草案，但在 M1～M4B、S1、R1 获得当前 revision 的 Verdict 前，不得创建 A1 的数据库、Outbox、Dispatcher、Web consumer 或 runtime wiring。
 
@@ -336,6 +413,8 @@ Vegas 不是单一可实施 Manifest。开始任何目标代码迁移前，必�
 9. 旧结果表降级为兼容投影，调用方归零后删除或冻结写入。
 
 验证：同一个执行请求只能生成一个稳定 Core OrderIntent；Web 投影丢失可从 Core 重建；Core 不再把 Web 表当 OMS。
+
+<a id="stage-4"></a>
 
 ## 8. 阶段 4：按业务链路继续迁移
 

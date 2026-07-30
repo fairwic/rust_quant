@@ -125,6 +125,23 @@ Adapters：
 
 不要顺手清理相邻 legacy，不建立无真实调用方的兼容层、Port 或扩展点。Fake/Mock 不算生产 Adapter；Fake-only Port 只能停在有明确承接项的 `implementing` Manifest，不能被标为已完成。
 
+跨仓库 Owner child 必须使用两阶段登记：先提交 Registry 的 `not_created` 条目，冻结
+child ID、owner repository、artifact path 与 `depends_on`；目标 Manifest 再钉住该
+registration revision；Manifest/Evidence 提交后，Registry 才更新为 `created` 和内容
+hash。`not_created` 可以位于 current-migration 的 `planned` 或 `active` Program，但父
+Program 的 `active` 不向 sibling 传播实施、依赖、发布或 cutover 资格。registration
+提交前不得创建目标 Manifest 或源码目录。
+
+跨仓库 `migration-check` 必须显式区分 checker/profile、目标 owner 与 Registry root；
+Manifest、Evidence、Cargo metadata、required artifact 和 Git diff 全部相对
+`scope.owner_repository` 检查，并验证 canonical root 等于该仓库 Git top-level。纯 SDK
+library workspace 使用不可部署 repository profile，不得伪造 Core Release Unit、binary
+allowlist 或部署资格。
+
+Registry 的 `depends_on` 按全局唯一 child ID 解析并做全局环检测；跨 Program 边只允许
+连接 current-migration Program，且 predecessor owner repository 必须已经列入 successor
+Program。不能用父 Program 状态、复制 child 或只查 sibling 的方式伪造依赖闭合。
+
 当父迁移计划明确记录用户决定延后受跟踪 CI 时，必须区分“实施输入”与“已满足依赖”：successor 只能钉住已提交、Registry 为 `created`、Manifest/Evidence/hash 和本地验证完整的 predecessor，并在 `dynamic_input_artifacts` 记录其代码/API/schema/lockfile hash；`predecessor_verdicts` 仍为空，状态最高为 `implementing`。此时只可编写源码、schema、纯/离线逻辑、公共只读 Adapter 和 disposable integration test，不得部署 runtime、切换事实源、写生产数据库、触发跨 Owner 副作用或交易所 mutation；predecessor 漂移时 descendant Evidence 必须失效并重验。
 
 ### 5. 按风险验证
@@ -164,6 +181,7 @@ Adapters：
 ### Market、Control 与跨仓库商业边界
 
 - OHLCV/Candle、时间、确认状态、数据源/序号和缺口语义属于 Market。legacy `common::CandleItem` 只能作为迁移来源；目标 canonical `MarketBar/Candle` 位于 `domains/market/model`，数据库 Row、交易所 DTO 与测试 fixture 在 Adapter/Testkit 边界映射，不能迁入 kernel 或 `quant/*`。
+- Exchange SDK 只拥有 endpoint/query、认证传输、provider DTO/envelope/error/quota 和调用者请求语义的忠实表达；Market 拥有 runtime provider inventory、source profile、完整性/readiness、observed/available time、Decimal/canonical 映射、节流调度与恢复。一次迁移只交付部分 provider 时，不得因此禁用或删除 SDK 中已有的其他 provider module；延期 provider 由 Market 入口显式 `Unsupported`，并分别等待后续 Manifest。
 - Control 只拥有 Release/激活指针、发布控制和 Kill Switch；Market 拥有 `MarketDecisionReadiness`（按 instrument/timeframe/source 的 Fresh/Stale/Gapped/Unknown），Account 拥有 ExchangeSession，Execution 拥有执行可用性。Control 只能聚合只读诊断，不能接管或在热路径替这些 owner 放行。
 - Control 只能激活 Strategy owner 已发布的不可变 `ActivationEligibility`；eligibility 必须同时绑定 release stage 与 deployment channel，Research/Retired 不能仅因 Snapshot 已发布而被激活。
 - Web 是用户、会员、combo、credential、产品资格和 canonical `ExecutionRequest` 的唯一 owner。Core 的信号生成/handoff 只能通过 `CreateExecutionRequestFromSignalV1` 提交版本化 `StrategySignal` 与幂等身份；不得查询订阅、接收候选用户/credential/risk profile 明细，或自行扇出/创建 Web 请求。Web 创建请求后，Execution 可以消费其中稳定授权引用并按 owner Contract 校验。
