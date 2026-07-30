@@ -207,12 +207,16 @@ scheduler、lease、cursor、run ledger 和持续写入。Bitget、Bybit、Gate�
 
 SDK I1 只新增 Binance USDⓈ-M 与 OKX SWAP 的 typed public instrument capability，不
 禁用、删除或宣称迁移 `crypto_exc_all` 已有的其他 provider module，也不解释 Market
-runtime provider 配置。`binance_usdm + okx_swap` inventory、`UnsupportedProvider`、
+runtime provider 配置。I1 必须提供不启用 root `full-sdk` 的最小公共产品 feature；旧
+`binance` feature 继续保持兼容，Market public gateway 不得借此获得 `CryptoSdk`、raw、
+账户或交易门面。`binance_usdm + okx_swap` inventory、`UnsupportedProvider`、
 perpetual/settle/quote 选择和 source completeness policy 归 Market F4C；SDK 只忠实返回
 endpoint 的 typed response、provider error 与 quota evidence。Binance response 中的
 `contractType` 与 filters、OKX 请求中的 `instType=SWAP` 及返回规则不得被 SDK 静默丢弃
-或先转为 `f64`，由 Market Adapter 在版本化 source profile 下无损转换为 `Decimal` 和
-canonical observation。
+或先转为 `f64`。F4C 只把 identity、product、status、listing、observed、available 映射为
+canonical lifecycle observation；rules/precision/limits 的 Decimal 转换、有效时间、
+revision/hash 和 current/point-in-time query 归独立 InstrumentRules successor，不能塞进
+lifecycle Aggregate，也不能经 F4B raw JSON 旁路发布。
 
 既有 `MIG-MKT-F2-PUBLIC-KLINE-INGEST-V1` 只完成 OKX K 线垂直切片，不代表迁移发布 V1
 已经满足 Binance 覆盖。发布 V1 完成前仍须另行登记 Binance public Kline 的 SDK/Gateway

@@ -80,8 +80,8 @@ manifest_kind = "owner_child"
 manifest_path = "rust_quant_alpha:docs/architecture/migrations/MIG-20260730-CROSS-REPOSITORY-MIGRATION-CHECK-P2/manifest.toml"
 evidence_path = "rust_quant_alpha:docs/architecture/migrations/MIG-20260730-CROSS-REPOSITORY-MIGRATION-CHECK-P2/evidence.md"
 verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-20260730-CROSS-REPOSITORY-MIGRATION-CHECK-P2/verdict.json"
-manifest_revision = "sha256:4512ebac25b8afec6c73a755df4f833c8bc4151b7b7f29533e9c1aabf18699e8"
-evidence_revision = "sha256:e951a6e569c56cc4ca961819f0629a929bcae3d65db7fa91289335a7f1699e27"
+manifest_revision = "sha256:0306d68d4f5f21f65d00742381e2a1a33e01530d5cad6310e9e954edaf25adab"
+evidence_revision = "sha256:b229ef78aa32bcd41da333ec16ba235d1ee18bce02ce6fff786e45ab6d23b887"
 verdict_revision = "not_created"
 depends_on = ["MIG-20260729-migration-check-p1"]
 
