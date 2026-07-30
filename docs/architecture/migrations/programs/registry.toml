@@ -259,8 +259,8 @@ manifest_kind = "owner_child"
 manifest_path = "crypto_exc_all:docs/architecture/migrations/MIG-EXSDK-I1-BINANCE-OKX-PUBLIC-INSTRUMENT-V1/manifest.toml"
 evidence_path = "crypto_exc_all:docs/architecture/migrations/MIG-EXSDK-I1-BINANCE-OKX-PUBLIC-INSTRUMENT-V1/evidence.md"
 verdict_path = "crypto_exc_all:docs/architecture/migrations/MIG-EXSDK-I1-BINANCE-OKX-PUBLIC-INSTRUMENT-V1/verdict.json"
-manifest_revision = "sha256:489a3471264ab252a5c4f66b3d8ee02c85efd04e84c668e8efa854fd1568c2fc"
-evidence_revision = "sha256:3d73287dce1324f89c32bd2d8a47acfc2fabfdf6808cfb085f9daa247aa30e52"
+manifest_revision = "sha256:05a12af1a61f6735de0df4404bd11be20e5e8cc0b562f547085cb8190c64d4e2"
+evidence_revision = "sha256:48a0cf9e07bb8340051f792b8cfa9797bc198839b91724359687d3b90183a5d3"
 verdict_revision = "not_created"
 depends_on = ["MIG-20260730-CROSS-REPOSITORY-MIGRATION-CHECK-P2"]
 
