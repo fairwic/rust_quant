@@ -265,6 +265,39 @@ verdict_revision = "not_created"
 depends_on = ["MIG-20260730-CROSS-REPOSITORY-MIGRATION-CHECK-P2"]
 
 [[program.children]]
+child_id = "MIG-EXSDK-K1-BINANCE-USDM-PUBLIC-KLINE-V1"
+short_name = "binance-usdm-public-kline-sdk"
+owner = "Exchange SDK"
+owner_repository = "crypto_exc_all"
+manifest_status = "not_created"
+manifest_kind = "owner_child"
+manifest_path = "crypto_exc_all:docs/architecture/migrations/MIG-EXSDK-K1-BINANCE-USDM-PUBLIC-KLINE-V1/manifest.toml"
+evidence_path = "crypto_exc_all:docs/architecture/migrations/MIG-EXSDK-K1-BINANCE-USDM-PUBLIC-KLINE-V1/evidence.md"
+verdict_path = "crypto_exc_all:docs/architecture/migrations/MIG-EXSDK-K1-BINANCE-USDM-PUBLIC-KLINE-V1/verdict.json"
+manifest_revision = "not_created"
+evidence_revision = "not_created"
+verdict_revision = "not_created"
+depends_on = ["MIG-EXSDK-I1-BINANCE-OKX-PUBLIC-INSTRUMENT-V1"]
+
+[[program.children]]
+child_id = "MIG-MKT-F2B-BINANCE-USDM-PUBLIC-KLINE-V1"
+short_name = "binance-usdm-public-kline-gateway"
+owner = "Market"
+owner_repository = "rust_quant_alpha"
+manifest_status = "not_created"
+manifest_kind = "owner_child"
+manifest_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F2B-BINANCE-USDM-PUBLIC-KLINE-V1/manifest.toml"
+evidence_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F2B-BINANCE-USDM-PUBLIC-KLINE-V1/evidence.md"
+verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F2B-BINANCE-USDM-PUBLIC-KLINE-V1/verdict.json"
+manifest_revision = "not_created"
+evidence_revision = "not_created"
+verdict_revision = "not_created"
+depends_on = [
+  "MIG-MKT-F2R-CAPABILITY-API-SPI-V1",
+  "MIG-EXSDK-K1-BINANCE-USDM-PUBLIC-KLINE-V1",
+]
+
+[[program.children]]
 child_id = "MIG-MKT-F4C-BINANCE-OKX-INSTRUMENT-INGEST-V1"
 short_name = "binance-okx-instrument-metadata-ingest"
 owner = "Market"
