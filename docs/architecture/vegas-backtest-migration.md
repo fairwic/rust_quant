@@ -331,7 +331,7 @@ tests/
 
 Research 只能编排，不复制其他 owner 的政策。
 
-`DatasetManifest` 只能冻结并引用 Market 已存在的 point-in-time 历史 stream / snapshot。它至少固定 `market_data_source_profile_id`、exchange/product/quote、stream partition、event time、首次 `available_at`/ingested-at 边界、数据 revision、研究 `as_of` cutoff、缺口/重复/修订政策、当时有效的 InstrumentRules、funding/index/mark 工件，以及带 `effective_from/effective_to`、上市/退市和纳入/剔除算法版本的历史 universe membership。Research/quant-lab 对这些输入只读回放：不得直连 Market 表、写入或回填 K 线、持有 `MarketDataAccessCredential`，也不得用用户 `credential_reference` 替代公共数据来源。数据补采、修订或 universe 重建是 Market owner 的独立子 Manifest；它产生新的不可变版本，不覆盖已引用版本。
+`DatasetManifest` 只能冻结并引用 Market 已存在的 point-in-time 历史 stream / snapshot。它至少固定 `market_data_source_profile_id`、exchange/product/quote、stream partition、event time、首次 `available_at`/ingested-at 边界、数据 revision、研究 `as_of` cutoff、缺口/重复/修订政策、当时有效的 InstrumentRules、funding/index/mark 工件，以及带 `effective_from/effective_to`、上市/退市和纳入/剔除算法版本的历史 universe membership。Research/quant-lab 对 Market 输入只读：不得直连 Market 表、写入或回填 K 线、持有 `MarketDataAccessCredential`，也不得用用户 `credential_reference` 替代公共数据来源。Market 只负责行情、instrument 生命周期、规则和 supplemental stream 的补采/修订并发布新事实版本；Research 负责 universe selection 与 `DatasetManifest` 的重建并发布新 manifest，任何旧版本都不覆盖。
 
 `EvaluationManifest` 必须在查看目标 OOS 结果前固定 hypothesis、训练/验证/OOS 窗口、walk-forward folds、purge/embargo、参数空间、优化器 algorithm/version/Seed/预算、候选选择规则、成本压力、最小事件/币种/市场状态覆盖、收益集中度和 holdout 重用计数。全部 trial（包括失败和淘汰项）写入不可变 trial ledger，不能只保存胜出参数。
 
@@ -593,7 +593,7 @@ Parent Program 只协调基线、依赖、跨 owner 验收和最终关闭条件�
 
 | Child Manifest | 唯一 Owner | 迁移内容 | 主要依赖与验收 |
 | --- | --- | --- | --- |
-| `V0-market-point-in-time-dataset` | Market | point-in-time stream、revision、历史 universe、InstrumentRules、funding/index/mark 与内容 hash | 可按 `as_of` 重建数据和成员关系；补采只产生新版本 |
+| `V0-market-point-in-time-dataset` | Market | 早期错误登记，混合 point-in-time Market 事实、Research universe selection 与多种独立 stream | 禁止实施；等待按 Owner/能力拆分的 successor |
 | `V1-research-run-governance` | Research | Experiment、BacktestRun、Dataset/Evaluation Manifest、trial ledger、RunSpec、ResearchDecisionContextSnapshot、Checkpoint | RunSpec 在读取结果前冻结；Research 不制造 Web request |
 | `V2-strategy-vegas-evaluator` | Strategy | Vegas evaluator、规则、candidate levels、evidence、RuntimeSnapshot | 固定输入下逐 K 线 Signal/evidence parity |
 | `V3-strategy-evaluation-state` | Strategy | EvaluationScopeId、state schema、预热/缺口/重启规则与 store Port | 并行 Run 隔离；冷启动、增量和恢复输出一致 |
@@ -609,12 +609,14 @@ Parent Program 只协调基线、依赖、跨 owner 验收和最终关闭条件�
 
 每个子 Manifest 必须单独记录 `owner`、`scope`、`baseline`、`target contract`、`evidence`、`rollback` 和 `delete gate`。如果 Vegas 模式在策略语义、状态 schema、运行入口或交付物上互斥，必须把对应行继续拆成 `Vx-<mode>` 独立 Manifest；不得把多个 mode 藏在同一 Manifest 的可选步骤中，也不得通过一个“共同 Owner”掩盖多 owner 修改。
 
+Registry 已冻结的 V0 使用空依赖，并把 `selection_algorithm_hash` 放进 Market -> Research Contract；依赖它的 V1 也因此不能继续实施。不得原地修改两者。恢复 Vegas 时先以 Market 子 Manifest 分别发布 MarketBar、instrument lifecycle、InstrumentRules 与所需 supplemental stream 工件，再登记 Market facts bundle successor；Research successor 随后拥有 universe selection/membership、选择算法 hash 和 `DatasetManifest`。
+
 ### 13.1 基线冻结责任
 
 Parent Program 定义共同 fixture 目录和比较协议，各 owner 只冻结自己拥有的基线：
 
-- Market 固定 BTC、ETH、其他币种的多个 point-in-time 窗口、历史 universe 与数据 revision；
-- Research 固定 Run identity、Dataset/Evaluation Manifest、SimulationProfile、初始模拟资金和 Evidence schema；
+- Market 固定 BTC、ETH、其他币种的多个 point-in-time 行情窗口、instrument lifecycle/rules 与数据 revision；
+- Research 固定历史 universe selection/membership、Run identity、Dataset/Evaluation Manifest、SimulationProfile、初始模拟资金和 Evidence schema；
 - Strategy 固定逐 K 线 Signal、EvaluationState before/after、candidate level 与 evidence；
 - Portfolio 固定排序、容量、净额与 Target；
 - Risk 固定候选失效价、最终 stop、RiskDecision/RiskAction 与原因；

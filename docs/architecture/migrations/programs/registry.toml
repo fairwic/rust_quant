@@ -209,6 +209,21 @@ evidence_revision = "sha256:ba0ec2c5fc7120e4a2f2eeaa0f7fe9219cbcae1eeb1b5af736e4
 verdict_revision = "not_created"
 depends_on = ["MIG-MKT-F3A-MARKET-BAR-STORAGE-V1"]
 
+[[program.children]]
+child_id = "MIG-MKT-F4B-INSTRUMENT-LIFECYCLE-FACTS-V1"
+short_name = "market-instrument-lifecycle-facts"
+owner = "Market"
+owner_repository = "rust_quant_alpha"
+manifest_status = "not_created"
+manifest_kind = "owner_child"
+manifest_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F4B-INSTRUMENT-LIFECYCLE-FACTS-V1/manifest.toml"
+evidence_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F4B-INSTRUMENT-LIFECYCLE-FACTS-V1/evidence.md"
+verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F4B-INSTRUMENT-LIFECYCLE-FACTS-V1/verdict.json"
+manifest_revision = "not_created"
+evidence_revision = "not_created"
+verdict_revision = "not_created"
+depends_on = ["MIG-MKT-F3C-MARKET-DATABASE-ROLE-BOUNDARY-V1"]
+
 [[program]]
 program_id = "MP-market-velocity-execution-v1"
 title = "Market Velocity 用户执行链路"
@@ -795,6 +810,9 @@ direction = "rust_quant_alpha::Build -> rust_quant_alpha::Research"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
 required_fields = ["git_revision", "patch_sha256", "cargo_lock_sha256", "toolchain", "target", "profile", "features", "package", "entry_checksum", "dependency_graph_sha256", "prng_version", "scheduler_version"]
 
+# 该早期 Contract 把 Research-owned selection_algorithm_hash 错放进 Market 输出，
+# 且已经随 Registry revision 冻结；不得原地改写或实施。未来使用分离 Market facts
+# 与 Research DatasetManifest 的新版本 Contract。
 [[program.contracts]]
 contract_id = "PointInTimeDatasetManifestV1"
 version = "v1"
@@ -822,6 +840,8 @@ direction = "rust_quant_alpha::Strategy -> rust_quant_alpha::Control"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
 required_fields = ["candidate_definition_artifact_ref", "research_execution_artifact_ref", "completed_evidence_ref", "evaluation_gate_result_ref", "released_definition_artifact_ref", "released_build_digest", "cross_build_parity_ref", "approved_by", "approved_at", "allowed_deployment_channels", "receipt_hash"]
 
+# 该早期 child 的空依赖和混合范围已经冻结，不能绕过 Market foundation 或继续实施。
+# 后续必须新登记 Market facts successor；Research-owned universe/DatasetManifest 另建 child。
 [[program.children]]
 child_id = "MIG-VEGAS-V0-MARKET-POINT-IN-TIME-DATASET-V1"
 short_name = "V0-market-point-in-time-dataset"

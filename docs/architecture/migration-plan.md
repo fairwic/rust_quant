@@ -37,7 +37,7 @@
 - legacy 来源与目标实现必须分仓冻结；不得把 `rust_quant` 未提交工作树复制为目标基线，也不得继续在 legacy 仓库创建目标架构业务包。
 - 自动执行只可以从 Web owner 创建的 canonical `ExecutionRequest` 进入；不存在 Core 自营/系统自营执行路径，也不得以技术迁移名义补建该路径。
 - 固定服务 API Key 只服务于 Market 公共只读行情采集；它不能作为 Account、Risk、用户 credential 或 `ExecutionRequest` 的输入、回退或前置条件。
-- 每次固定 Market Key 访问都必须记录非敏感 key ref、Market owner、只读 endpoint/method、观察时间、权限/响应 evidence ref + hash 与“无用户 credential fallback”；Research 只读消费已发布 DatasetManifest。
+- 每次固定 Market Key 访问都必须记录非敏感 key ref、Market owner、只读 endpoint/method、观察时间、权限/响应 evidence ref + hash 与“无用户 credential fallback”；Research 只读消费 Market 已发布的 point-in-time 事实工件，并据此生成自己的 `DatasetManifest`。
 
 ## 3. 每个迁移切片的固定清单
 
@@ -72,7 +72,8 @@
 - 记录 `quant_core` 与 `quant_web` 当前表 owner、写入者、读取者和数据量；
 - 为关键策略建立固定输入下的 evaluator、portfolio、risk 和 execution parity 基线；
 - 为 Vegas 以 current-migration Owner 子 Manifest 固定 point-in-time DatasetManifest、EvaluationManifest、四个 Domain Policy Snapshot、`ResearchDecisionContextSnapshot`、SimulationProfile、ResearchExecutionArtifactRef、指标预热长度、动态 Evidence、RngSpec 与 SchedulerSpec；
-- DatasetManifest 必须覆盖 Market stream revision/首次可见时间、历史 universe 成员有效期与上市/退市、纳入算法、数据缺口/修订政策、当时有效 InstrumentRules 和需要的 funding/index/mark 工件；
+- Market 必须发布可引用的 stream revision/首次可见时间、instrument 生命周期、当时有效 InstrumentRules 和需要的 funding/index/mark point-in-time 事实工件；
+- Research-owned `DatasetManifest` 必须固定所引用的 Market 工件、历史 universe 成员有效期、纳入/剔除算法与 hash，以及数据缺口/修订政策；
 - EvaluationManifest 必须在读取目标 OOS 结果前固定 train/validation/OOS、walk-forward folds、purge/embargo、参数空间、优化器/Seed/预算、选择规则、holdout 重用和收益集中度门；
 - 记录 Vegas 当前 backtest、paper/live 的实际窗口差异、状态缓存 identity 和信号字段差异；
 - 记录 `TradingState`、`deal_signal`、`StrategyExecutor`、全局 Registry、零字段 Service/Calculator 的调用方、owner 混合和删除条件；
@@ -115,9 +116,10 @@ M1 canonical MarketBar / instrument / timeframe / finality
   -> G2 Architecture Governance P0.1 门禁
   -> M2R Market public-Kline structure-only 模块/API-SPI 拆分
   -> M3A Market owner storage + historical query
-  -> M4A point-in-time DatasetSnapshot
+  -> M4A point-in-time MarketBar DatasetSnapshot
+  + M4B point-in-time instrument lifecycle facts
   -> S1 StrategyDefinition / StrategyRuntimeSnapshot / Evaluator / Signal
-  -> R1 deterministic backtest + strategy parity
+  -> R1 Research-owned DatasetManifest / universe selection / deterministic backtest + strategy parity
   -> A Strategy/Web handoff
   -> C0 Execution intake
   -> B0/B deterministic dry-run
@@ -136,7 +138,11 @@ M2 已暴露出两个会在 M3A 继续放大的结构风险：canonical bar 与 
 
 Registry 已登记的 `MIG-MKT-F3-MARKET-BAR-STORAGE-V1` 与 `MIG-MKT-F4-DATASET-SNAPSHOT-V1` 依赖边不能原地改写，因此保留为不可实施的早期登记；实际后续使用新 successor `MIG-MKT-F3A-MARKET-BAR-STORAGE-V1 -> MIG-MKT-F4A-DATASET-SNAPSHOT-V1`，其中 F3A 显式依赖 M2R。不得通过修改旧 child 的 `depends_on` 绕过 registration revision。
 
-下文 `A → C0 → B0 → B → C1` 只描述**上游地基完成之后**的执行 Golden Slice 内部依赖，不表示可以从 A 开始迁移整个系统。可以提前冻结防腐 Contract 草案，但在 M1～M4A、S1、R1 获得当前 revision 的 Verdict 前，不得创建 A1 的数据库、Outbox、Dispatcher、Web consumer 或 runtime wiring。
+M4A 只冻结 canonical bar，不能把 legacy 当前 `exchange_symbols` 或 current-live 币池冒充历史 universe。`MIG-MKT-F4B-INSTRUMENT-LIFECYCLE-FACTS-V1` 仅由 Market 发布 listing/status/availability/revision 事实；历史 universe 的纳入/剔除算法、成员关系和 `DatasetManifest` 仍归 Research。F4B 因新增 Market owner storage/DDL 而依赖已经建立 schema-tool 与数据库角色边界的 F3C；它不读取 F4A 的 bar snapshot，因此不伪造 F4A 代码依赖。未来 Research successor 必须同时引用 F4A 与 F4B，并按实际策略需要继续依赖独立的历史 InstrumentRules、funding/index/mark Market successor，不能把这些能力塞进 F4B。
+
+F4B 首个实现只允许复用 legacy `exchange_symbols` current-state、`exchange_symbol_listing_events` first-seen 和 raw payload 做可审计回填，并以真实 Postgres Adapter 提供 append/query；不得在 Market target 中复制裸 `reqwest` 交易所接口。当前 SDK 已覆盖 Binance/OKX/Bitget/Bybit 的相关 public endpoint，但 Gate 缺少全量 contracts、KuCoin 尚无对应 SDK domain；持续采集必须由 Exchange SDK owner 先补齐端点，再由独立 Market ingest successor 接入。缺失 SDK 能力不得在 F4B 中用临时 HTTP 绕过。
+
+下文 `A → C0 → B0 → B → C1` 只描述**上游地基完成之后**的执行 Golden Slice 内部依赖，不表示可以从 A 开始迁移整个系统。可以提前冻结防腐 Contract 草案，但在 M1～M4B、S1、R1 获得当前 revision 的 Verdict 前，不得创建 A1 的数据库、Outbox、Dispatcher、Web consumer 或 runtime wiring。
 
 2026-07-29 已登记的 `MIG-MVE-A1-STRATEGY-SIGNAL-HANDOFF-V1` 错误地把 `depends_on` 冻结为空。Registry 的 child identity 与依赖不可原地改写，因此该 child 只能保留为被阻塞的 Contract/边界发现记录，不能继续充当实施前置。未来恢复 handoff 实施时必须新登记 successor child，并显式依赖 M4A、S1 与 R1 的不可变 Verdict。
 
@@ -259,7 +265,7 @@ Vegas 不是单一可实施 Manifest。开始任何目标代码迁移前，必�
 
 | Child Manifest | 唯一 Owner | `depends_on` | 单一职责 |
 | --- | --- | --- | --- |
-| `V0-market-point-in-time-dataset` | Market | 无 | 发布历史 stream/universe/revision/InstrumentRules 工件 |
+| `V0-market-point-in-time-dataset` | Market | 无 | 早期错误登记：混合 Market 事实与 Research universe selection，且绕过 Market foundation；禁止实施 |
 | `V1-research-run-governance` | Research | V0 | Dataset/Evaluation Manifest、RunSpec、Artifact/RNG/Scheduler ref 与 trial ledger |
 | `V2-strategy-vegas-evaluator` | Strategy | V1 | Vegas evaluator、规则与 Signal evidence parity |
 | `V3-strategy-evaluation-state` | Strategy | V2 | scoped state、预热、缺口与 checkpoint 语义 |
@@ -274,6 +280,8 @@ Vegas 不是单一可实施 Manifest。开始任何目标代码迁移前，必�
 | `V12-strategy-promotion-receipt` | Strategy | V8、V11 | candidate -> released 工件等价与晋级审计 |
 
 每个 child 还必须按 `structure_only -> behavior_change -> cutover -> legacy_delete` 拆分互斥模式；上表只表示业务依赖，不授权一个 commit 同时修改多 Owner。Migration Manifest 控制代码/事实源迁移，不能替代每次研究运行的 ResearchRunSpec/EvaluationManifest。
+
+已登记的 V0 及依赖它的 V1 identity/依赖边不能原地改写。恢复 Vegas 实施前，必须先分别完成 MarketBar snapshot、instrument lifecycle、InstrumentRules 与所需 supplemental stream 的 Market 子 Manifest，再新登记只组合 Market 事实引用的 V0 successor；随后新登记 Research successor，由它拥有 universe selection、membership、选择算法 hash 与 `DatasetManifest`。现有 `PointInTimeDatasetManifestV1` 的 Market -> Research 方向和 `selection_algorithm_hash` 字段归属错误，只保留为未创建的早期登记，禁止创建 snapshot 或实现。
 
 必须完成：
 

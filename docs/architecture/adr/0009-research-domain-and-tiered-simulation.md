@@ -37,7 +37,7 @@ Market 仍拥有历史行情事实。Research 只拥有“本次实验选择了�
 - 当时有效的 `InstrumentRulesSnapshot`、tick/step/min quantity、交易能力，以及策略需要的 funding/index/mark 等历史 stream；
 - 时区、bar close 语义、完整性报告和所有引用对象的 hash。
 
-Research 只能通过 Market 的只读历史 API/contract 解析并消费这些不可变工件，不能直连 Market 表、触发 K 线 backfill 或持有 `MarketDataAccessCredential`。任何补采、修订或 universe 重建都由 Market owner 产生新的不可变版本；旧 DatasetManifest 不被原地覆盖。
+Research 只能通过 Market 的只读历史 API/contract 解析并消费这些不可变工件，不能直连 Market 表、触发 K 线 backfill 或持有 `MarketDataAccessCredential`。行情、instrument 生命周期、规则或补充 stream 的补采与修订由 Market owner 产生新的不可变事实版本；Research 基于这些事实重建新的 universe selection 与 `DatasetManifest`，两类旧版本都不得原地覆盖。
 
 Strategy 仍拥有 `StrategyDefinition`、可执行技术 Artifact、Release 与 RuntimeSnapshot。ResearchEvidence 归 Research；Evidence 的 `Completed` 只表示本次运行及其引用工件完整、原子可见，不表示评价通过或可晋级。Research 依据运行前冻结的 `EvaluationManifest` 另行发布 `EvaluationGateResult { eligible | rejected | inconclusive }`。Strategy promote/rollback 不接管实验表；promote 必须创建 Strategy-owned `PromotionReceipt`，同时引用 Completed Evidence、eligible gate result、被研究的 candidate artifact 和即将发布的 released artifact 等价证据。
 

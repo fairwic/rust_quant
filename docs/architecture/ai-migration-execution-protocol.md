@@ -100,7 +100,7 @@ Core 采用跨仓库 greenfield 迁移时，`owner_repository` 表示子 Manifes
 - 不得跨库/跨服务开启大事务、共享 ORM 事务或以远程调用替代 Outbox/InBox 语义；
 - Contract 变更必须写明 producer、consumer、当前/目标版本、N/N-1 兼容窗口和各自的 `depends_on`。
 
-固定服务 API Key 只能作为 Market 公共只读数据采集能力；它不得成为 `ExecutionRequest`、Account、Risk、用户 credential 验证或任何执行前置条件，也不得用于交易所 mutation。声明该 Key 时，Manifest 必须以 `fixed_service_api_key_access_evidence` 记录非敏感 key ref、Market owner、允许 endpoint、只读 method、观察时间、响应/权限 evidence ref + hash，及 `no_user_credential_fallback = true`；Research 只能消费 Market 发布的 DatasetManifest，不能持有或回退到该 Key。
+固定服务 API Key 只能作为 Market 公共只读数据采集能力；它不得成为 `ExecutionRequest`、Account、Risk、用户 credential 验证或任何执行前置条件，也不得用于交易所 mutation。声明该 Key 时，Manifest 必须以 `fixed_service_api_key_access_evidence` 记录非敏感 key ref、Market owner、允许 endpoint、只读 method、观察时间、响应/权限 evidence ref + hash，及 `no_user_credential_fallback = true`；Research 只能消费 Market 发布的 point-in-time 事实工件并据此生成自己的 `DatasetManifest`，不能持有或回退到该 Key。
 
 #### 用户执行 Claim Contract（固定方向）
 

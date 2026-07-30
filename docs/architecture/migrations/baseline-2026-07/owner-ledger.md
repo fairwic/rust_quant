@@ -72,7 +72,8 @@ owner-agnostic `quant/`:math(common 的纯数值部分)、indicators(纯指标)�
 
 | 事实或 Contract | 唯一 owner | 迁移约束 |
 |---|---|---|
-| `MarketSnapshot`、历史 DatasetManifest、公共行情采集 | Market | 固定服务 API Key 只在此边界做公共只读采集；必须保存 endpoint/method/权限 evidence hash，不能传入用户执行链 |
+| `MarketSnapshot`、历史 Market stream/instrument/rules 工件、公共行情采集 | Market | 固定服务 API Key 只在此边界做公共只读采集；必须保存 endpoint/method/权限 evidence hash，不能传入用户执行链 |
+| `DatasetManifest`、历史 universe selection/membership 与数据指纹 | Research | 只能引用 Market 已冻结事实工件；纳入/剔除算法和选择理由归 Research，不得回写 Market 表或触发补采 |
 | Market Velocity `StrategySignal`、`StrategySignalHandoffV1` | Strategy | Market 只提供输入；Strategy 在本地事务写 handoff + Outbox，随后经 `CreateExecutionRequestFromSignalV1` 交给 Web |
 | canonical `ExecutionRequest`、用户 credential 状态、claim lease | Web (`rust_quan_web`) | Execution 只能经 Claim/Renew/Release Contract 读取/续租/释放，不能直写 Web 表或创建自营请求 |
 | `CoreExecutionIntake`、live `ExecutionPlan`、Order/Attempt/Protection | Execution (`rust_quant`) | B 阶段只生产 `ExecutionPlanningValue`；C1 才在 Execution 本地事务将其落实为持久 OMS aggregate |
