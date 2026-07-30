@@ -274,8 +274,8 @@ manifest_kind = "owner_child"
 manifest_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F4C-BINANCE-OKX-INSTRUMENT-INGEST-V1/manifest.toml"
 evidence_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F4C-BINANCE-OKX-INSTRUMENT-INGEST-V1/evidence.md"
 verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F4C-BINANCE-OKX-INSTRUMENT-INGEST-V1/verdict.json"
-manifest_revision = "sha256:c24826d2d923005e5cd19efd521e1c7a3a576fc02c40c63061db9ed3c7ee0c81"
-evidence_revision = "sha256:f7e8ce0174546531f84ca7b1e89d014b59cd3517926b43a85d189c9a184bd865"
+manifest_revision = "sha256:7ded006fae7022771f29beac5b2177812c4efbc9fcad27745391d3db2510a810"
+evidence_revision = "sha256:6590908d5ffa1395f4e0a5b718531df1501c38b788782a1b7f51ccdd1137f51a"
 verdict_revision = "not_created"
 depends_on = [
   "MIG-MKT-F4B-INSTRUMENT-LIFECYCLE-FACTS-V1",
