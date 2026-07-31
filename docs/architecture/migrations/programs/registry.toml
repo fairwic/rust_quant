@@ -398,6 +398,24 @@ evidence_revision = "sha256:be921a9edaeb78d8efe16e89fa2e4cd25385216765ca4f158ccf
 verdict_revision = "not_created"
 depends_on = ["MIG-EXSDK-K1-BINANCE-USDM-PUBLIC-KLINE-V1"]
 
+[[program.children]]
+child_id = "MIG-MKT-F5C-PUBLIC-SOURCE-TRANSPORT-BINDING-V1"
+short_name = "public-source-transport-binding"
+owner = "Market"
+owner_repository = "rust_quant_alpha"
+manifest_status = "not_created"
+manifest_kind = "owner_child"
+manifest_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F5C-PUBLIC-SOURCE-TRANSPORT-BINDING-V1/manifest.toml"
+evidence_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F5C-PUBLIC-SOURCE-TRANSPORT-BINDING-V1/evidence.md"
+verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F5C-PUBLIC-SOURCE-TRANSPORT-BINDING-V1/verdict.json"
+manifest_revision = "not_created"
+evidence_revision = "not_created"
+verdict_revision = "not_created"
+depends_on = [
+  "MIG-MKT-F5B-MARKET-WORKER-BOUNDED-SYNC-V1",
+  "MIG-EXSDK-K2-BINANCE-OKX-EXPLICIT-PUBLIC-TRANSPORT-V1",
+]
+
 [[program]]
 program_id = "MP-market-velocity-execution-v1"
 title = "Market Velocity 用户执行链路"
