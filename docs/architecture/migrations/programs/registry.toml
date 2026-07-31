@@ -350,6 +350,21 @@ evidence_revision = "sha256:29992aa151db13987c8a46873588fd10e3e551ff323fe9ce36f3
 verdict_revision = "not_created"
 depends_on = ["MIG-MKT-F3D-PROVIDER-NORMALIZED-SHARD-BINDING-V1"]
 
+[[program.children]]
+child_id = "MIG-MKT-F5B-MARKET-WORKER-BOUNDED-SYNC-V1"
+short_name = "bounded-market-worker-sync"
+owner = "Market"
+owner_repository = "rust_quant_alpha"
+manifest_status = "not_created"
+manifest_kind = "owner_child"
+manifest_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F5B-MARKET-WORKER-BOUNDED-SYNC-V1/manifest.toml"
+evidence_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F5B-MARKET-WORKER-BOUNDED-SYNC-V1/evidence.md"
+verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F5B-MARKET-WORKER-BOUNDED-SYNC-V1/verdict.json"
+manifest_revision = "not_created"
+evidence_revision = "not_created"
+verdict_revision = "not_created"
+depends_on = ["MIG-MKT-F5A-PAGINATED-BAR-SYNC-V1"]
+
 [[program]]
 program_id = "MP-market-velocity-execution-v1"
 title = "Market Velocity 用户执行链路"
