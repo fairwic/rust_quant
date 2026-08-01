@@ -117,6 +117,14 @@ Web 是 canonical `ExecutionRequest`、用户 credential 状态和 lease 的唯�
 
 对新增风险，`execution_request_id + claim_id + claim_fence + claim_expires_at` 必须进入 live Context subject binding、最终门禁、`GatewayCredentialCapability` 和 `MutationPermit`。capability/permit 的有效期不得晚于 claim；Gateway consume 时必须同时验证 current claim fence/expiry。claim 失效只冻结新开/加仓，不得中断已持久化 `SafetyObligation` 的 Query/Reconciliation/Cancel/Protect/Reduce/Close。
 
+### 4.1a 迁移风险分级（Migration Tier）
+
+见 [ADR-0016](adr/0016-migration-risk-tiering-and-fast-track.md)。每个实施型子 Manifest 声明 `migration_tier`，枚举 `low_risk_fast_track` 与 `full_rigor`；缺省或非法值一律按 `full_rigor` 处理（fail-closed）。
+
+tier 不是独立可信输入，而是 Manifest 已有安全字段的**纯函数**。门禁派生"最宽松可享受档"，八项维度全部命中才够格 `low_risk_fast_track`：`production_mutation_allowed=false`、`side_effects.read_only=true` 且全部写标志为 false、`cutover.required=false` 且 `cutover_status=not_required`、`behavior_change=false` 且 `mode=structure_only`、非 `legacy_delete`、`persistence.changed=false`、`contracts.changed=false`、`fixed_service_api_key_scope ∈ {not_used, market_public_read_only}`。
+
+生效 tier = 声明与派生上限中更严格者。声明 `low_risk_fast_track` 但派生为 `full_rigor` 时，`migration-check` 报 `MIG-TIER-ESCALATION-REQUIRED` 并 fail closed。任一维度漂移都会自动 escalate 回全套 `full_rigor` 校验，高风险切片无法伪装成低风险。`full_rigor` 的一切要求与本节以下各条完全不变。
+
 ### 4.2 Migration Manifest
 
 每个迁移切片创建：
@@ -146,9 +154,13 @@ docs/architecture/migrations/<migration-id>-<slug>/
 
 Manifest 未填写完整、字段互相冲突或无法映射到真实调用链时，不得开始修改。
 
+上述必填项按 tier 分为两级。**两档共有必填**：`migration_tier`、program identity/`depends_on`/状态/唯一 Owner、可区分的 legacy source/target/baseline、迁移模式与 `behavior_change`、source/target/allowed/forbidden 路径、`contracts.changed`、`persistence` owner 与跨 owner 事务禁令、`side_effects.*`、`cutover.required`/`cutover_status`、`evidence_file`/`verdict_file`、blocking 一致性——即派生 tier 的输入与安全真值表，一个都不能省。**仅 `full_rigor` 附加必填**：`authority.normative_document_hashes` 与 `release_unit_manifest_hashes` 的逐一内容 hash、`contract_snapshots`/`schema_snapshots`、`[behavior]` 差异刻画、`[configuration]` 策略/组合/风险/执行快照 refs、`[shadow]`、以及 §4.2.1 的语义处置工件。生效 `low_risk_fast_track` 时这些附加项改为存在即校验、缺失不报错（见 [ADR-0016](adr/0016-migration-risk-tiering-and-fast-track.md)）。
+
 #### 4.2.1 语义继承门禁
 
-目标架构允许重新分层和重写实现，但不得把“没有复制旧代码”误写成“旧业务语义不存在”。每个涉及 legacy 业务代码的 Owner 子迁移，在写目标代码前必须形成独立的语义处置工件，并由 Manifest/Evidence 的 `required_artifacts` 引用。工件至少覆盖：
+目标架构允许重新分层和重写实现，但不得把“没有复制旧代码”误写成“旧业务语义不存在”。每个涉及 legacy 业务代码的 Owner 子迁移，在写目标代码前必须形成独立的语义处置工件，并由 Manifest/Evidence 的 `required_artifacts` 引用。
+
+**适用范围**：本门禁仅对涉及 legacy 业务代码、有行为变化或事实源迁移的切片强制。生效 `low_risk_fast_track`（无 behavior_change、无 legacy 继承、公共只读）的切片豁免语义处置工件与 `required_artifacts` 引用；但一旦切片触及任何 legacy 语义、行为变化、生产写入或 contract 变更，派生 tier 立即 escalate 回 `full_rigor`，本门禁全部恢复强制。工件至少覆盖：
 
 1. 先枚举全部 App/CLI/Scheduler/Consumer 入口及绕过 Service 的直接 SDK/SQL/env 调用，再追到 Use Case、数据库、外部副作用和最终消费者；
 2. identity、状态机、时间边界、默认值、排序、幂等、事务、失败、重试、恢复、限频、并发、审计和清理行为；
@@ -173,6 +185,8 @@ Manifest 未填写完整、字段互相冲突或无法映射到真实调用链�
 - legacy 调用方、配置、表写入和白名单变化；
 - rollback 证据；
 - 未完成项与阻塞项。
+
+生效 `low_risk_fast_track` 的切片豁免本节完整分节模板，最小 Evidence 要求为：`evidence.md` 存在、可重放的本地验证命令与关键输出、Manifest/被测代码补丁 hash。"不得只写测试通过"仍然适用；逐文档内容 hash 与语义矩阵不再强制。以下要求针对 `full_rigor`：
 
 不得只写“测试通过”。必须记录 Manifest SHA-256、Evidence SHA-256、被测试的代码 commit/范围补丁 hash、可重放命令、不可变输入 identity/hash、输出工件 identity/hash、关键输出和失败时首次差异层。`contract_snapshots` 必须是可机读 object array（ID/version/path/hash/producer/consumers/compatibility window），`dynamic_input_artifacts` 只能引用在运行前已经固定的 DatasetManifest、Snapshot 或外部工件；不得引用本 Manifest 的 `evidence.md`，也不得以会被本次运行改写的文件作为动态输入。Secret、凭证和敏感用户数据不得进入 Evidence。Evidence 后续发生变化时，最终 CI 必须在新 HEAD 重新生成 Verdict；不能让旧 revision 的 Evidence 自动证明新代码。
 
@@ -277,6 +291,8 @@ state: draft -> baseline_frozen -> implementing -> verified -> ready_for_cutover
 - `completed`：目标事实源已稳定，删除门按本 Manifest 范围闭合；
 - `blocked`：保存原因和待决策项，不通过扩大范围绕过。
 
+生效 `low_risk_fast_track` 且 `verification_mode = "manual"` 时，可凭可重放的本地验证停在 `implementing`，无需 current-revision machine Verdict。上限仍为 `implementing`：进入 `verified`/`completed`、执行 cutover 或删除 legacy 必须按 `full_rigor` 补齐 Verdict 与授权门（§4.1/§13），本例外不放宽这些门。
+
 AI 可以根据确定性证据更新技术状态，但不能自行填写 `approved_by`、伪造外部授权或把自己的评论当作授权来源。
 
 ## 7. 执行前强制 Preflight
@@ -334,6 +350,8 @@ AI 在修改文件前必须完成：
 - 把跨 Owner 大函数整体移动到新 `impl`；
 - 为通过编译临时增加生产到 Research 的反向依赖；
 - 同时维护两套会独立演化的业务规则。
+
+**低风险快车道例外**：生效 `low_risk_fast_track` 的切片可通过 `scope.merged_capabilities` 把同一 Owner 的多个连续 capability 合并进一个切片，免去逐能力拆分。合并仍受约束：只在生效 low tier 开放、不得跨 Owner、逐能力都必须命中低风险派生（任一 escalate 则整体回落 `full_rigor` 并恢复单一垂直切片要求）、allowed/forbidden 路径不重叠且不越 Owner 范围。`full_rigor` 切片一律保持单一垂直切片和上面的禁止清单。
 
 目标 Domain/Adapter 的内部拆分遵守 [ADR-0015](adr/0015-capability-first-modules-and-api-spi-boundaries.md)：
 

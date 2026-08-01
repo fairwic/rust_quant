@@ -17,6 +17,12 @@ cutover_status = "not_required"
 mode = "structure_only"
 # truth table: structure_only/legacy_delete => false; behavior_change => true; cutover => false (semantic change must be separate Manifest).
 behavior_change = false
+# 迁移风险分级（见 ADR-0016）。默认 full_rigor（全套严格）。仅当八项低风险维度全部命中
+# （无 mutation/写入/cutover/契约变更/删 legacy、read_only、structure_only、公共只读 Key）
+# 才可填 low_risk_fast_track；否则门禁 MIG-TIER-ESCALATION-REQUIRED fail closed。
+# low tier 可留空：authority.normative_document_hashes/release_unit_manifest_hashes、
+# behavior.*差异刻画、configuration.*_snapshot_refs、[shadow]、语义处置工件。
+migration_tier = "full_rigor"
 verification_mode = "manual"
 production_mutation_allowed = false
 # legal: current_migration | historical_characterization。后者不能证明当前 HEAD、Cutover 或目标目录已迁完。
@@ -62,6 +68,8 @@ affected_cargo_packages = []
 affected_release_units = []
 owned_tables = []
 external_owner_apis = []
+# 仅 low_risk_fast_track 可用：本切片合并的多个同 Owner capability 标识。为空=单一垂直切片。
+merged_capabilities = []
 
 [behavior]
 business_goal = ""

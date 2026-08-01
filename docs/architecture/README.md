@@ -22,7 +22,7 @@ Research 与 live 的同名术语不得混用：ResearchBar 以 `ResearchDecisio
 | [业务代码与数据访问放置规范](business-code-and-data-access.md) | 已接受 | Rust 对象/函数/Policy/Use Case 选择、CRUD、事务、SQL、Command/Query/Consumer 模板 |
 | [量化通用逻辑归属](common-logic-placement.md) | 已接受 | 通用类型、数学、指标、纯回放内核、分析与 Research 归属边界 |
 | [AI 编码与架构防腐护栏](ai-coding-guardrails.md) | 已接受 | 修改前声明、Golden Template、CI ratchet 与 Review 检查表 |
-| [AI 架构迁移执行协议](ai-migration-execution-protocol.md) | 已接受 | Migration Manifest、基线锁定、迁移模式、Evidence、Verdict 与停止条件 |
+| [AI 架构迁移执行协议](ai-migration-execution-protocol.md) | 已接受 | Migration Manifest、基线锁定、迁移模式、风险分级（tier）、Evidence、Verdict 与停止条件 |
 | [Migration Program 注册表](migrations/programs/README.md) | 已接受 | 跨仓库父 Program、Owner 子 Manifest、Contract 与依赖图的机器可读索引 |
 | [架构迁移计划](migration-plan.md) | 计划中 | 现有实现迁入目标架构的阶段、验证和删除条件 |
 | [Vegas 与现有回测主链迁移实战](vegas-backtest-migration.md) | 迁移设计 | 以真实 Vegas/回测代码验证 Research 编排、三层模拟、逐文件分配与 parity 切换门 |
@@ -47,6 +47,7 @@ Research 与 live 的同名术语不得混用：ResearchBar 以 `ResearchDecisio
 | [ADR-0013](adr/0013-user-execution-request-and-public-market-data-credentials.md) | 已接受 | Web 是唯一执行请求 creator；平台固定 API Key 仅用于 Market 公共只读数据 |
 | [ADR-0014](adr/0014-greenfield-target-repository-migration.md) | 已接受 | `rust_quant` 保留 legacy/治理基线，Core 目标实现和当前迁移工件统一进入 `rust_quant_alpha` |
 | [ADR-0015](adr/0015-capability-first-modules-and-api-spi-boundaries.md) | 已接受 | Domain 内 capability-first、API/SPI 双门面、Port 完整性、Outbox 责任与提前文件预算 |
+| [ADR-0016](adr/0016-migration-risk-tiering-and-fast-track.md) | 已接受 | 迁移切片按风险分两档 tier；低风险快车道减负、门禁派生裁决 fail-closed |
 
 ## 阅读顺序
 

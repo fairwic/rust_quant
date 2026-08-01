@@ -416,6 +416,36 @@ depends_on = [
   "MIG-EXSDK-K2-BINANCE-OKX-EXPLICIT-PUBLIC-TRANSPORT-V1",
 ]
 
+[[program.children]]
+child_id = "MIG-INFRA-TIER-MECHANISM-V1"
+short_name = "migration-risk-tier-mechanism"
+owner = "Market"
+owner_repository = "rust_quant_alpha"
+manifest_status = "created"
+manifest_kind = "owner_child"
+manifest_path = "rust_quant_alpha:docs/architecture/migrations/MIG-INFRA-TIER-MECHANISM-V1/manifest.toml"
+evidence_path = "rust_quant_alpha:docs/architecture/migrations/MIG-INFRA-TIER-MECHANISM-V1/evidence.md"
+verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-INFRA-TIER-MECHANISM-V1/verdict.json"
+manifest_revision = "sha256:76fea4632749ba248fcaf75e1bd7aa15c96b203c2ce4eb00d2412edd3b1dc5ce"
+evidence_revision = "sha256:0feb6bb256220b09c5abd7615098da04bf9825e093f8e55cd0cfa01d83d0fc65"
+verdict_revision = "not_created"
+depends_on = []
+
+[[program.children]]
+child_id = "MIG-MKT-F5D-INSTRUMENT-INGEST-PREPARE-SPLIT-V1"
+short_name = "instrument-ingest-prepare-split"
+owner = "Market"
+owner_repository = "rust_quant_alpha"
+manifest_status = "created"
+manifest_kind = "owner_child"
+manifest_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F5D-INSTRUMENT-INGEST-PREPARE-SPLIT-V1/manifest.toml"
+evidence_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F5D-INSTRUMENT-INGEST-PREPARE-SPLIT-V1/evidence.md"
+verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MKT-F5D-INSTRUMENT-INGEST-PREPARE-SPLIT-V1/verdict.json"
+manifest_revision = "sha256:50595e74c01bdc3e11531f72d6fabfc6b38568c1458d4059f93849951d8b6f0a"
+evidence_revision = "sha256:aa179618be9eadf7144a2e7774fc216c6fc74b02d33ae08dfd0e43df4a51d181"
+verdict_revision = "not_created"
+depends_on = ["MIG-MKT-F4C-BINANCE-OKX-INSTRUMENT-INGEST-V1"]
+
 [[program]]
 program_id = "MP-market-velocity-execution-v1"
 title = "Market Velocity 用户执行链路"
