@@ -1112,8 +1112,8 @@ manifest_kind = "owner_child"
 manifest_path = "rust_quant_alpha:docs/architecture/migrations/MIG-VEGAS-V0A-MARKET-DATASET-FACTS-BUNDLE-V1/manifest.toml"
 evidence_path = "rust_quant_alpha:docs/architecture/migrations/MIG-VEGAS-V0A-MARKET-DATASET-FACTS-BUNDLE-V1/evidence.md"
 verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-VEGAS-V0A-MARKET-DATASET-FACTS-BUNDLE-V1/verdict.json"
-manifest_revision = "sha256:4203b18d5d689e3db653095fe452126222a372297fdc0e0dda945ec69974c466"
-evidence_revision = "sha256:b03df7c6a6f8e6e8220871d9d1267a0b4cccc3673ed7cfbd7352c44f90e8b807"
+manifest_revision = "sha256:c008460359d67cb216d50420e05bea5f938c1b7d90f136d9ddb3d365054be367"
+evidence_revision = "sha256:93369eaa7b40cec59f6719857a9c4341ab33e2463c74f790a1cca1c0b3ec6aab"
 verdict_revision = "not_created"
 depends_on = [
   "MIG-MKT-F4A-DATASET-SNAPSHOT-V1",
