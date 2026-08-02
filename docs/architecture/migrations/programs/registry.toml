@@ -1062,6 +1062,29 @@ direction = "rust_quant_alpha::Strategy -> rust_quant_alpha::Control"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
 required_fields = ["candidate_definition_artifact_ref", "research_execution_artifact_ref", "completed_evidence_ref", "evaluation_gate_result_ref", "released_definition_artifact_ref", "released_build_digest", "cross_build_parity_ref", "approved_by", "approved_at", "allowed_deployment_channels", "receipt_hash"]
 
+# MarketDatasetFactsBundleV1：错误 PointInTimeDatasetManifestV1 的 Market 侧 successor。
+# 分离 Market 事实与 Research selection——只组合 F4A+F4B 事实引用，禁止 selection_algorithm_hash。
+[[program.contracts]]
+contract_id = "MarketDatasetFactsBundleV1"
+version = "v1"
+compatibility_window = "initial v1; Market 组合 F4A+F4B 不可变事实引用；数据 revision 产生新 bundle content hash"
+kind = "owner_value"
+direction = "rust_quant_alpha::Market -> rust_quant_alpha::Research"
+snapshot = { status = "not_created", ref = "", sha256 = "" }
+required_fields = ["market_bar_snapshot_content_hash", "instrument_lifecycle_fingerprint", "as_of_unix_ms", "source_profile_id", "bundle_content_hash"]
+forbidden_fields = ["selection_algorithm_hash", "universe_membership_intervals", "listing_delisting_events", "instrument_rules_history", "funding_index_mark_refs"]
+
+# ResearchDatasetManifestV1：错误 PointInTimeDatasetManifestV1 的 Research 侧 successor。
+# 方向改为 Research->Research；Research 拥有 universe selection 与 selection_algorithm_hash。
+[[program.contracts]]
+contract_id = "ResearchDatasetManifestV1"
+version = "v1"
+compatibility_window = "initial v1; Research 固定引用的 Market bundle 与自身 universe selection；数据或算法 revision 产生新 manifest content hash"
+kind = "owner_value"
+direction = "rust_quant_alpha::Research -> rust_quant_alpha::Research"
+snapshot = { status = "not_created", ref = "", sha256 = "" }
+required_fields = ["market_dataset_facts_bundle_content_hash", "as_of_unix_ms", "universe_membership_intervals", "selection_algorithm_hash", "gap_revision_policy", "content_hash"]
+
 # 该早期 child 的空依赖和混合范围已经冻结，不能绕过 Market foundation 或继续实施。
 # 后续必须新登记 Market facts successor；Research-owned universe/DatasetManifest 另建 child。
 [[program.children]]
@@ -1078,6 +1101,24 @@ manifest_revision = "not_created"
 evidence_revision = "not_created"
 verdict_revision = "not_created"
 depends_on = []
+
+[[program.children]]
+child_id = "MIG-VEGAS-V0A-MARKET-DATASET-FACTS-BUNDLE-V1"
+short_name = "market-dataset-facts-bundle"
+owner = "Market"
+owner_repository = "rust_quant_alpha"
+manifest_status = "created"
+manifest_kind = "owner_child"
+manifest_path = "rust_quant_alpha:docs/architecture/migrations/MIG-VEGAS-V0A-MARKET-DATASET-FACTS-BUNDLE-V1/manifest.toml"
+evidence_path = "rust_quant_alpha:docs/architecture/migrations/MIG-VEGAS-V0A-MARKET-DATASET-FACTS-BUNDLE-V1/evidence.md"
+verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-VEGAS-V0A-MARKET-DATASET-FACTS-BUNDLE-V1/verdict.json"
+manifest_revision = "sha256:4203b18d5d689e3db653095fe452126222a372297fdc0e0dda945ec69974c466"
+evidence_revision = "sha256:b03df7c6a6f8e6e8220871d9d1267a0b4cccc3673ed7cfbd7352c44f90e8b807"
+verdict_revision = "not_created"
+depends_on = [
+  "MIG-MKT-F4A-DATASET-SNAPSHOT-V1",
+  "MIG-MKT-F4B-INSTRUMENT-LIFECYCLE-FACTS-V1",
+]
 
 [[program.children]]
 child_id = "MIG-VEGAS-V7-QUANT-BACKTEST-KERNEL-V1"
