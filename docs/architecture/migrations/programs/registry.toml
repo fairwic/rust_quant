@@ -1298,3 +1298,28 @@ manifest_revision = "sha256:f363dc343b3d163bfeb594e65f9081088f521296bbfbc70c3bd3
 evidence_revision = "sha256:1477f584c02d96dc2be0e276495810e3052c4d265f35c65ed0c5b02cb26ac241"
 verdict_revision = "not_created"
 depends_on = []
+
+[[program]]
+program_id = "MP-strategy-domain-foundation-v1"
+title = "Strategy 领域核心 aggregate 地基"
+kind = "owner_dependency_foundation"
+state = "planned"
+evidence_scope = "current_migration"
+parent_plan = "docs/architecture/migration-plan.md#stage-2"
+repositories = ["rust_quant", "rust_quant_alpha"]
+historical_dependency_eligible = false
+
+[[program.children]]
+child_id = "MIG-STG-S1-STRATEGY-FOUNDATION-V1"
+short_name = "strategy-domain-foundation"
+owner = "Strategy"
+owner_repository = "rust_quant_alpha"
+manifest_status = "created"
+manifest_kind = "owner_child"
+manifest_path = "rust_quant_alpha:docs/architecture/migrations/MIG-STG-S1-STRATEGY-FOUNDATION-V1/manifest.toml"
+evidence_path = "rust_quant_alpha:docs/architecture/migrations/MIG-STG-S1-STRATEGY-FOUNDATION-V1/evidence.md"
+verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-STG-S1-STRATEGY-FOUNDATION-V1/verdict.json"
+manifest_revision = "sha256:PENDING_MANIFEST_HASH"
+evidence_revision = "sha256:a7764a04f338b79c1ae740aa845e1a2262e00aea28ff7c7b4377da9485f95691"
+verdict_revision = "not_created"
+depends_on = []
