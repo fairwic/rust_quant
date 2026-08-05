@@ -189,6 +189,7 @@ mod tests {
 
     fn candle(ts: i64, histogram: Option<f64>) -> ComputedCandle {
         ComputedCandle {
+            volume_ccy: None,
             candle: BacktestCandle {
                 ts,
                 open: 99.0,
@@ -199,9 +200,14 @@ mod tests {
             },
             sma: Some(100.0),
             ema: Some(100.0),
+            ema12: None,
+            ema144: None,
+            ema169: None,
+            ema696: None,
             previous_volume_avg: Some(5.0),
             previous_range_avg: Some(2.0),
             rsi14: Some(50.0),
+            atr14: None,
             bollinger_middle: Some(100.0),
             bollinger_upper: Some(105.0),
             bollinger_lower: Some(95.0),

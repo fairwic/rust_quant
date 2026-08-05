@@ -1,9 +1,12 @@
 # ADR-0016：迁移风险分级与低风险快车道
 
-- 状态：已接受
+- 状态：已被 ADR-0017 取代
 - 日期：2026-07-31
 - 决策者：Rust Quant Core / Architecture Governance
-- 上位文档：[AI 架构迁移执行协议](../ai-migration-execution-protocol.md)、[Greenfield 目标仓库迁移](0014-greenfield-target-repository-migration.md)、[Owner-scoped 持久化与事务边界](0007-owner-scoped-persistence-and-transaction-boundaries.md)、[用户执行请求与公共行情凭证](0013-user-execution-request-and-public-market-data-credentials.md)
+- 历史上位文档：[旧 Manifest 执行协议](../archive/legacy-manifest-execution-protocol-2026-07.md)、[Greenfield 目标仓库迁移](0014-greenfield-target-repository-migration.md)
+- 替代决策：[ADR-0017](0017-capability-catalog-and-domain-wave-migration.md)
+
+> 本 ADR 只解释 2026-07 历史 Manifest 为什么出现低风险快车道。新的迁移不再声明 migration_tier，不再创建逐切片 Manifest；活跃流程统一使用能力总账和 Domain Wave。
 
 ## 背景
 

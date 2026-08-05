@@ -1,0 +1,57 @@
+{
+  "schema_version": "market_momentum_ema144_576_close_hold_confirmation_l1_v1",
+  "identity": {
+    "level": "L1_quick_research_no_outcome_labels",
+    "candidate_key": "market_momentum_ema144_576_close_hold_confirmation_15m_v7",
+    "rule_version": "l1_v6_touch_close_hold_current_ema144_v7",
+    "only_variable": "require the completed touch candle to close on the current EMA144 trend side",
+    "source_l1_report_sha256": "a69b9cafb83ea55601bc35eaf13a821c0a5fb5080f4d256632457ab3e6f974da",
+    "dataset_fingerprint_sha256": "67516c927ce30323f38f34e6c87fd7bac7720bae8084209cc44b86cce6efe997",
+    "label_boundary": "read only close_holds_current_ema144, symbol, direction, signal time, month, and frozen target windows from the V6 L1 ledger",
+    "outcome_evaluation_performed": false
+  },
+  "summary": {
+    "baseline_candidates": 54837,
+    "retained_candidates": 40980,
+    "retained_pct": 74.730565129383,
+    "filtered_identity_ledger_sha256": "f8fd807815a9564965810114f514052db03c156c02ec1f042a6c2592ecc20d05",
+    "by_direction": {
+      "long": 17257,
+      "short": 23723
+    },
+    "symbol_count": 44,
+    "utc_month_count": 13,
+    "effective_market_events": null,
+    "effective_market_events_not_evaluated_reason": "hard target gate failed before later coverage gates"
+  },
+  "target_audits": [
+    {
+      "name": "nmr_2026_07_01_user_chart",
+      "matched": true,
+      "matched_signal_timestamps_ms": [1782867600000]
+    },
+    {
+      "name": "btc_2026_07_02_user_chart",
+      "matched": true,
+      "matched_signal_timestamps_ms": [1782952200000]
+    },
+    {
+      "name": "btc_2026_07_12_user_chart",
+      "matched": false,
+      "matched_signal_timestamps_ms": []
+    }
+  ],
+  "decision": {
+    "status": "stop",
+    "gates": {
+      "source_l1_identity_verified": true,
+      "retention_between_10_and_90_pct": true,
+      "both_directions_at_least_10": true,
+      "symbols_at_least_8": true,
+      "utc_months_at_least_6": true,
+      "all_three_user_targets_match": false,
+      "outcome_labels_remain_closed": true
+    },
+    "reason": "the 2026-07-12 BTC user target closes slightly below current EMA144, so close-hold confirmation contradicts an explicitly valid user shape and cannot enter L2"
+  }
+}

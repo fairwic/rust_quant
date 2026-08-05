@@ -59,6 +59,7 @@ fn apply_breakout_reclaim(
         profit_protection_for_target(args, target_r),
         runner_exit_for_target(args, target_r),
         early_exit(args),
+        super::uses_target_completion_profit_observation(&args.paper_outcome_entry_rule_version),
     );
     combine_reentry_result(original, reentry, reclaim_price, args.stop_reentry_mode)
 }

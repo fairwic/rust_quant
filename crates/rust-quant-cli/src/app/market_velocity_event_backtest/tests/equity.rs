@@ -1,5 +1,34 @@
 use super::*;
+use crate::app::market_velocity_event_backtest::filtered_volume_rsi_ema_macd::{
+    FILTERED_VOLUME_V3_ATR_STOP_SOURCE, FILTERED_VOLUME_V3_LOWER_WICK_STOP_SOURCE,
+};
+use crate::app::market_velocity_event_backtest::rsi_volume_regime::RSI_VOLUME_V3_ATR_STOP_SOURCE;
+use crate::app::market_velocity_event_backtest::strategy_identity::MARKET_FILTERED_VOLUME_RSI_EMA_MACD_V13_ENTRY_RULE_VERSION;
 use std::collections::HashMap;
+
+#[test]
+fn v13_detail_contract_persists_the_one_point_five_atr_countertrend_target() {
+    let args = MarketVelocityEventBacktestArgs {
+        entry_filtered_volume_rsi_ema_macd: true,
+        paper_outcome_entry_rule_version:
+            MARKET_FILTERED_VOLUME_RSI_EMA_MACD_V13_ENTRY_RULE_VERSION.to_string(),
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+
+    let strategy = market_velocity_strategy_detail(&args);
+    let risk = market_velocity_risk_config_detail(&args, 1.0);
+
+    assert_eq!(
+        strategy["trend_managed_exit"]["countertrend_target_atr"],
+        1.5
+    );
+    assert_eq!(
+        risk["trend_managed_exit"]["countertrend_default_target_atr"],
+        1.5
+    );
+    assert_eq!(strategy["paper_live_eligible"], false);
+}
+
 #[test]
 fn framework_equity_report_replays_raw_event_at_next_15m_candle() {
     let mut candles = (0..505)
@@ -522,6 +551,153 @@ fn framework_equity_trade_report_keeps_same_candle_full_close_trade() {
     assert_eq!(reports[0].event_id, 78);
     assert_eq!(reports[0].outcome, "win");
 }
+
+#[test]
+fn filtered_volume_v3_checks_entry_candle_and_rearms_after_same_candle_exit() {
+    let first_entry_ts = MS_15M * 505;
+    let mut candles = (0..505)
+        .map(|index| ohlc(MS_15M * index, 100.0, 100.5, 99.5, 100.0))
+        .collect::<Vec<_>>();
+    candles.push(ohlc(first_entry_ts, 100.0, 101.0, 94.0, 99.0));
+    candles.push(ohlc(first_entry_ts + MS_15M, 100.0, 106.0, 99.0, 105.0));
+
+    let evidence = || CompletedCandleEntrySignalEvidence {
+        filtered_volume_ratio: 3.5,
+        filtered_volume_retained_candles: 10,
+        current_volume_ccy: Some(1_000_000.0),
+        weekly_volume_ccy_p90: Some(900_000.0),
+        rsi14: 30.0,
+        macd_dif: 0.0,
+        ema12: 100.0,
+        ema144: 99.0,
+        ema169: 98.5,
+        ema696: 98.0,
+        atr14: 2.0,
+        take_profit_atr_multiplier: Some(2.7),
+        rsi_pattern_stop_participated: true,
+        rsi_divergences: Vec::new(),
+        macd_divergences: Vec::new(),
+        bollinger_conflict: None,
+        ema144_distance_atr: None,
+        ema144_max_distance_atr: None,
+        ema_candidate_blocked_by_distance: false,
+        anchor_entry: None,
+        trend_managed_exit: None,
+        isolated_family: None,
+    };
+    let mut first = confirmed_event(
+        178,
+        "V3-SAME-CANDLE-USDT-SWAP",
+        first_entry_ts,
+        "2026-06-01T00:00:00Z",
+    );
+    first.structure_stop_loss_price = Some(95.0);
+    first.structure_stop_loss_source = Some(FILTERED_VOLUME_V3_LOWER_WICK_STOP_SOURCE.to_string());
+    first.entry_signal_evidence = Some(evidence());
+    let mut second = confirmed_event(
+        179,
+        "V3-SAME-CANDLE-USDT-SWAP",
+        first_entry_ts + MS_15M,
+        "2026-06-01T00:15:00Z",
+    );
+    second.structure_stop_loss_price = Some(97.0);
+    second.structure_stop_loss_source = Some(FILTERED_VOLUME_V3_ATR_STOP_SOURCE.to_string());
+    second.entry_signal_evidence = Some(evidence());
+    let candles_by_symbol = HashMap::from([("V3-SAME-CANDLE-USDT-SWAP".to_string(), candles)]);
+    let args = MarketVelocityEventBacktestArgs {
+        min_trades: 1,
+        stop_loss_pct: 0.03,
+        paper_outcome_entry_rule_version: MARKET_FILTERED_VOLUME_RSI_EMA_MACD_V3_ENTRY_RULE_VERSION
+            .to_string(),
+        entry_filtered_volume_rsi_ema_macd: true,
+        ignore_entry_signal_updates_while_open: true,
+        backtest_fee_bps_per_side: Some(5.0),
+        backtest_slippage_bps_per_side: 3.0,
+        ..MarketVelocityEventBacktestArgs::default()
+    };
+
+    let reports =
+        build_framework_equity_trade_reports(&[first, second], &candles_by_symbol, 1.0, &args);
+
+    assert_eq!(reports.len(), 2);
+    assert_eq!(reports[0].event_id, 178);
+    assert_eq!(
+        reports[0].close_position_time.as_deref(),
+        Some(reports[0].open_position_time.as_str())
+    );
+    assert_eq!(reports[0].close_price, Some(95.0));
+    assert_eq!(
+        reports[0].initial_stop_source.as_deref(),
+        Some(FILTERED_VOLUME_V3_LOWER_WICK_STOP_SOURCE)
+    );
+    assert_eq!(reports[1].event_id, 179);
+    assert_eq!(
+        reports[1].close_position_time.as_deref(),
+        Some(reports[1].open_position_time.as_str())
+    );
+    assert!(reports[1].profit_loss > 0.0);
+}
+
+#[test]
+fn v12_framework_replay_persists_completed_bar_volume_trailing_update() {
+    let entry_ts = MS_15M * 505;
+    let mut candles = (0..505)
+        .map(|index| ohlcv(MS_15M * index, 100.0, 100.5, 99.5, 100.0, 10.0))
+        .collect::<Vec<_>>();
+    candles.extend([
+        ohlcv(entry_ts, 100.0, 100.5, 99.5, 100.0, 10.0),
+        ohlcv(entry_ts + MS_15M, 100.0, 101.5, 99.8, 101.0, 30.0),
+        ohlcv(entry_ts + MS_15M * 2, 101.0, 101.2, 99.9, 100.0, 10.0),
+    ]);
+    let mut event = confirmed_event(180, "V12-TRAIL-USDT-SWAP", entry_ts, "2026-06-01T00:00:00Z");
+    event.structure_stop_loss_price = Some(97.0);
+    event.structure_stop_loss_source = Some("filtered_volume_v3_atr14_1_5".to_string());
+    event.entry_signal_evidence = Some(CompletedCandleEntrySignalEvidence {
+        filtered_volume_ratio: 3.0,
+        filtered_volume_retained_candles: 10,
+        current_volume_ccy: Some(30.0),
+        weekly_volume_ccy_p90: Some(20.0),
+        rsi14: 29.0,
+        macd_dif: -0.1,
+        ema12: 100.0,
+        ema144: 101.0,
+        ema169: 102.0,
+        ema696: 103.0,
+        atr14: 2.0,
+        take_profit_atr_multiplier: Some(2.7),
+        rsi_pattern_stop_participated: false,
+        rsi_divergences: Vec::new(),
+        macd_divergences: Vec::new(),
+        bollinger_conflict: None,
+        ema144_distance_atr: None,
+        ema144_max_distance_atr: None,
+        ema_candidate_blocked_by_distance: false,
+        anchor_entry: None,
+        trend_managed_exit: None,
+        isolated_family: None,
+    });
+    let candles_by_symbol = HashMap::from([("V12-TRAIL-USDT-SWAP".to_string(), candles)]);
+    let mut args = market_filtered_volume_rsi_ema_macd_v12_research_args().unwrap();
+    args.min_trades = 1;
+
+    let reports = build_framework_equity_trade_reports(&[event], &candles_by_symbol, 1.0, &args);
+
+    assert_eq!(reports.len(), 1);
+    let updates = serde_json::from_str::<serde_json::Value>(
+        reports[0].stop_loss_update_history.as_deref().unwrap(),
+    )
+    .unwrap();
+    assert_eq!(updates.as_array().map(Vec::len), Some(2));
+    assert_eq!(
+        updates[1]["source"],
+        "MarketVelocityVolumeAtrTrailingBreakEven"
+    );
+    assert_eq!(
+        updates[1]["evidence"]["policy"],
+        "completed_15m_filtered_volume_atr_ladder_v12"
+    );
+}
+
 #[test]
 fn framework_equity_trade_report_keeps_trade_when_symbol_history_is_shorter_than_500_candles() {
     let entry_ts = MS_15M * 5;
@@ -823,6 +999,20 @@ fn framework_equity_trade_report_expands_runner_close_legs() {
 }
 #[test]
 fn framework_equity_trade_report_builds_legacy_backtest_detail_payload() {
+    let stop_updates = serde_json::Value::Array(
+        (0..80)
+            .map(|idx| {
+                serde_json::json!({
+                    "source": "MarketVelocityTargetCompletionProfitObservation",
+                    "updated_at": idx,
+                    "old_stop_price": 97.0 + idx as f64 * 0.01,
+                    "new_stop_price": 97.1 + idx as f64 * 0.01,
+                })
+            })
+            .collect(),
+    )
+    .to_string();
+    assert!(stop_updates.len() > 5_000);
     let report = FrameworkEquityTradeReport {
         target_r: 2.4,
         symbol: "DETAIL-USDT-SWAP".to_string(),
@@ -841,12 +1031,29 @@ fn framework_equity_trade_report_builds_legacy_backtest_detail_payload() {
         profit_loss: 6.43,
         initial_risk_amount: Some(3.0),
         net_profit_r: Some(2.143333333333333),
+        initial_stop_source: None,
         quantity: 1.0,
         outcome: "win",
         trigger: "reclaim_ema".to_string(),
         new_rank: 8,
         delta_rank: 19,
-        price_change_pct: 43.2,
+        // 信号 K 线为阴线，但策略最终方向为做多；明细必须跟随冻结方向。
+        price_change_pct: -43.2,
+        entry_signal_evidence: None,
+        close_signal_value: Some(
+            serde_json::json!({
+                "exit_reason": "profit_observation_close_crossed_new_lock",
+                "profit_observation": {
+                    "peak_r": 1.2,
+                    "true_target_r": 2.4,
+                    "target_completion": 0.5,
+                    "active_lock_r": 0.3,
+                }
+            })
+            .to_string(),
+        ),
+        close_stop_loss_source: None,
+        stop_loss_update_history: Some(stop_updates.clone()),
         close_legs: Vec::new(),
     };
     let args = MarketVelocityEventBacktestArgs {
@@ -880,6 +1087,10 @@ fn framework_equity_trade_report_builds_legacy_backtest_detail_payload() {
     assert_eq!(open.quantity, "1");
     assert_eq!(open.full_close, "false");
     assert_eq!(open.close_type, "");
+    assert_eq!(open.stop_loss_source, None);
+    assert_eq!(open.initial_stop_price, Some(97.0));
+    assert_eq!(open.initial_risk_amount, Some(3.0));
+    assert_eq!(open.net_profit_r, None);
     assert_eq!(close.option_type, "close");
     assert_eq!(
         close.signal_open_position_time.as_deref(),
@@ -895,6 +1106,10 @@ fn framework_equity_trade_report_builds_legacy_backtest_detail_payload() {
     assert_eq!(close.win_nums, 1);
     assert_eq!(close.loss_nums, 0);
     assert_eq!(close.signal_result, "market_velocity_framework_replay");
+    assert_eq!(close.stop_loss_source, None);
+    assert_eq!(close.initial_stop_price, Some(97.0));
+    assert_eq!(close.initial_risk_amount, Some(3.0));
+    assert_eq!(close.net_profit_r, Some(2.143333333333333));
     assert_eq!(signal_value["rank_event_id"], 77);
     assert_eq!(signal_value["entry_trigger"], "reclaim_ema");
     assert_eq!(signal_value["target_r"], 2.4);
@@ -908,10 +1123,207 @@ fn framework_equity_trade_report_builds_legacy_backtest_detail_payload() {
     assert_eq!(signal_value["entry_exhaustion_current_cluster_candles"], 3);
     assert_eq!(signal_value["entry_exhaustion_swing_radius_candles"], 3);
     assert_eq!(
+        signal_value["exit_reason"],
+        "profit_observation_close_crossed_new_lock"
+    );
+    assert_eq!(signal_value["profit_observation"]["peak_r"], 1.2);
+    assert!(signal_value.get("exit_signal_value").is_none());
+    assert!(signal_value.get("stop_loss_update_history").is_none());
+    assert!(close.signal_value.len() < 5_000);
+    assert_eq!(
+        close.stop_loss_update_history.as_deref(),
+        Some(stop_updates.as_str())
+    );
+    assert_eq!(
         signal_value["entry_rule_version"],
         args.paper_outcome_entry_rule_version
     );
+
+    let v3_args = market_rsi_volume_regime_v3_research_args().unwrap();
+    let v3_details = build_market_velocity_backtest_details(&report, 124, &v3_args).unwrap();
+    assert_eq!(
+        v3_details[0].stop_loss_source.as_deref(),
+        Some(RSI_VOLUME_V3_ATR_STOP_SOURCE)
+    );
+    assert_eq!(v3_details[0].initial_stop_price, Some(97.0));
+    assert_eq!(v3_details[1].net_profit_r, Some(2.143333333333333));
 }
+
+#[test]
+fn v12_detail_payload_keeps_full_trend_evidence_within_legacy_varchar_limit() {
+    let platform = |direction| PlatformBreakdownSignalEvidence {
+        direction,
+        break_ts_ms: 1_784_470_500_000,
+        confirmed_ts_ms: 1_784_472_300_000,
+        platform_high: 123_456.789_012_345,
+        platform_low: 98_765.432_109_876,
+        platform_range_atr: 3.999_999_999,
+        atr_reference_ts_ms: None,
+        platform_reference_atr14: None,
+        close_center_shift_atr: None,
+        close_regression_r_squared: None,
+        fitted_close_drift_atr: None,
+        upper_touch_count: None,
+        lower_touch_count: None,
+        break_body_range_ratio: 0.987_654_321,
+        break_body_open_ratio: 0.029_999_999,
+        filtered_volume_ratio: 12.345_678_901,
+        current_volume_ccy: 987_654_321_012.345,
+        weekly_volume_ccy_p90: 876_543_210_123.456,
+    };
+    let stop_updates = serde_json::Value::Array(
+        (0..80)
+            .map(|idx| {
+                serde_json::json!({
+                    "source": "MarketFilteredVolumeAtrTrailing",
+                    "updated_at": 1_784_470_500_000_i64 + idx * MS_15M,
+                    "old_stop_price": 98.5 + idx as f64,
+                    "new_stop_price": 99.0 + idx as f64,
+                    "evidence": {
+                        "filtered_volume_ratio": 9.87654321,
+                        "rung": idx + 1,
+                    }
+                })
+            })
+            .collect(),
+    )
+    .to_string();
+    assert!(stop_updates.len() > 5_000);
+
+    let report = FrameworkEquityTradeReport {
+        target_r: 3.0,
+        symbol: "V12-PAYLOAD-USDT-SWAP".to_string(),
+        event_id: 17_185,
+        signal_ts: 1_784_470_500_000,
+        direction: MarketVelocityTradeDirection::Long,
+        detected_at: "2026-07-19T16:15:00.123456789Z".to_string(),
+        entry_ts: 1_784_471_400_000,
+        signal_open_position_time: "2026-07-19 16:15:00".to_string(),
+        open_position_time: "2026-07-19 16:30:00".to_string(),
+        close_position_time: Some("2026-07-19 17:30:00".to_string()),
+        open_price: 100.0,
+        close_price: Some(104.5),
+        close_type: "LongTakeProfit".to_string(),
+        signal_status: 1,
+        profit_loss: 4.34,
+        initial_risk_amount: Some(1.5),
+        net_profit_r: Some(2.893_333_333),
+        initial_stop_source: Some("FilteredVolumeAtr14X1p5".to_string()),
+        quantity: 0.666_666_666,
+        outcome: "win",
+        trigger: "rsi_anchor_bottom_divergence+pivot_lower_wick_next_open".to_string(),
+        new_rank: 0,
+        delta_rank: 0,
+        price_change_pct: 0.0,
+        entry_signal_evidence: Some(CompletedCandleEntrySignalEvidence {
+            filtered_volume_ratio: 12.345_678_901,
+            filtered_volume_retained_candles: 5,
+            current_volume_ccy: Some(987_654_321_012.345),
+            weekly_volume_ccy_p90: Some(876_543_210_123.456),
+            rsi14: 29.123_456_789,
+            macd_dif: -0.123_456_789,
+            ema12: 100.123_456_789,
+            ema144: 101.234_567_891,
+            ema169: 102.345_678_912,
+            ema696: 103.456_789_123,
+            atr14: 1.234_567_891,
+            take_profit_atr_multiplier: Some(4.5),
+            rsi_pattern_stop_participated: false,
+            rsi_divergences: vec![RsiDivergenceSignalEvidence {
+                comparison_mode: "filtered_volume_anchor",
+                direction: MarketVelocityTradeDirection::Long,
+                pivot_ts_ms: 1_784_470_500_000,
+                reference_pivot_ts_ms: 1_784_427_300_000,
+                pivot_price: 98.765_432_109,
+                reference_pivot_price: 99.876_543_210,
+                pivot_rsi14: 29.123_456_789,
+                reference_pivot_rsi14: 28.012_345_678,
+                pivot_filtered_volume_ratio: Some(12.345_678_901),
+                reference_filtered_volume_ratio: Some(9.876_543_210),
+                pivot_volume_ccy: Some(987_654_321_012.345),
+                reference_volume_ccy: Some(765_432_101_234.567),
+                pivot_weekly_volume_ccy_p90: Some(876_543_210_123.456),
+                reference_weekly_volume_ccy_p90: Some(654_321_012_345.678),
+                confirmation_ts_ms: None,
+                confirmation_close: None,
+                confirmation_break_price: None,
+            }],
+            macd_divergences: Vec::new(),
+            bollinger_conflict: None,
+            ema144_distance_atr: None,
+            ema144_max_distance_atr: None,
+            ema_candidate_blocked_by_distance: false,
+            anchor_entry: Some(AnchorEntrySignalEvidence {
+                activation_mode: "pivot_directional_wick_next_open",
+                pivot_body_range_ratio: 0.123_456_789,
+                pivot_directional_wick_range_ratio: 0.765_432_101,
+                pivot_opposite_wick_range_ratio: 0.111_111_111,
+                activation_price: 98.765_432_109,
+                activation_candle_ts_ms: Some(1_784_471_400_000),
+                fill_price: Some(100.0),
+                fill_price_source: Some("next_candle_open_after_directional_wick"),
+                intrabar_path_policy: Some("old_stop_then_target_then_close_update"),
+            }),
+            trend_managed_exit: Some(TrendManagedExitSignalEvidence {
+                market_regime: "conflict_neutral",
+                trade_trend_relation: "neutral",
+                long_term_bearish_confirmed: true,
+                long_term_bullish_confirmed: true,
+                ema696_recent: vec![
+                    103.456_789_123,
+                    103.345_678_912,
+                    103.234_567_891,
+                    103.123_456_789,
+                ],
+                bearish_platform_breakdown: Some(platform("bearish")),
+                bullish_platform_breakdown: Some(platform("bullish")),
+                prior_96_net_move_pct: Some(-12.345_678_901),
+                countertrend_extreme_move_exception: true,
+                volume_tier_take_profit_atr_multiplier: 4.5,
+                selected_take_profit_atr_multiplier: 4.5,
+                target_policy: "countertrend_extreme_volume_tier",
+            }),
+            isolated_family: None,
+        }),
+        close_signal_value: Some(
+            serde_json::json!({
+                "exit_reason": "volume_atr_trailing_stop_hit_after_multiple_completed_bar_updates"
+            })
+            .to_string(),
+        ),
+        close_stop_loss_source: Some("MarketFilteredVolumeAtrTrailingRung3".to_string()),
+        stop_loss_update_history: Some(stop_updates.clone()),
+        close_legs: Vec::new(),
+    };
+    let args = market_filtered_volume_rsi_ema_macd_v12_research_args().unwrap();
+
+    let details = build_market_velocity_backtest_details(&report, 17_185, &args).unwrap();
+
+    assert_eq!(details.len(), 2);
+    assert!(details
+        .iter()
+        .all(|detail| detail.signal_value.len() <= 5_000));
+    assert_eq!(
+        details[1].stop_loss_update_history.as_deref(),
+        Some(stop_updates.as_str())
+    );
+    let signal_value = serde_json::from_str::<serde_json::Value>(&details[0].signal_value).unwrap();
+    assert_eq!(
+        signal_value["trend_managed_exit"]["platform_breakdowns"]
+            .as_array()
+            .map(Vec::len),
+        Some(2)
+    );
+    assert_eq!(
+        signal_value["trend_managed_exit"]["target_policy"],
+        "countertrend_extreme_volume_tier"
+    );
+    assert_eq!(
+        signal_value["anchor_entry"]["fill_price_source"],
+        "next_candle_open_after_directional_wick"
+    );
+}
+
 #[test]
 fn framework_equity_trade_report_builds_runner_legacy_backtest_detail_payload() {
     let report = FrameworkEquityTradeReport {
@@ -932,12 +1344,17 @@ fn framework_equity_trade_report_builds_runner_legacy_backtest_detail_payload() 
         profit_loss: 4.0,
         initial_risk_amount: None,
         net_profit_r: None,
+        initial_stop_source: None,
         quantity: 1.0,
         outcome: "win",
         trigger: "breakout_previous_high".to_string(),
         new_rank: 6,
         delta_rank: 50,
         price_change_pct: 21.0,
+        entry_signal_evidence: None,
+        close_signal_value: None,
+        close_stop_loss_source: None,
+        stop_loss_update_history: None,
         close_legs: vec![
             FrameworkEquityCloseLegReport {
                 close_ts: MS_15M * 506,
@@ -1007,5 +1424,6 @@ fn confirmed_event(id: i64, symbol: &str, entry_ts: i64, detected_at: &str) -> C
         trigger: "breakout_previous_high".to_string(),
         structure_stop_loss_price: None,
         structure_stop_loss_source: None,
+        entry_signal_evidence: None,
     }
 }

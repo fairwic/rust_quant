@@ -1,0 +1,107 @@
+//@version=6
+strategy("EMA596 Reclaim Departure HH HL Long 15m V2", overlay = true,
+     pyramiding = 0, initial_capital = 100000, default_qty_type = strategy.fixed,
+     default_qty_value = 1, process_orders_on_close = false, max_labels_count = 300)
+
+const string strategyVersion = "volume_ema596_reclaim_departure_hh_hl_long_15m_v2"
+const int volumeLookback = 10
+const int weeklyLookback = 672
+const int reclaimMaxAge = 32
+const int structureLookback = 4
+const int medianVolumeLookback = 20
+const int slopeLookback = 3
+const float medianVolumeRatioMin = 2.5
+const float previousDistanceAtrMax = 0.50
+const float currentDistanceAtrMin = 1.00
+const float bodyRangeMin = 0.60
+const float ema144StrongDownSlopeAtr = 0.015
+const float ema596StrongDownSlopeAtr = 0.0015
+const float targetRisk = 2.00
+
+ema12 = ta.ema(close, 12)
+ema144 = ta.ema(close, 144)
+ema596 = ta.ema(close, 596)
+atr14 = ta.atr(14)
+weeklyP90 = ta.percentile_nearest_rank(volume[1], weeklyLookback, 90)
+weeklyMinVolume = ta.lowest(volume[1], weeklyLookback)
+weeklyVolumeReady = bar_index >= weeklyLookback + volumeLookback and
+     not na(weeklyP90) and weeklyMinVolume >= 0
+medianVolume20 = ta.percentile_nearest_rank(volume[1], medianVolumeLookback, 50)
+medianVolumeRatio = not na(medianVolume20) and medianVolume20 > 0 ?
+     volume / medianVolume20 : na
+
+candleValid = high >= math.max(open, close) and low <= math.min(open, close) and
+     high > low and open > 0 and not na(atr14) and atr14 > 0
+bodyRangeRatio = candleValid ? math.abs(close - open) / (high - low) : na
+priorHigh = ta.highest(high[1], structureLookback)
+priorLow = ta.lowest(low[1], structureLookback)
+structureReady = close > priorHigh and high > high[1] and low > low[1]
+structureStop = math.floor((priorLow - syminfo.mintick) / syminfo.mintick) * syminfo.mintick
+structureRisk = close - structureStop
+structureTarget = math.floor(
+     (close + targetRisk * structureRisk) / syminfo.mintick) * syminfo.mintick
+
+reclaimCrossedUp = ta.crossover(close, ema596)
+reclaimAge = ta.barssince(reclaimCrossedUp)
+bool reclaimHeld = not na(reclaimAge) and reclaimAge <= reclaimMaxAge
+for offset = 0 to reclaimMaxAge
+    if reclaimHeld and offset <= reclaimAge and close[offset] <= ema596[offset]
+        reclaimHeld := false
+
+previousDistanceAtr = candleValid and not na(atr14[1]) and atr14[1] > 0 ?
+     (close[1] - ema596[1]) / atr14[1] : na
+currentDistanceAtr = candleValid ? (close - ema596) / atr14 : na
+ema12SlopeAtr = candleValid ?
+     (ema12 - ema12[slopeLookback]) / (slopeLookback * atr14) : na
+ema144SlopeAtr = candleValid ?
+     (ema144 - ema144[slopeLookback]) / (slopeLookback * atr14) : na
+ema596SlopeAtr = candleValid ?
+     (ema596 - ema596[slopeLookback]) / (slopeLookback * atr14) : na
+
+// 趋势门禁固定读取 t-1 到 t-4；当前放量阳线不能同时制造信号并改写自己的趋势背景。
+priorSlowBearTrend = not na(ema144SlopeAtr[1]) and not na(ema596SlopeAtr[1]) and
+     ema144SlopeAtr[1] <= -ema144StrongDownSlopeAtr and
+     ema596SlopeAtr[1] <= -ema596StrongDownSlopeAtr
+
+// “收复后离轨”必须至少经历一根已完成的 EMA596 上方 K 线，避免把单棒垂直上穿当作市场接受。
+longSetup = barstate.isconfirmed and candleValid and weeklyVolumeReady and
+     reclaimHeld and reclaimAge >= 1 and
+     previousDistanceAtr > 0 and previousDistanceAtr <= previousDistanceAtrMax and
+     currentDistanceAtr >= currentDistanceAtrMin and not priorSlowBearTrend and
+     volume >= weeklyP90 and medianVolumeRatio >= medianVolumeRatioMin and
+     structureReady and close > open and bodyRangeRatio >= bodyRangeMin and
+     structureRisk > 0 and structureTarget > close
+longEntryOrder = longSetup and strategy.position_size <= 0
+
+signalTooltip = "买入 · 多单" +
+     "\n模式  EMA596收复接受后放量离轨扩张" +
+     "\n价格  " + str.tostring(close, format.mintick) +
+     "\n收复  " + str.tostring(reclaimAge) + "根前上穿 · 此后未收回线下" +
+     "\n距离  前棒 " + str.tostring(previousDistanceAtr, "#.##") +
+     " ATR → 当前 " + str.tostring(currentDistanceAtr, "#.##") + " ATR" +
+     "\n结构  收盘突破前4高 " + str.tostring(priorHigh, format.mintick) +
+     " · 高点/低点同步抬高" +
+     "\n量能  vol_ccy " + str.tostring(volume, "#.##") +
+     " ≥ 周P90 " + str.tostring(weeklyP90, "#.##") +
+     " · 中位量比 " + str.tostring(medianVolumeRatio, "#.##") + "x" +
+     "\n前趋势  EMA144斜率 " + str.tostring(ema144SlopeAtr[1], "#.####") +
+     " · EMA596斜率 " + str.tostring(ema596SlopeAtr[1], "#.####") + " ATR/根" +
+     "\n风控  结构低点 " + str.tostring(priorLow, format.mintick) +
+     " · 目标 " + str.tostring(structureTarget, format.mintick) +
+     "\n版本  " + strategyVersion
+
+if longEntryOrder
+    markerTip = low - math.max(syminfo.mintick * 4, atr14 * 0.08)
+    label.new(bar_index, markerTip, "", xloc = xloc.bar_index, yloc = yloc.price,
+         style = label.style_triangleup, color = color.green, size = size.small,
+         tooltip = signalTooltip)
+    line.new(bar_index, markerTip - atr14 * 0.70, bar_index, markerTip - atr14 * 0.12,
+         xloc = xloc.bar_index, color = color.green, width = 6)
+    strategy.entry("Long EMA596-D2", strategy.long, comment = strategyVersion)
+    strategy.exit("EMA596-D2 protection", from_entry = "Long EMA596-D2",
+         stop = structureStop, limit = structureTarget, qty_percent = 100,
+         comment_profit = "EMA596_D2_TP", comment_loss = "SL")
+
+plot(ema12, "EMA12", color = color.rgb(38, 166, 154), linewidth = 1)
+plot(ema144, "EMA144", color = color.orange, linewidth = 2)
+plot(ema596, "EMA596", color = color.rgb(171, 71, 188), linewidth = 2)

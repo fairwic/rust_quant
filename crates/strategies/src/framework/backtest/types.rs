@@ -356,6 +356,18 @@ impl Default for TradingState {
 pub struct BasicRiskStrategyConfig {
     // 最大止损百分比(避免当k线振幅过大，使用k线最低/高价止损时候，造成太大的亏损)
     pub max_loss_percent: f64,
+    /// 是否同时启用通用最大亏损止损。
+    ///
+    /// `None` 与 `Some(true)` 保持历史行为；只有已经自行冻结完整初始止损契约的研究策略
+    /// 才能显式设为 `Some(false)`，避免通用百分比静默改写策略风险单位。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enforce_base_max_loss: Option<bool>,
+    /// 是否在以当前 K 线开盘价成交后，立即用该 K 线完整高低价检查保护单。
+    ///
+    /// 旧策略通常在收盘生成并执行信号，因此默认关闭；下一根开盘成交的策略必须显式开启，
+    /// 否则会漏掉入场后同一根 K 线内触发的止盈或止损。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub check_entry_candle_risk: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     //(开仓K线止盈止损),多单时,当价格低于入场k线的最低价时,止损;空单时,价格高于入场k线的最高价时,止损
     pub is_used_signal_k_line_stop_loss: Option<bool>,
@@ -392,6 +404,12 @@ pub struct BasicRiskStrategyConfig {
     /// 回测时 position_nums 乘以该倍数，盈亏与回撤同步放大。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub position_leverage: Option<f64>,
+    /// 每笔交易按入场时账户权益承担的初始价格风险比例。
+    ///
+    /// `None` 保持历史全名义仓位；设置后，仓位数量等于权益风险预算除以实际成交价到
+    /// 最终初始止损的距离。该口径不额外乘 `position_leverage`。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub account_risk_fraction_per_trade: Option<f64>,
     /// 第一档止盈触发时的部分平仓比例，按当前剩余仓位计算。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tiered_take_profit_level_1_close_ratio: Option<f64>,
@@ -404,6 +422,8 @@ impl Default for BasicRiskStrategyConfig {
     fn default() -> Self {
         Self {
             max_loss_percent: 0.02, // 默认2%止损
+            enforce_base_max_loss: None,
+            check_entry_candle_risk: None,
             is_used_signal_k_line_stop_loss: Some(true),
             atr_take_profit_ratio: Some(0.00), // 默认1%盈利开始启用动态止盈
             fixed_signal_kline_take_profit_ratio: Some(0.00), // 默认不使用固定信号线的止盈
@@ -415,6 +435,7 @@ impl Default for BasicRiskStrategyConfig {
             dynamic_range_loss_percent: None,
             trade_fee_rate: None,
             position_leverage: None,
+            account_risk_fraction_per_trade: None,
             tiered_take_profit_level_1_close_ratio: None,
             tiered_take_profit_level_2_close_ratio: None,
         }

@@ -2,7 +2,7 @@
 
 - 状态：已接受
 - 首次接受：2026-07-18
-- 最近修订：2026-07-28
+- 最近修订：2026-08-03
 - 上位文档：[Rust Quant 目标架构](target-architecture.md)
 
 ## 1. 核心原则
@@ -65,7 +65,7 @@ crates/platform/kernel/src/
 
 其他模块通过 owner 的稳定公开 API 使用这些类型，而不是把所有业务类型搬进 kernel。
 
-`common::CandleItem` 是 legacy 位置，不是长期“通用内存模型”的例外。OHLCV、时间、确认状态、数据源/序号和缺口语义都是 Market 事实；迁移后的 canonical 类型应位于 `domains/market/model`（例如 `MarketBar`），由 Market 的公开 API 暴露。数据库 Row、交易所 DTO 和 backtest fixture 在 Adapter/Testkit 边界映射，不能为了兼容把 Candle 再放入 `platform/kernel`、`quant/*` 或新的 `common` crate。
+`common::CandleItem` 是 legacy 位置，不是长期“通用内存模型”的例外。OHLCV、时间、确认状态、数据源/序号和缺口语义都是 Market 事实；迁移后的 canonical `MarketBar` 位于 `domains/market/stream/bars/bar.rs`，由 Market 的公开 API 暴露。数据库 Row、交易所 DTO 和 backtest fixture 在 Adapter/Testkit 边界映射，不能为了兼容把 Candle 再放入 `platform/kernel`、`quant/*` 或新的 `common` crate。
 
 ## 4. `quant/math`：无交易语义的纯数学
 
@@ -164,13 +164,13 @@ Analytics 不决定是否发布策略；Research 不直接修改 live 默认版�
 
 | 代码 | 正确归属 |
 | --- | --- |
-| 多个策略共用的 StrategyDefinition 校验 | `domains/strategy/model` |
-| 多个策略共用的 Signal 去重 | `domains/strategy/use_cases` 或 Strategy 内部共享模块 |
+| 多个策略共用的 StrategyDefinition 校验 | `domains/strategy/definition/validation.rs` |
+| 多个策略共用的 Signal 去重 | `domains/strategy/signal/` 下有真实 capability 名称的模块 |
 | 多个组合共用的资金预算、目标净额和冲突处理 | `domains/portfolio`；纯矩阵或优化算法可下沉 `quant/math` |
 | 多个风险政策共用的敞口计算 | `domains/risk`；纯数学部分可下沉 `quant/math` |
-| 多个交易所共用的订单精度处理 | 规格事实归 `domains/market/model`，协议映射归 exchange-gateway |
-| 多个执行动作共用的订单状态迁移 | `domains/execution/model` |
-| 多个对账任务共用的差异分类 | `domains/reconciliation/model` |
+| 多个交易所共用的订单精度处理 | 规格事实归 `domains/market/reference/instrument_rules/`，协议映射归 exchange-gateway |
+| 多个执行动作共用的订单状态迁移 | `domains/execution/order_lifecycle/` |
+| 多个对账任务共用的差异分类 | `domains/reconciliation/detection/` |
 
 只有 owner 无关的那一小部分才继续下沉到通用 crate。
 
@@ -178,8 +178,8 @@ Analytics 不决定是否发布策略；Research 不直接修改 live 默认版�
 
 | 代码 | 应放位置 | 原因 |
 | --- | --- | --- |
-| Candle、Ticker、OrderBook | `domains/market/model` | 市场事实 |
-| Symbol 标准化后的业务类型 | `domains/market/model` | Market 拥有标准交易品种 |
+| Candle、Ticker、OrderBook | `domains/market/stream/<capability>/` | 市场事实按具体数据能力归属 |
+| Symbol 标准化后的业务类型 | `domains/market/reference/instrument.rs` | Market 拥有标准交易品种 |
 | 交易所原始 symbol 映射 | `adapters/exchange-gateway` | 外部协议差异 |
 | EMA/RSI/ATR | `quant/indicators` | 通用指标 |
 | RollingWindow、z-score | `quant/math` | 无交易语义纯算法 |
@@ -191,15 +191,15 @@ Analytics 不决定是否发布策略；Research 不直接修改 live 默认版�
 | 多策略资本预算、目标仓位、信号净额 | `domains/portfolio` | 目标组合与资金分配 |
 | 交易所实际余额、持仓和 PnL 投影 | `domains/account` | 外部账户事实 |
 | 最大仓位、最大回撤规则 | `domains/risk` | 风险不变量 |
-| 价格/数量 rounding 业务校验 | `domains/market/model` + `domains/execution/use_cases` | 规格事实与执行门禁分开 |
+| 价格/数量 rounding 业务校验 | `domains/market/reference/instrument_rules/` + `domains/execution/planning/` | 规格事实与执行门禁分开 |
 | 下单/撤单/保护单状态机 | `domains/execution` | 订单生命周期 |
 | Exchange HTTP 请求 | `adapters/exchange-gateway` | 外部技术实现 |
 | 订单与交易所结果差异 | `domains/reconciliation` | 对账事实 |
 | fee/slippage/funding 模拟机制 | `quant/backtest` | owner 无关回测机制 |
 | Sharpe/max drawdown | `quant/analytics` | 绩效计算 |
 | 参数实验、数据指纹、Run/Checkpoint/Evidence | `domains/research` | 有独立身份、生命周期和持久化 owner |
-| 模拟现金、仓位、working orders 与权益 | `domains/research/model/simulation_ledger` | 研究模拟事实，不是生产 AccountProjection |
-| 同时点多币信号收集与决策屏障 | `domains/research/use_cases` | 防止 symbol 遍历顺序改变资金分配 |
+| 模拟现金、仓位、working orders 与权益 | `domains/research/simulation/` 内的明确 ledger 模块 | 研究模拟事实，不是生产 AccountProjection |
+| 同时点多币信号收集与决策屏障 | `domains/research/simulation/` 的组合回放 capability | 防止 symbol 遍历顺序改变资金分配 |
 | StrategySignalV1 JSON | `contracts/strategy/v1` | 跨进程协议 |
 | FillEventV1 JSON | `contracts/execution/v1` | Execution 到 Account 的跨进程事实 |
 | SQLx Row Model | `adapters/postgres/<owner>` | 数据库实现细节 |
@@ -218,7 +218,38 @@ Analytics 不决定是否发布策略；Research 不直接修改 live 默认版�
 
 如果不满足，保留在 owner 模块。对十几行简单逻辑，允许暂时重复，也不要制造错误抽象。
 
-## 11. 明确禁止的“伪通用”目录
+## 11. 首批不可重复实现清单
+
+目标仓库以 `rust_quant_alpha/architecture/module-boundary-policy.toml` 的
+`canonical_implementation` 为唯一机器事实源。首批已冻结范围是：
+
+| 分类 | 唯一实现 |
+| --- | --- |
+| Market 事实 | `MarketBar`、`MarketInstrument`、`Timeframe`、`InstrumentRules` |
+| Quant 指标 | `IndicatorBar`、ATR、RSI、STC、EMA、Bollinger、Volume Ratio |
+| Quant 回测/分析 | `round_trip_fee`、`PerformanceMetrics`、`calculate_performance_metrics` |
+| Strategy Vegas v1 | `VegasFeatureEngine`、`VegasDecisionEngine` |
+
+使用规则：
+
+1. 新代码先查登记，再调用 Owner 的公开 API；不得用 `Candle`、`Kline`、`SymbolFilters`、
+   `BacktestMetrics` 等同义名称复制第二份业务实现。
+2. Adapter DTO、数据库 Row、Wire payload 可以不同，但名称必须体现 provider、存储或协议语义，并在边界映射；
+   它们不是 canonical 业务类型。
+3. `planned` 能力没有真实代码时不登记空壳；在 Domain Wave 中确定 Owner，随第一个完整消费者闭环落地。
+4. 新增真正跨 Owner 的复用能力时，同一变更必须补 capability、唯一实现路径、禁止别名和注入违规测试。
+
+## 12. 性能规则不能制造第二套架构
+
+- 性能优化优先改唯一实现，不在 CLI、Research、Backtest 或另一个策略旁路复制“更快版本”。
+- 逐 K 线和流式指标使用有界状态；禁止每步复制完整窗口、头删 `Vec`、无界 `collect/sort`，或读取 env/
+  “最新配置”。配置在 App 解析并以不可变快照注入。
+- 外部 SDK/HTTP I/O 在数据库事务和 provider lock 外完成；正常提交路径使用有界 batch，禁止对 snapshot
+  每行执行一次 SQL `await`。冲突失败分支可以有界定位，但不能成为正常写路径。
+- 性能结论必须同时保留行为证据：策略使用指纹/parity，数据库使用真实 PostgreSQL 原子性、CAS 与并发测试，
+  吞吐使用相同 release 构建、数据集和查询次数/耗时口径。没有证据时只登记待测热点，不提前复杂化代码。
+
+## 13. 明确禁止的“伪通用”目录
 
 禁止新增以下兜底目录或同义变体：
 
@@ -229,11 +260,14 @@ helpers/
 shared-services/
 base-service/
 misc/
+support/
 ```
 
-允许业务模块内部存在范围明确的私有 helper，但文件名必须表达用途，例如 `price_rounding.rs`、`signal_dedup.rs`，不能只有 `utils.rs`。
+允许业务模块内部存在范围明确的私有函数，但文件名必须表达用途，例如 `price_rounding.rs`、`signal_dedup.rs`，
+不能只有 `utils.rs`、`helpers.rs`、`support.rs`、`*_helpers.rs` 或 `*_support.rs`。测试目录内局部 `support`
+不受此限制。
 
-## 12. 错误、配置和缓存不是全局业务通用
+## 14. 错误、配置和缓存不是全局业务通用
 
 - 不建立一个包含所有错误的全局 `AppError`；每个业务模块定义稳定错误，App/Adapter 在边界映射。
 - 不建立一个包含所有环境变量的全局配置；每个 App 只解析自己需要的强类型配置。

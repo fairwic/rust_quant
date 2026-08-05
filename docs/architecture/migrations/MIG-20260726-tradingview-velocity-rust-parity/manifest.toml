@@ -1,0 +1,236 @@
+schema_version = 2
+manifest_kind = "historical_record"
+migration_id = "MIG-20260726-tradingview-velocity-rust-parity"
+title = "15m Velocity TradingView 与 Rust Research 等价回放"
+state = "verified"
+promotion_status = "research_only"
+cutover_status = "not_required"
+mode = "behavior_change"
+behavior_change = true
+verification_mode = "manual"
+production_mutation_allowed = false
+evidence_scope = "historical_characterization"
+
+[program]
+migration_program_id = "MP-tradingview-velocity-research-characterization"
+registry_ref = "docs/architecture/migrations/programs/registry.toml"
+parent_plan = "docs/architecture/migration-plan.md"
+# 本记录早于未来 Market/Strategy Owner 子 Manifest；不得把它当作未来迁移的已满足依赖。
+depends_on = []
+historical_dependency_eligible = false
+
+[authority]
+architecture_baseline_git_sha = "660407f438db52acde8318e705b26ad05948aa0a"
+adrs = ["ADR-0009"]
+normative_documents = [
+  "docs/architecture/target-architecture.md",
+  "docs/architecture/dependency-rules.md",
+  "docs/architecture/ai-coding-guardrails.md",
+  "docs/architecture/ai-migration-execution-protocol.md",
+]
+# 历史记录未保留当时规范文档内容 hash；后续 current_migration 必须重新冻结，不能复用本项。
+normative_document_hashes = []
+release_unit_manifest_hashes = []
+contract_snapshots = [
+  { contract_id = "StrategyRuleArtifactV1", version = "66d3937e", path = "docs/strategy_list/15min_velocity_all_symbol_strategy_research_66d3937e.pine", sha256 = "3d2b82f4297d9d4a661d8ca2c04daf8d0b1cebc8a1b62e63f60d923f3ccc7799", producer = "Strategy", consumers = ["Research"], compatibility_window = "not_applicable_historical" },
+  { contract_id = "MarketHistoricalObservationV0", version = "historical", path = "", sha256 = "", producer = "Market", consumers = ["Research"], compatibility_window = "unsealed_scenario_only" },
+  { contract_id = "ResearchReadOnlyReplayV1", version = "v1", path = "", sha256 = "", producer = "Research", consumers = [], compatibility_window = "not_applicable" },
+]
+schema_snapshots = []
+
+[scope]
+owner = "Research"
+owner_repository = "rust_quant"
+source_paths = [
+  "docs/strategy_list/15min_velocity_all_symbol_strategy_research_66d3937e.pine",
+  "docs/strategy_list/15min_velocity_all_sybol_strategy.md",
+]
+target_paths = [
+  "crates/rust-quant-cli/src/app/tradingview_velocity_parity.rs",
+  "crates/rust-quant-cli/src/app/tradingview_velocity_parity/",
+  "crates/rust-quant-cli/src/bin/tradingview_velocity_parity.rs",
+]
+allowed_change_paths = [
+  "docs/strategy_list/15min_velocity_all_sybol_strategy.md",
+  "docs/architecture/migrations/MIG-20260726-tradingview-velocity-rust-parity/",
+  "crates/rust-quant-cli/src/app/mod.rs",
+  "crates/rust-quant-cli/src/app/tradingview_velocity_parity.rs",
+  "crates/rust-quant-cli/src/app/tradingview_velocity_parity/",
+  "crates/rust-quant-cli/src/bin/tradingview_velocity_parity.rs",
+  "task_plan.md",
+  "AGENT_PROGRESS.md",
+]
+forbidden_change_paths = [
+  "crates/execution/",
+  "crates/orchestration/",
+  "docker-compose.deploy.yml",
+  ".github/workflows/",
+]
+affected_cargo_packages = ["rust-quant-cli"]
+affected_release_units = []
+owned_tables = []
+external_owner_apis = [
+  "Market::HistoricalMarketDataV0 public read-only observation only",
+]
+
+[behavior]
+business_goal = "在独立 Research 入口中复刻冻结 Pine 的信号、下一根开盘成交、保护位与退出政策，并输出 BTC/ETH 可审计差异。"
+invariants = [
+  "所有信号只读取信号 K 线及之前已完成的 15m K 线",
+  "Pine 基线源码 FNV-1a 32 必须保持 66d3937e",
+  "TradingView volume 按当前研究约定映射为 OKX vol_ccy，不计算 volume * close",
+  "新实现保持 Research-only，不注册 Paper、Live 或生产默认入口",
+  "旧 Rust V1-V13 的策略身份、参数和可重放结果不被覆盖",
+  "Research 只消费 Market 历史数据和 Strategy 规则工件；不拥有 Candle、universe 或 Strategy 发布事实",
+]
+current_entrypoints = ["TradingView Pine strategy editor"]
+target_entrypoints = ["cargo run -p rust-quant-cli --bin tradingview_velocity_parity"]
+allowed_differences = [
+  "Rust 可额外计入手续费和滑点压力；TradingView 当前基线 commission 为 0",
+  "若数据源使用 OKX REST 而非 TradingView 图表缓存，行情修订与可见历史长度须单独报告",
+  "仅有 OHLC 时同棒触价顺序按明确且保守的 broker path 规则回放",
+]
+forbidden_differences = [
+  "使用信号后的 K 线决定是否入场",
+  "把尚未进入 Pine 的量价滞涨假设混入等价基线",
+  "把 spot 与 swap 结果当作 exact parity",
+]
+characterization_evidence = [
+  "TradingView source: 1603 lines, 94515 chars, FNV-1a 32 66d3937e",
+  "BTC baseline: 7 trades, net 265.00 USDT, PF 1.1780315754, commission 0",
+  "ETH baseline: 14 trades, net 331.42 USDT, PF 8.7092347057, commission 0",
+]
+
+[configuration]
+strategy_runtime_snapshot_refs = []
+portfolio_policy_snapshot_refs = []
+risk_policy_snapshot_refs = []
+execution_planning_policy_snapshot_refs = []
+execution_decision_context_refs = []
+research_run_spec_refs = ["docs/strategy_list/15min_velocity_all_sybol_strategy.md"]
+# V1 未保留 immutable DatasetManifest；它只能作为历史 scenario characterization，不能复用为 exact replay 输入。
+dynamic_input_artifacts = []
+environment_inputs_to_remove = []
+
+[contracts]
+changed = false
+current_versions = [
+  "MarketHistoricalObservationV0 (unsealed legacy observation)",
+  "StrategyRuleArtifactV1@66d3937e",
+]
+target_versions = [
+  "MarketHistoricalDatasetV1 (Market owner immutable DatasetManifest, future child Manifest)",
+  "StrategyRuleArtifactV1 (Strategy owner versioned artifact, future child Manifest)",
+  "ResearchReadOnlyReplayV1",
+]
+compatibility_window = "not_applicable_historical_characterization"
+producer_consumers = [
+  "Market historical input -> Research read-only replay",
+  "Strategy rule artifact -> Research read-only replay",
+]
+owner_contract_boundaries = [
+  "Research consumes immutable Market/Strategy artifacts and emits Evidence only; it does not write owner facts",
+]
+message_contracts = []
+
+[persistence]
+changed = false
+owner = "not_applicable_research_only"
+local_write_set = []
+local_transaction_boundary = "none; read-only research replay"
+transaction_invariants = []
+idempotency_identities = []
+outbox_requirements = []
+inbox_requirements = []
+cross_owner_transactions_forbidden = true
+index_and_lock_evidence = []
+database_comment_requirements = []
+
+[side_effects]
+read_only = true
+database_writes = false
+external_network_writes = false
+exchange_mutations = false
+production_writes = false
+recovery_owner = "not_applicable_research_only"
+fixed_service_api_key_scope = "not_used"
+fixed_service_api_key_access_evidence = []
+
+[build]
+expected_build_impact = ["rust-quant-cli research binary only"]
+required_release_units = []
+forbidden_packages = []
+required_binary_allowlists = []
+
+[verification]
+required_suites = [
+  "focused unit tests",
+  "strict timing tests",
+  "BTC and ETH multi-window replay",
+  "TradingView scenario comparison",
+  "git diff check",
+  "code file line limit check",
+]
+commands = [
+  "cargo test -p rust-quant-cli tradingview_velocity_parity --lib",
+  "cargo check -p rust-quant-cli --bin tradingview_velocity_parity",
+  "cargo run -p rust-quant-cli --bin tradingview_velocity_parity -- --proxy-url <explicit-local-proxy>",
+  "cargo fmt -- --check <scoped-parity-rust-paths>",
+  "git diff --check -- <migration-scope>",
+]
+parity_layers = ["indicator", "signal", "entry", "risk", "exit", "performance"]
+recovery_scenarios = []
+deploy_contracts = []
+expected_legacy_ratchet_delta = 0
+test_only_evidence_provider = { required = false, contract_id = "", immutable_inputs_required = true, runtime_wiring_forbidden = true }
+
+[shadow]
+required = false
+dual_side_effects_forbidden = true
+comparison_identity = "pine_hash_66d3937e"
+acceptance_thresholds = []
+
+[cutover]
+required = false
+fact_source_before = "TradingView Research Chart"
+fact_source_after = "unchanged"
+cutover_identity = ""
+rollback_entrypoint = ""
+rollback_window = ""
+authorization_required = false
+
+[legacy]
+allowlist_entries_before = []
+entries_to_remove = []
+callers_to_migrate = []
+configs_to_remove = []
+table_writes_to_stop = []
+monitors_to_remove = []
+deletion_gates = []
+
+[evidence]
+evidence_file = "docs/architecture/migrations/MIG-20260726-tradingview-velocity-rust-parity/evidence.md"
+required_artifacts = [
+  "Pine-to-Rust rule matrix",
+  "BTC and ETH replay metrics",
+  "first-difference audit",
+]
+contains_sensitive_data = false
+# 历史范围补丁未保留；本记录不能生成当前 HEAD Verdict，后续 current_migration 必须重跑。
+tested_revision = "660407f438db52acde8318e705b26ad05948aa0a"
+tested_patch_sha256 = ""
+input_artifact_hashes = [
+  "StrategyRuleArtifactV1:sha256:3d2b82f4297d9d4a661d8ca2c04daf8d0b1cebc8a1b62e63f60d923f3ccc7799",
+]
+output_artifact_hashes = []
+
+[approval]
+required = false
+reason = "Research-only; no production mutation or cutover"
+approved_by = ""
+approved_at = ""
+reference = ""
+
+[blocking]
+reasons = []
+required_decisions = []

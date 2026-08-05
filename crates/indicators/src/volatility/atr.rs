@@ -130,4 +130,28 @@ mod tests {
             assert!(approx_eq!(f64, result, *expected, epsilon = 0.001));
         }
     }
+
+    #[test]
+    /// 验证 ATR 同时纳入前收跳变，并在首个完整窗口后按 Wilder RMA 递推。
+    fn previous_close_gap_is_included_before_wilder_smoothing() {
+        let mut atr = ATR::new(3).unwrap();
+
+        assert_eq!(atr.next(10.0, 8.0, 9.0), 0.0);
+        assert_eq!(atr.next(15.0, 14.0, 14.5), 0.0);
+        let seeded = atr.next(14.5, 13.0, 13.5);
+        let smoothed = atr.next(14.0, 12.0, 13.0);
+
+        assert!(approx_eq!(
+            f64,
+            seeded,
+            (2.0 + 6.0 + 1.5) / 3.0,
+            epsilon = 1e-12
+        ));
+        assert!(approx_eq!(
+            f64,
+            smoothed,
+            (seeded * 2.0 + 2.0) / 3.0,
+            epsilon = 1e-12
+        ));
+    }
 }

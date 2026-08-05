@@ -1,0 +1,3079 @@
+//@version=6
+// V18 主研究图表：完整保留冻结 V11，并把冻结 V17 箱体右侧 stop-entry 作为低优先级补充家族。
+// 同棒候选固定 V11 优先；每币单持仓，volume 直接使用 vol_ccy，未引入 Paper/Live 或生产语义。
+strategy("15m Velocity All Symbol - Research Chart V18", overlay = true, pyramiding = 0,
+     initial_capital = 100000, default_qty_type = strategy.fixed, default_qty_value = 1,
+     process_orders_on_close = false, max_labels_count = 500, max_lines_count = 500)
+
+const string coreIndicatorGroup = "核心指标参数（TradingView研究覆盖）"
+const string bollingerInputGroup = "布林带参数（TradingView研究覆盖）"
+indicatorSource = input.source(close, "统一价格源", group = coreIndicatorGroup,
+     tooltip = "EMA、RSI、MACD与布林带共同使用此价格源。默认close与Rust正式基线一致。")
+rsiLength = input.int(14, "RSI周期", minval = 2, group = coreIndicatorGroup)
+emaFastLength = input.int(12, "EMA快速周期", minval = 1, group = coreIndicatorGroup)
+emaMediumLength = input.int(144, "EMA中速周期", minval = 2, group = coreIndicatorGroup)
+emaStructureLength = input.int(576, "EMA慢速结构周期", minval = 2, group = coreIndicatorGroup)
+emaRegimeLength = input.int(676, "EMA趋势判定周期", minval = 2, group = coreIndicatorGroup,
+     tooltip = "默认676。修改后仅影响当前TradingView实例，不会自动改写Rust正式基线。")
+macdFastLength = input.int(12, "MACD快速周期", minval = 1, group = coreIndicatorGroup)
+macdSlowLength = input.int(26, "MACD慢速周期", minval = 2, group = coreIndicatorGroup)
+macdSignalLength = input.int(9, "MACD信号周期", minval = 1, group = coreIndicatorGroup)
+bollingerLength = input.int(20, "布林带周期", minval = 2, group = bollingerInputGroup)
+bollingerDeviation = input.float(2.5, "布林带标准差倍数", minval = 0.1, step = 0.1,
+     group = bollingerInputGroup)
+
+// 图表版无法在下一根开盘成交前取得实际成交价，因而固定为 1 单位，不复刻 Core 的 1% 风险仓位计算。
+const int volumeLookback = 10
+const int minValidVolumeSamples = 5
+const int weeklyLookback = 672
+const int anchorMinDistance = 5
+const int anchorLookback = 32
+const int divergenceWeakMaxGap = 7
+const float volumeEventRatio = 2.5
+const float divergenceRsiMidline = 50.0
+const float divergenceMinBreakRatio = 0.0035
+const float divergenceMinBreakAtr = 0.50
+const float divergenceMinIntermediateSwingAtr = 1.0
+const float divergenceBreakEvenRisk = 1.0
+const float divergenceFinalTargetRisk = 1.5
+const float divergenceDirectionalShadowMin = 0.25
+const int divergenceDirectionalShadowMinTicks = 2
+const string divergenceStructureVersion = "rsi_divergence_directional_candle_gate_v4"
+const int falseBreakoutAnchorLength = 20
+const int falseBreakoutFailureWindow = 8
+const string rangeUpsideBreakLongVersion = "volume_anchor_range_upside_break_long_15m_v1"
+const string confirmedRangeBreakLongVersion = "volume_confirmed_range_acceptance_break_long_15m_v2"
+const int confirmedRangeTouchGap = 2
+const int confirmedRangeAcceptanceWindow = 3
+const float confirmedRangeMaxWidthRatio = 0.03
+const float confirmedRangeTouchBandRatio = 0.0015
+const float confirmedRangeTouchBandAtr = 0.35
+const float confirmedRangeContainmentMin = 0.80
+const float confirmedRangeUpperDriftMax = 0.25
+const float confirmedRangeLowerDriftMax = 0.35
+const float confirmedRangeContractionMax = 1.00
+const float confirmedRangeRetestBandRatio = 0.001
+const float confirmedRangeRetestBandAtr = 0.25
+const string largeHorizontalRangeLongVersion = "volume_large_horizontal_range_break_long_15m_v1"
+const int largeHorizontalRangeLookbackMin = 96
+const int largeHorizontalRangeLookbackMax = 240
+const int largeHorizontalRangeLookbackStep = 24
+const int largeHorizontalRangeTouchGap = 8
+const float largeHorizontalRangeMaxWidthRatio = 0.03
+const float largeHorizontalRangeTouchBandRatio = 0.002
+const float largeHorizontalRangeTouchBandAtr = 0.50
+const float largeHorizontalRangeContainmentMin = 0.90
+const float largeHorizontalRangeBoundaryDriftMax = 0.45
+const float largeHorizontalRangeBreakoutRsiMin = 70.0
+const float largeHorizontalRangeBreakoutRsiMax = 85.0
+const string largeAscendingTriangleLongVersion = "volume_large_ascending_triangle_break_long_15m_v1"
+const int largeTriangleLookbackMin = 96
+const int largeTriangleLookbackMax = 192
+const int largeTriangleLookbackStep = 24
+const int largeTriangleTouchGap = 8
+const float largeTriangleResistanceSpreadMax = 0.005
+const float largeTriangleTouchBandRatio = 0.003
+const float largeTriangleTouchBandAtr = 0.50
+const float largeTriangleLowStepAtrMin = 0.25
+const float largeTriangleLowRiseAtrMin = 1.0
+const float largeTriangleContractionMax = 0.70
+const float largeTriangleBreakoutRsiMin = 70.0
+const float largeTriangleBreakoutRsiMax = 80.0
+const string bullishTransitionShortGuardVersion = "recent_bullish_volume_ema_transition_short_guard_15m_v1"
+const int bullishTransitionProtectionWindow = 5
+const float bullishTransitionImpulseVolumeRatio = 6.0
+const float bullishTransitionImpulseBodyAtr = 1.0
+const string slowEmaBandReclaimShortGuardVersion = "fresh_slow_ema_band_reclaim_rsi_overbought_upper_wick_short_guard_15m_v1"
+const int slowEmaBandReclaimProtectionWindow = 5
+const string transitionLiquiditySweepShortVersion = "volume_transition_liquidity_sweep_short_15m_v1"
+const string postBreakoutLongShortGuardVersion = "post_breakout_long_acceptance_short_guard_15m_v1"
+const int transitionSweepAnchorMinDistance = 5
+const int transitionSweepAnchorMaxDistance = 16
+const int transitionSweepPriorHighLookback = 20
+const int transitionSweepTouchGap = 2
+const int transitionSweepMinTouchGroups = 2
+const float transitionSweepTouchBandRatio = 0.0015
+const float transitionSweepTouchBandAtr = 0.50
+const float transitionSweepAnchorRsiMin = 80.0
+const float transitionSweepSignalRsiMin = 70.0
+const string effortNoResultShortVersion = "volume_effort_no_result_lower_high_boll_reclaim_short_15m_v1"
+const int effortNoResultAnchorMinDistance = 20
+const int effortNoResultAnchorMaxDistance = 80
+const float effortNoResultMaxGapRatio = 0.005
+const float effortNoResultMaxGapAtr = 0.50
+const float effortNoResultVolumeMultiplierMin = 1.25
+const float effortNoResultAnchorRsiMin = 70.0
+const float effortNoResultSignalRsiMin = 55.0
+const float effortNoResultSignalRsiMax = 70.0
+const float effortNoResultBodyRangeMin = 0.60
+const float effortNoResultBodyAtrMin = 0.50
+const float effortNoResultCloseLocationMax = 0.20
+const float effortNoResultBreakEvenRisk = 1.0
+const float effortNoResultFinalTargetRisk = 1.5
+const int counterTrendRangeLength = 8
+const int counterTrendRangeLookback = 48
+const int counterTrendTouchGap = 2
+const float counterTrendRangeMaxWidthRatio = 0.03
+const float counterTrendTouchBandRatio = 0.10
+const int counterTrendFreshBreakWindow = 8
+const int counterTrendDisplacementLookback = 96
+const float counterTrendDisplacementAtrMin = 6.0
+const float counterTrendDisplacementRatioMin = 0.05
+const float counterTrendTrailingDistanceRisk = 1.0
+const string counterTrendStructureExitVersion = "counter_trend_structure_1r_trailing_v1"
+const string counterTrendFreshBreakVersion = "counter_trend_recent_range_break_reversion_v1"
+const int rsiCounterTrendMaturityBars = 600
+const float rsiCounterTrendCostRatePerSide = 0.0008
+const float rsiCounterTrendWideTrailRisk = 2.0
+const string rsiCounterTrendMaturityExitVersion = "rsi_counter_trend_ema_age_structure_exit_v5"
+const int emaCompressionLookback = 12
+const int emaSlopeLookback = 3
+const int emaExpansionCooldown = 12
+const int emaExpansionStructureLookback = 20
+const int v10AcceptanceWindow = 3
+const int recentMacdDirectionLookback = 3
+const float emaCompressionMeanAtrMax = 0.25
+const float emaCompressionMaxAtrMax = 0.50
+const float emaCompressionTouchAtrMax = 0.10
+const float ema12SlopeAtrMin = 0.05
+const float ema144SlopeAtrMin = 0.015
+const float ema596SlopeAtrMin = 0.0015
+const float emaSlopeAccelerationMin = 1.20
+const float emaExpansionTakeProfitAtr = 3.0
+const float v10EmaSourceDistanceAtrMax = 1.25
+const float v10EmaTrendBreakDistanceAtrMax = 1.50
+const float v10EmaTrendRetestBandAtr = 0.35
+const float v10EmaExpansionRetestBandAtr = 0.25
+const float v10EmaExpansionLongRsiMin = 40.0
+const float v10EmaExpansionLongRsiMax = 68.0
+const float v10EmaExpansionShortRsiMin = 35.0
+const float v10EmaExpansionShortRsiMax = 65.0
+const string v10EntryQualityVersion = "tradingview_velocity_entry_quality_v11"
+const float shortTrendExtensionTargetAtr = 8.0
+const string threeBarEngulfReversalLongVersion = "volume_three_bear_bullish_engulfing_reversal_long_15m_v1"
+const float threeBarEngulfMinBodyRangeRatio = 0.75
+const float threeBarEngulfMinBodyAtr = 1.5
+const float threeBarEngulfMinCloseLocation = 0.90
+const float threeBarEngulfBottomBandAtr = 0.25
+const float threeBarEngulfBreakEvenRisk = 1.0
+const float threeBarEngulfFinalTargetRisk = 1.5
+const string bollingerLowerReclaimLongVersion = "volume_bollinger_lower_reclaim_long_15m_v1"
+const int bollingerLowerReclaimLocationLookback = 48
+const float bollingerLowerReclaimShadowMin = 0.50
+const float bollingerLowerReclaimCloseLocationMin = 0.75
+const float bollingerLowerReclaimBottomPositionMax = 0.15
+const float bollingerLowerReclaimRsiMin = 35.0
+const float bollingerLowerReclaimRsiMax = 50.0
+const float bollingerLowerReclaimMinRewardRisk = 1.10
+const string ema596ReclaimDepartureLongVersion = "volume_ema596_reclaim_departure_hh_hl_long_15m_v4"
+const int ema596ReclaimMaxAge = 32
+const int ema596DepartureStructureLookback = 8
+const int ema596DepartureVolumeMedianLookback = 20
+const float ema596DepartureMedianVolumeRatioMin = 2.5
+const float ema596DeparturePreviousDistanceAtrMax = 0.50
+const float ema596DepartureCurrentDistanceAtrMin = 1.0
+const float ema596DepartureCurrentDistanceAtrMax = 2.5
+const float ema596DepartureBodyRangeMin = 0.60
+const float ema596DepartureTargetRisk = 2.0
+
+// 止损距离向外取整，止盈距离向内取整，保持交易所 tick 精度且不缩小初始风险空间。
+f_stop_distance_ticks(distance) =>
+    int(math.max(1, math.ceil(distance / syminfo.mintick)))
+
+f_target_distance_ticks(distance) =>
+    int(math.max(1, math.floor(distance / syminfo.mintick)))
+
+f_round_long_stop(price) =>
+    math.floor(price / syminfo.mintick) * syminfo.mintick
+
+f_round_short_stop(price) =>
+    math.ceil(price / syminfo.mintick) * syminfo.mintick
+
+f_round_long_target(price) =>
+    math.floor(price / syminfo.mintick) * syminfo.mintick
+
+f_round_short_target(price) =>
+    math.ceil(price / syminfo.mintick) * syminfo.mintick
+
+// 成本后保本属于保护价：多单必须向上、空单必须向下取整，避免 tick 取整后重新落回净亏损。
+f_round_long_net_break_even(price) =>
+    math.ceil(price / syminfo.mintick) * syminfo.mintick
+
+f_round_short_net_break_even(price) =>
+    math.floor(price / syminfo.mintick) * syminfo.mintick
+
+// 同方向多个候选分支可以同时成立，悬浮信息需要完整保留全部触发原因。
+f_append_trigger(current, matched, trigger) =>
+    matched ? (str.length(current) == 0 ? trigger : current + " + " + trigger) : current
+
+// 透明热区覆盖信号 K 线主体，让悬浮提示不必精确命中尺寸很小的可见标记。
+f_add_hover_target(x, y, details) =>
+    label.new(x, y, "■■■\n■■■", xloc = xloc.bar_index, yloc = yloc.price,
+         style = label.style_none, textcolor = color.new(color.white, 100),
+         size = size.large, tooltip = details)
+
+// 图表版用固定 8 根确认窗落实“至少 8 根”，防止为追求更远目标而事后向外扩张横盘边界。
+f_sideways_window(endOffset) =>
+    float candidateHigh = na
+    float candidateLow = na
+    bool samplesReady = true
+    for windowIndex = 0 to counterTrendRangeLength - 1
+        offset = endOffset + windowIndex
+        sampleReady = not na(high[offset]) and not na(low[offset]) and
+             high[offset] >= low[offset] and low[offset] > 0
+        samplesReady := samplesReady and sampleReady
+        if sampleReady
+            candidateHigh := na(candidateHigh) ? high[offset] : math.max(candidateHigh, high[offset])
+            candidateLow := na(candidateLow) ? low[offset] : math.min(candidateLow, low[offset])
+
+    candidateHeight = samplesReady ? candidateHigh - candidateLow : na
+    candidateWidthRatio = samplesReady and candidateLow > 0 ? candidateHeight / candidateLow : na
+    touchBand = samplesReady ? math.max(syminfo.mintick * 2, candidateHeight * counterTrendTouchBandRatio) : na
+    int upperTouchGroups = 0
+    int lowerTouchGroups = 0
+    int lastUpperTouchIndex = na
+    int lastLowerTouchIndex = na
+
+    // 连续触碰属于同一组；只有与上一触碰至少相隔 2 根，才记为新的独立测试。
+    for chronologicalIndex = 0 to counterTrendRangeLength - 1
+        offset = endOffset + counterTrendRangeLength - 1 - chronologicalIndex
+        if samplesReady and high[offset] >= candidateHigh - touchBand
+            if na(lastUpperTouchIndex) or chronologicalIndex - lastUpperTouchIndex >= counterTrendTouchGap
+                upperTouchGroups += 1
+            lastUpperTouchIndex := chronologicalIndex
+        if samplesReady and low[offset] <= candidateLow + touchBand
+            if na(lastLowerTouchIndex) or chronologicalIndex - lastLowerTouchIndex >= counterTrendTouchGap
+                lowerTouchGroups += 1
+            lastLowerTouchIndex := chronologicalIndex
+
+    valid = samplesReady and candidateHeight > 0 and
+         candidateWidthRatio <= counterTrendRangeMaxWidthRatio and
+         upperTouchGroups >= 2 and lowerTouchGroups >= 2
+    [valid, candidateHigh, candidateLow, candidateWidthRatio, upperTouchGroups, lowerTouchGroups]
+
+// “刚突破/跌破”必须是横盘结束后的首次收盘穿越，且从穿越棒到 t 的每根收盘都留在区间外。
+// 这样旧区间被收回后不会因二次穿越重新取得 fresh 身份，也不会把长期离轨误写成刚破位。
+f_held_break_age(zoneEndOffset, boundary, breakDown) =>
+    int firstBreakAge = na
+    // 从横盘结束后最老的一根向 t 扫描；若首次穿越早于8根，即使近期二次穿越也不能重新标成 fresh。
+    for scanIndex = 0 to counterTrendRangeLookback - 1
+        candidateAge = counterTrendRangeLookback - 1 - scanIndex
+        candidateReady = candidateAge < zoneEndOffset and
+             not na(close[candidateAge]) and not na(close[candidateAge + 1])
+        crossed = candidateReady and
+             (breakDown ?
+                  close[candidateAge] < boundary and close[candidateAge + 1] >= boundary :
+                  close[candidateAge] > boundary and close[candidateAge + 1] <= boundary)
+        if na(firstBreakAge) and crossed
+            firstBreakAge := candidateAge
+
+    bool heldOutside = not na(firstBreakAge)
+    if heldOutside
+        for heldAge = 0 to counterTrendRangeLookback - 1
+            if heldAge <= firstBreakAge
+                sampleOutside = not na(close[heldAge]) and
+                     (breakDown ? close[heldAge] < boundary : close[heldAge] > boundary)
+                heldOutside := heldOutside and sampleOutside
+    heldOutside and firstBreakAge < counterTrendFreshBreakWindow ? firstBreakAge : na
+
+// 20 根短箱体使用稳健边界识别横盘、真实极值确认突破；两者分离可避免单根异常影线伪造箱体边界。
+f_confirmed_anchor_range(currentAtr) =>
+    int halfLength = int(falseBreakoutAnchorLength / 2)
+    int recentContractionLength = 5
+    bool samplesReady = not na(currentAtr) and currentAtr > 0
+    array<float> highSamples = array.new_float()
+    array<float> lowSamples = array.new_float()
+    array<float> earlyHighSamples = array.new_float()
+    array<float> recentHighSamples = array.new_float()
+    array<float> earlyLowSamples = array.new_float()
+    array<float> recentLowSamples = array.new_float()
+    float earlierTrueRangeSum = 0.0
+    float recentTrueRangeSum = 0.0
+
+    for chronologicalIndex = 0 to falseBreakoutAnchorLength - 1
+        offset = falseBreakoutAnchorLength - chronologicalIndex
+        sampleReady = not na(high[offset]) and not na(low[offset]) and not na(close[offset]) and
+             not na(close[offset + 1]) and high[offset] >= low[offset] and low[offset] > 0
+        samplesReady := samplesReady and sampleReady
+        if sampleReady
+            array.push(highSamples, high[offset])
+            array.push(lowSamples, low[offset])
+            if chronologicalIndex < halfLength
+                array.push(earlyHighSamples, high[offset])
+                array.push(earlyLowSamples, low[offset])
+            else
+                array.push(recentHighSamples, high[offset])
+                array.push(recentLowSamples, low[offset])
+
+            sampleTrueRange = math.max(high[offset] - low[offset],
+                 math.max(math.abs(high[offset] - close[offset + 1]),
+                 math.abs(low[offset] - close[offset + 1])))
+            if chronologicalIndex < falseBreakoutAnchorLength - recentContractionLength
+                earlierTrueRangeSum += sampleTrueRange
+            else
+                recentTrueRangeSum += sampleTrueRange
+
+    candidateUpper = samplesReady ? array.percentile_nearest_rank(highSamples, 85) : na
+    candidateLower = samplesReady ? array.percentile_nearest_rank(lowSamples, 15) : na
+    candidateRawHigh = samplesReady ? array.max(highSamples) : na
+    candidateRawLow = samplesReady ? array.min(lowSamples) : na
+    candidateHeight = samplesReady ? candidateUpper - candidateLower : na
+    candidateMid = samplesReady ? (candidateUpper + candidateLower) * 0.5 : na
+    candidateWidthRatio = samplesReady and candidateMid > 0 ? candidateHeight / candidateMid : na
+    touchBand = samplesReady ? math.max(candidateMid * confirmedRangeTouchBandRatio,
+         currentAtr * confirmedRangeTouchBandAtr) : na
+    int upperTouchGroups = 0
+    int lowerTouchGroups = 0
+    int lastUpperTouchIndex = na
+    int lastLowerTouchIndex = na
+    int containedCloses = 0
+
+    if samplesReady
+        for chronologicalIndex = 0 to falseBreakoutAnchorLength - 1
+            offset = falseBreakoutAnchorLength - chronologicalIndex
+            if high[offset] >= candidateUpper - touchBand
+                if na(lastUpperTouchIndex) or chronologicalIndex - lastUpperTouchIndex >= confirmedRangeTouchGap
+                    upperTouchGroups += 1
+                lastUpperTouchIndex := chronologicalIndex
+            if low[offset] <= candidateLower + touchBand
+                if na(lastLowerTouchIndex) or chronologicalIndex - lastLowerTouchIndex >= confirmedRangeTouchGap
+                    lowerTouchGroups += 1
+                lastLowerTouchIndex := chronologicalIndex
+            if close[offset] >= candidateLower - touchBand and close[offset] <= candidateUpper + touchBand
+                containedCloses += 1
+
+    containmentRatio = samplesReady ? float(containedCloses) / falseBreakoutAnchorLength : na
+    earlyUpper = samplesReady ? array.percentile_nearest_rank(earlyHighSamples, 80) : na
+    recentUpper = samplesReady ? array.percentile_nearest_rank(recentHighSamples, 80) : na
+    earlyLower = samplesReady ? array.percentile_nearest_rank(earlyLowSamples, 20) : na
+    recentLower = samplesReady ? array.percentile_nearest_rank(recentLowSamples, 20) : na
+    upperBoundaryDriftRatio = samplesReady and candidateHeight > 0 ?
+         math.abs(recentUpper - earlyUpper) / candidateHeight : na
+    lowerBoundaryDriftRatio = samplesReady and candidateHeight > 0 ?
+         math.abs(recentLower - earlyLower) / candidateHeight : na
+    earlierTrueRangeMean = samplesReady ?
+         earlierTrueRangeSum / (falseBreakoutAnchorLength - recentContractionLength) : na
+    recentTrueRangeMean = samplesReady ? recentTrueRangeSum / recentContractionLength : na
+    contractionRatio = samplesReady and earlierTrueRangeMean > 0 ?
+         recentTrueRangeMean / earlierTrueRangeMean : na
+
+    valid = samplesReady and candidateHeight > 0 and
+         candidateWidthRatio <= confirmedRangeMaxWidthRatio and
+         upperTouchGroups >= 2 and lowerTouchGroups >= 2 and
+         containmentRatio >= confirmedRangeContainmentMin and
+         // 上破交易要求压力线更水平；下沿可轻微抬升，但仍须受限，避免把趋势段冒充箱体。
+         upperBoundaryDriftRatio <= confirmedRangeUpperDriftMax and
+         lowerBoundaryDriftRatio <= confirmedRangeLowerDriftMax and
+         contractionRatio <= confirmedRangeContractionMax
+    [valid, candidateUpper, candidateLower, candidateRawHigh, candidateRawLow,
+         candidateWidthRatio, containmentRatio, upperBoundaryDriftRatio,
+         lowerBoundaryDriftRatio, contractionRatio, upperTouchGroups, lowerTouchGroups]
+
+// 固定五个24～48小时窗口，避免逐长度搜索把已见形态变成隐性参数优化；每个窗口只读取信号棒之前的数据。
+f_large_ascending_triangle(candidateLength, currentAtr) =>
+    int segmentLength = int(candidateLength / 3)
+    bool samplesReady = not na(currentAtr) and currentAtr > 0
+    float earlyHigh = na
+    float middleHigh = na
+    float recentHigh = na
+    float earlyLow = na
+    float middleLow = na
+    float recentLow = na
+
+    // 三等分后的高点衡量水平阻力，低点负责证明买方承接在逐段抬高。
+    for chronologicalIndex = 0 to candidateLength - 1
+        offset = candidateLength - chronologicalIndex
+        sampleReady = not na(high[offset]) and not na(low[offset]) and
+             high[offset] >= low[offset] and low[offset] > 0
+        samplesReady := samplesReady and sampleReady
+        if sampleReady
+            if chronologicalIndex < segmentLength
+                earlyHigh := na(earlyHigh) ? high[offset] : math.max(earlyHigh, high[offset])
+                earlyLow := na(earlyLow) ? low[offset] : math.min(earlyLow, low[offset])
+            else if chronologicalIndex < 2 * segmentLength
+                middleHigh := na(middleHigh) ? high[offset] : math.max(middleHigh, high[offset])
+                middleLow := na(middleLow) ? low[offset] : math.min(middleLow, low[offset])
+            else
+                recentHigh := na(recentHigh) ? high[offset] : math.max(recentHigh, high[offset])
+                recentLow := na(recentLow) ? low[offset] : math.min(recentLow, low[offset])
+
+    candidateResistance = samplesReady ? math.max(earlyHigh, math.max(middleHigh, recentHigh)) : na
+    lowestSegmentPeak = samplesReady ? math.min(earlyHigh, math.min(middleHigh, recentHigh)) : na
+    resistanceSpreadRatio = samplesReady and candidateResistance > 0 ?
+         (candidateResistance - lowestSegmentPeak) / candidateResistance : na
+    touchBand = samplesReady ? math.max(candidateResistance * largeTriangleTouchBandRatio,
+         currentAtr * largeTriangleTouchBandAtr) : na
+    int upperTouchGroups = 0
+    int lastUpperTouchIndex = na
+
+    // 一串连续贴边只算一次测试，至少相隔8根才证明阻力经历过独立回踩。
+    if samplesReady
+        for chronologicalIndex = 0 to candidateLength - 1
+            offset = candidateLength - chronologicalIndex
+            if high[offset] >= candidateResistance - touchBand
+                if na(lastUpperTouchIndex) or chronologicalIndex - lastUpperTouchIndex >= largeTriangleTouchGap
+                    upperTouchGroups += 1
+                lastUpperTouchIndex := chronologicalIndex
+
+    lowStepMinimum = currentAtr * largeTriangleLowStepAtrMin
+    lowsRising = samplesReady and middleLow - earlyLow >= lowStepMinimum and
+         recentLow - middleLow >= lowStepMinimum and
+         recentLow - earlyLow >= currentAtr * largeTriangleLowRiseAtrMin
+    earlyWidth = samplesReady ? candidateResistance - earlyLow : na
+    recentWidth = samplesReady ? candidateResistance - recentLow : na
+    contractionRatio = samplesReady and earlyWidth > 0 and recentWidth > 0 ? recentWidth / earlyWidth : na
+    valid = samplesReady and resistanceSpreadRatio <= largeTriangleResistanceSpreadMax and
+         upperTouchGroups >= 3 and lowsRising and
+         not na(contractionRatio) and contractionRatio <= largeTriangleContractionMax
+    [valid, candidateResistance, earlyLow, middleLow, recentLow,
+         resistanceSpreadRatio, contractionRatio, upperTouchGroups]
+
+// 大型水平箱体用稳健分位边界忽略少数异常影线，再以真实最高价确认突破，避免“未过前高”的伪箱体信号。
+f_large_horizontal_range(candidateLength, currentAtr) =>
+    int segmentLength = int(candidateLength / 3)
+    bool samplesReady = not na(currentAtr) and currentAtr > 0
+    array<float> highSamples = array.new_float()
+    array<float> lowSamples = array.new_float()
+    array<float> earlyHighSamples = array.new_float()
+    array<float> middleHighSamples = array.new_float()
+    array<float> recentHighSamples = array.new_float()
+    array<float> earlyLowSamples = array.new_float()
+    array<float> middleLowSamples = array.new_float()
+    array<float> recentLowSamples = array.new_float()
+
+    for chronologicalIndex = 0 to candidateLength - 1
+        offset = candidateLength - chronologicalIndex
+        sampleReady = not na(high[offset]) and not na(low[offset]) and not na(close[offset]) and
+             high[offset] >= low[offset] and low[offset] > 0
+        samplesReady := samplesReady and sampleReady
+        if sampleReady
+            array.push(highSamples, high[offset])
+            array.push(lowSamples, low[offset])
+            if chronologicalIndex < segmentLength
+                array.push(earlyHighSamples, high[offset])
+                array.push(earlyLowSamples, low[offset])
+            else if chronologicalIndex < 2 * segmentLength
+                array.push(middleHighSamples, high[offset])
+                array.push(middleLowSamples, low[offset])
+            else
+                array.push(recentHighSamples, high[offset])
+                array.push(recentLowSamples, low[offset])
+
+    candidateUpper = samplesReady ? array.percentile_nearest_rank(highSamples, 90) : na
+    candidateLower = samplesReady ? array.percentile_nearest_rank(lowSamples, 10) : na
+    candidateRawHigh = samplesReady ? array.max(highSamples) : na
+    candidateHeight = samplesReady ? candidateUpper - candidateLower : na
+    candidateMid = samplesReady ? (candidateUpper + candidateLower) * 0.5 : na
+    candidateWidthRatio = samplesReady and candidateMid > 0 ? candidateHeight / candidateMid : na
+    touchBand = samplesReady ? math.max(candidateMid * largeHorizontalRangeTouchBandRatio,
+         currentAtr * largeHorizontalRangeTouchBandAtr) : na
+    int upperTouchGroups = 0
+    int lowerTouchGroups = 0
+    int lastUpperTouchIndex = na
+    int lastLowerTouchIndex = na
+    int containedCloses = 0
+
+    if samplesReady
+        for chronologicalIndex = 0 to candidateLength - 1
+            offset = candidateLength - chronologicalIndex
+            if high[offset] >= candidateUpper - touchBand
+                if na(lastUpperTouchIndex) or chronologicalIndex - lastUpperTouchIndex >= largeHorizontalRangeTouchGap
+                    upperTouchGroups += 1
+                lastUpperTouchIndex := chronologicalIndex
+            if low[offset] <= candidateLower + touchBand
+                if na(lastLowerTouchIndex) or chronologicalIndex - lastLowerTouchIndex >= largeHorizontalRangeTouchGap
+                    lowerTouchGroups += 1
+                lastLowerTouchIndex := chronologicalIndex
+            if close[offset] >= candidateLower - touchBand and close[offset] <= candidateUpper + touchBand
+                containedCloses += 1
+
+    containmentRatio = samplesReady ? float(containedCloses) / candidateLength : na
+    earlyUpper = samplesReady ? array.percentile_nearest_rank(earlyHighSamples, 90) : na
+    middleUpper = samplesReady ? array.percentile_nearest_rank(middleHighSamples, 90) : na
+    recentUpper = samplesReady ? array.percentile_nearest_rank(recentHighSamples, 90) : na
+    earlyLower = samplesReady ? array.percentile_nearest_rank(earlyLowSamples, 10) : na
+    middleLower = samplesReady ? array.percentile_nearest_rank(middleLowSamples, 10) : na
+    recentLower = samplesReady ? array.percentile_nearest_rank(recentLowSamples, 10) : na
+    upperBoundaryDriftRatio = samplesReady and candidateHeight > 0 ?
+         (math.max(earlyUpper, math.max(middleUpper, recentUpper)) -
+         math.min(earlyUpper, math.min(middleUpper, recentUpper))) / candidateHeight : na
+    lowerBoundaryDriftRatio = samplesReady and candidateHeight > 0 ?
+         (math.max(earlyLower, math.max(middleLower, recentLower)) -
+         math.min(earlyLower, math.min(middleLower, recentLower))) / candidateHeight : na
+
+    valid = samplesReady and candidateHeight > 0 and
+         candidateWidthRatio <= largeHorizontalRangeMaxWidthRatio and
+         upperTouchGroups >= 2 and lowerTouchGroups >= 2 and
+         containmentRatio >= largeHorizontalRangeContainmentMin and
+         upperBoundaryDriftRatio <= largeHorizontalRangeBoundaryDriftMax and
+         lowerBoundaryDriftRatio <= largeHorizontalRangeBoundaryDriftMax
+    [valid, candidateUpper, candidateLower, candidateRawHigh, candidateWidthRatio,
+         containmentRatio, upperBoundaryDriftRatio, lowerBoundaryDriftRatio,
+         upperTouchGroups, lowerTouchGroups]
+
+// 历史放量标记只使用各自之前十根原始成交量，避免递归地过滤更早放量 K 线。
+rawVolumeAverage = ta.sma(volume, volumeLookback)[1]
+rawVolumeSpike = not na(rawVolumeAverage) and rawVolumeAverage > 0 and volume >= volumeEventRatio * rawVolumeAverage
+
+// 当前 K 线的过滤后量比：只保留前十根中自身未被标为放量的历史成交量。
+f_filtered_volume_ratio() =>
+    float retainedVolume = 0.0
+    int retainedCount = 0
+    for offset = 1 to volumeLookback
+        if not na(volume[offset]) and not rawVolumeSpike[offset]
+            retainedVolume += volume[offset]
+            retainedCount += 1
+    retainedCount >= minValidVolumeSamples and retainedVolume > 0 ? volume / (retainedVolume / retainedCount) : na
+
+filteredVolumeRatio = f_filtered_volume_ratio()
+// Pine 的 nearest-rank P90 作用于 t 之前连续 672 根 K 线，当前 K 线不进入基准样本。
+weeklyP90 = ta.percentile_nearest_rank(volume[1], weeklyLookback, 90)
+weeklyMinVolume = ta.lowest(volume[1], weeklyLookback)
+weeklyVolumeReady = bar_index >= weeklyLookback + volumeLookback and not na(weeklyP90) and weeklyMinVolume >= 0
+volumeEvent = not na(filteredVolumeRatio) and filteredVolumeRatio >= volumeEventRatio and weeklyVolumeReady and volume > 0 and volume >= weeklyP90
+
+rsi14 = ta.rsi(indicatorSource, rsiLength)
+ema12 = ta.ema(indicatorSource, emaFastLength)
+ema144 = ta.ema(indicatorSource, emaMediumLength)
+ema596 = ta.ema(indicatorSource, emaStructureLength)
+ema696 = ta.ema(indicatorSource, emaRegimeLength)
+atr14 = ta.atr(14)
+bollingerMiddle = ta.sma(indicatorSource, bollingerLength)
+bollingerRange = bollingerDeviation * ta.stdev(indicatorSource, bollingerLength)
+bollingerUpper = bollingerMiddle + bollingerRange
+bollingerLower = bollingerMiddle - bollingerRange
+[macdLine12_26, macdSignal9, macdHistogram] = ta.macd(
+     indicatorSource, macdFastLength, macdSlowLength, macdSignalLength)
+emaFastLabel = "EMA" + str.tostring(emaFastLength)
+emaMediumLabel = "EMA" + str.tostring(emaMediumLength)
+emaStructureLabel = "EMA" + str.tostring(emaStructureLength)
+emaRegimeLabel = "EMA" + str.tostring(emaRegimeLength)
+macdDeathCross = ta.crossunder(macdLine12_26, macdSignal9)
+macdDeathCrossAge = ta.barssince(macdDeathCross)
+macdDirectionGuardReady = not na(macdHistogram) and not na(macdHistogram[1]) and
+     not na(macdHistogram[2]) and not na(macdHistogram[3])
+recentMacdDeathCross = not macdDirectionGuardReady or
+     (not na(macdDeathCrossAge) and macdDeathCrossAge < recentMacdDirectionLookback)
+
+// 默认值仍复刻既有研究基线；输入项只提供当前图表的显式研究覆盖，避免参数调整静默污染Rust基线。
+plot(ema12, "EMA Fast (input)", color = color.rgb(38, 166, 154), linewidth = 1)
+plot(ema144, "EMA Medium (input)", color = color.rgb(255, 152, 0), linewidth = 2)
+plot(ema596, "EMA Structure (input)", color = color.rgb(171, 71, 188), linewidth = 2)
+
+// 布林带保留真实价格量纲，因此只绘制在 overlay 主图；副图保留真实 RSI，MACD 与成交量仅做分区缩放。
+bollingerUpperPlot = plot(bollingerUpper, "BOLL Upper (input)", color = color.new(color.rgb(33, 150, 243), 15), linewidth = 1)
+plot(bollingerMiddle, "BOLL Middle (input)", color = color.new(color.gray, 25), linewidth = 1)
+bollingerLowerPlot = plot(bollingerLower, "BOLL Lower (input)", color = color.new(color.rgb(33, 150, 243), 15), linewidth = 1)
+fill(bollingerUpperPlot, bollingerLowerPlot, color = color.new(color.rgb(33, 150, 243), 92), title = "BOLL Band (input)")
+
+// 只扫描 t 之前的 48 根已完成 K 线，并按结束位置从近到远选取第一个有效确认窗。
+bool sidewaysZoneFound = false
+float sidewaysZoneHigh = na
+float sidewaysZoneLow = na
+float sidewaysZoneWidthRatio = na
+int sidewaysZoneUpperTouchGroups = na
+int sidewaysZoneLowerTouchGroups = na
+int sidewaysZoneStartOffset = na
+int sidewaysZoneEndOffset = na
+for candidateEndOffset = 1 to counterTrendRangeLookback - counterTrendRangeLength + 1
+    [candidateValid, candidateHigh, candidateLow, candidateWidthRatio, candidateUpperTouches, candidateLowerTouches] =
+         f_sideways_window(candidateEndOffset)
+    if not sidewaysZoneFound and candidateValid
+        sidewaysZoneFound := true
+        sidewaysZoneHigh := candidateHigh
+        sidewaysZoneLow := candidateLow
+        sidewaysZoneWidthRatio := candidateWidthRatio
+        sidewaysZoneUpperTouchGroups := candidateUpperTouches
+        sidewaysZoneLowerTouchGroups := candidateLowerTouches
+        sidewaysZoneStartOffset := candidateEndOffset + counterTrendRangeLength - 1
+        sidewaysZoneEndOffset := candidateEndOffset
+
+// fresh 只评估“从近到远找到的第一个有效横盘区”。最近区不 fresh 时禁止回退挑选更老区间，
+// 否则同一根信号会因退出规则而悄悄改写 nearest-sideways 的既有结构归属。
+int freshBreakdownAge = sidewaysZoneFound ?
+     f_held_break_age(sidewaysZoneEndOffset, sidewaysZoneLow, true) : na
+int freshBreakoutAge = sidewaysZoneFound ?
+     f_held_break_age(sidewaysZoneEndOffset, sidewaysZoneHigh, false) : na
+bool freshBreakdownZoneFound = sidewaysZoneFound and not na(freshBreakdownAge)
+bool freshBreakoutZoneFound = sidewaysZoneFound and not na(freshBreakoutAge)
+float freshBreakdownZoneHigh = freshBreakdownZoneFound ? sidewaysZoneHigh : na
+float freshBreakdownZoneLow = freshBreakdownZoneFound ? sidewaysZoneLow : na
+int freshBreakdownZoneStartOffset = freshBreakdownZoneFound ? sidewaysZoneStartOffset : na
+int freshBreakdownZoneEndOffset = freshBreakdownZoneFound ? sidewaysZoneEndOffset : na
+float freshBreakoutZoneHigh = freshBreakoutZoneFound ? sidewaysZoneHigh : na
+float freshBreakoutZoneLow = freshBreakoutZoneFound ? sidewaysZoneLow : na
+int freshBreakoutZoneStartOffset = freshBreakoutZoneFound ? sidewaysZoneStartOffset : na
+int freshBreakoutZoneEndOffset = freshBreakoutZoneFound ? sidewaysZoneEndOffset : na
+
+// 从 t-5 向过去搜索并在首个完整量能事件处停止；窗口包含 t-5/t-32，t-1～t-4 不具备锚点资格。
+int qOffset = na
+if volumeEvent
+    for offset = anchorMinDistance to anchorLookback
+        if na(qOffset) and volumeEvent[offset]
+            qOffset := offset
+
+float qHigh = na
+float qLow = na
+float qRsi = na
+float qAtr = na
+if not na(qOffset)
+    qHigh := high[qOffset]
+    qLow := low[qOffset]
+    qRsi := rsi14[qOffset]
+    qAtr := atr14[qOffset]
+
+// 固定间隔不能证明 q/t 属于两个独立波段；同时记录中间价格摆动，以免把连续下跌或上涨中的微小插针误判为背离。
+float pathRsiMin = na
+float pathRsiMax = na
+float pathPriceHigh = na
+float pathPriceLow = na
+bool pathRsiComplete = not na(qOffset)
+if not na(qOffset)
+    for offset = 1 to anchorLookback - 1
+        if offset < qOffset
+            pathRsi = rsi14[offset]
+            if na(pathRsi)
+                pathRsiComplete := false
+            else
+                pathRsiMin := na(pathRsiMin) ? pathRsi : math.min(pathRsiMin, pathRsi)
+                pathRsiMax := na(pathRsiMax) ? pathRsi : math.max(pathRsiMax, pathRsi)
+            pathPriceHigh := na(pathPriceHigh) ? high[offset] : math.max(pathPriceHigh, high[offset])
+            pathPriceLow := na(pathPriceLow) ? low[offset] : math.min(pathPriceLow, low[offset])
+
+topDivergenceRsiPathValid = pathRsiComplete and not na(pathRsiMin) and pathRsiMin >= divergenceRsiMidline
+bottomDivergenceRsiPathValid = pathRsiComplete and not na(pathRsiMax) and pathRsiMax <= divergenceRsiMidline
+divergenceAtrScale = not na(atr14) and atr14 > 0 and not na(qAtr) and qAtr > 0 ? math.max(atr14, qAtr) : na
+bearishBreakDistance = not na(qHigh) ? high - qHigh : na
+bullishBreakDistance = not na(qLow) ? qLow - low : na
+bearishBreakRatio = not na(bearishBreakDistance) and qHigh > 0 ? bearishBreakDistance / qHigh : na
+bullishBreakRatio = not na(bullishBreakDistance) and qLow > 0 ? bullishBreakDistance / qLow : na
+bearishBreakAtr = not na(divergenceAtrScale) ? bearishBreakDistance / divergenceAtrScale : na
+bullishBreakAtr = not na(divergenceAtrScale) ? bullishBreakDistance / divergenceAtrScale : na
+bearishIntermediateSwingAtr = not na(divergenceAtrScale) and not na(pathPriceLow) ? (qHigh - pathPriceLow) / divergenceAtrScale : na
+bullishIntermediateSwingAtr = not na(divergenceAtrScale) and not na(pathPriceHigh) ? (pathPriceHigh - qLow) / divergenceAtrScale : na
+
+// 0.35% 创新和双 ATR 门槛负责排除微小插针并证明独立波段；最近 q 不合格时仍禁止回退。
+// q/t 仅相隔 5～7 根时属于弱背离，必须在信号棒收盘收回锚点极值；完整背离保留原结构确认。
+bearishDivergencePriceValid = not na(bearishBreakRatio) and bearishBreakRatio >= divergenceMinBreakRatio and
+     bearishBreakAtr >= divergenceMinBreakAtr and bearishIntermediateSwingAtr >= divergenceMinIntermediateSwingAtr
+bullishDivergencePriceValid = not na(bullishBreakRatio) and bullishBreakRatio >= divergenceMinBreakRatio and
+     bullishBreakAtr >= divergenceMinBreakAtr and bullishIntermediateSwingAtr >= divergenceMinIntermediateSwingAtr
+bearishDivergenceReclaimed = not na(qHigh) and close < qHigh
+bullishDivergenceReclaimed = not na(qLow) and close > qLow
+rawRsiBearishDivergence = volumeEvent and not na(qOffset) and topDivergenceRsiPathValid and bearishDivergencePriceValid and
+     rsi14 > 60 and qRsi >= 70 and high > qHigh and rsi14 < qRsi
+rawRsiBullishDivergence = volumeEvent and not na(qOffset) and bottomDivergenceRsiPathValid and bullishDivergencePriceValid and
+     rsi14 < 40 and qRsi <= 30 and low < qLow and rsi14 > qRsi
+bearishDivergenceWeak = not na(qOffset) and qOffset <= divergenceWeakMaxGap
+bullishDivergenceWeak = not na(qOffset) and qOffset <= divergenceWeakMaxGap
+
+// 形态只使用已完成的 t（吞没额外读取 t-1），并且在 OHLC 非法时整体关闭。
+candleValid = high >= math.max(open, close) and low <= math.min(open, close) and high > low and open > 0
+previousCandleValid = high[1] >= math.max(open[1], close[1]) and low[1] <= math.min(open[1], close[1]) and high[1] > low[1] and open[1] > 0
+candleRange = high - low
+body = math.abs(close - open)
+bodyRangeRatio = candleValid ? body / candleRange : na
+bodyOpenRatio = candleValid ? body / open : na
+upperShadow = high - math.max(open, close)
+lowerShadow = math.min(open, close) - low
+isDoji = candleValid and bodyRangeRatio <= 0.10
+isModerateLargeBody = candleValid and bodyRangeRatio >= 0.60 and bodyOpenRatio > 0.01 and bodyOpenRatio < 0.03
+longUpperShadow = candleValid and not isDoji and upperShadow / candleRange >= 0.60 and upperShadow > lowerShadow
+longLowerShadow = candleValid and not isDoji and lowerShadow / candleRange >= 0.60 and lowerShadow > upperShadow
+bullishEngulfing = candleValid and previousCandleValid and close[1] < open[1] and close > open and open <= close[1] and close >= open[1]
+bearishEngulfing = candleValid and previousCandleValid and close[1] > open[1] and close < open and open >= close[1] and close <= open[1]
+bullishReversalPattern = bullishEngulfing or longLowerShadow
+bearishReversalPattern = bearishEngulfing or longUpperShadow
+
+// 背离本身只证明价量/动量相对变化；V4 还要求信号棒给出方向性拒绝。
+// 25% 影线明显低于既有“长影线”60%门槛，允许温和反转，同时以2 tick排除几乎无意义的细小影线。
+divergenceDirectionalShadowThreshold = math.max(
+     divergenceDirectionalShadowMinTicks * syminfo.mintick,
+     divergenceDirectionalShadowMin * candleRange)
+bullishDivergenceCandleGate = candleValid and
+     (close > open or lowerShadow >= divergenceDirectionalShadowThreshold)
+bearishDivergenceCandleGate = candleValid and
+     (close < open or upperShadow >= divergenceDirectionalShadowThreshold)
+rsiBearishDivergence = rawRsiBearishDivergence and bearishDivergenceCandleGate and
+     (not bearishDivergenceWeak or bearishDivergenceReclaimed)
+// 底背离还保留三根 MACD 死叉门禁，避免仅凭一根拒绝棒逆着重新增强的下行动量抢反转。
+rsiBullishDivergence = rawRsiBullishDivergence and bullishDivergenceCandleGate and
+     (not bullishDivergenceWeak or bullishDivergenceReclaimed) and not recentMacdDeathCross
+
+// q 先仅按 t-20～t-80 的最高价唯一确定；同高保留最近一根，后续条件失败时不得回退挑选更老锚点。
+// 这让锚点选择不受当前量能、RSI 或收益结果反向影响，避免在窗口内事后挑选最有利对照点。
+bool effortNoResultAnchorHistoryReady = true
+int effortNoResultAnchorOffset = na
+float effortNoResultAnchorHigh = na
+for offset = effortNoResultAnchorMinDistance to effortNoResultAnchorMaxDistance
+    candidateHigh = high[offset]
+    if na(candidateHigh)
+        effortNoResultAnchorHistoryReady := false
+    else if na(effortNoResultAnchorHigh) or candidateHigh > effortNoResultAnchorHigh
+        effortNoResultAnchorHigh := candidateHigh
+        effortNoResultAnchorOffset := offset
+
+float effortNoResultAnchorVolume = na
+float effortNoResultAnchorRsi = na
+if not na(effortNoResultAnchorOffset)
+    effortNoResultAnchorVolume := volume[effortNoResultAnchorOffset]
+    effortNoResultAnchorRsi := rsi14[effortNoResultAnchorOffset]
+
+effortNoResultHighGap = not na(effortNoResultAnchorHigh) ? effortNoResultAnchorHigh - high : na
+effortNoResultHighGapRatio = not na(effortNoResultHighGap) and effortNoResultAnchorHigh > 0 ?
+     effortNoResultHighGap / effortNoResultAnchorHigh : na
+effortNoResultHighGapAtr = not na(effortNoResultHighGap) and not na(atr14) and atr14 > 0 ?
+     effortNoResultHighGap / atr14 : na
+// 用户定义中的“0.5% 或 0.5 ATR”按字面 OR 实现；任一尺度足够接近即可通过。
+effortNoResultLowerHighNear = not na(effortNoResultHighGap) and effortNoResultHighGap > 0 and
+     (effortNoResultHighGapRatio <= effortNoResultMaxGapRatio or
+     effortNoResultHighGapAtr <= effortNoResultMaxGapAtr)
+effortNoResultVolumeMultiple = not na(effortNoResultAnchorVolume) and effortNoResultAnchorVolume > 0 ?
+     volume / effortNoResultAnchorVolume : na
+effortNoResultBearBodyAtr = candleValid and close < open and not na(atr14) and atr14 > 0 ?
+     (open - close) / atr14 : na
+effortNoResultCloseLocation = candleValid ? (close - low) / candleRange : na
+effortNoResultUpperBandReclaim = not na(bollingerUpper) and high > bollingerUpper and close < bollingerUpper
+
+// 该结构是“量价努力无结果”，不是要求价格创新高的 RSI 顶背离；只在 t 收盘后确认。
+effortNoResultShortSetup = barstate.isconfirmed and effortNoResultAnchorHistoryReady and
+     not na(effortNoResultAnchorOffset) and candleValid and volumeEvent and
+     effortNoResultLowerHighNear and
+     effortNoResultVolumeMultiple >= effortNoResultVolumeMultiplierMin and
+     effortNoResultAnchorRsi >= effortNoResultAnchorRsiMin and
+     rsi14 >= effortNoResultSignalRsiMin and rsi14 <= effortNoResultSignalRsiMax and
+     rsi14 < effortNoResultAnchorRsi and close < open and
+     bodyRangeRatio >= effortNoResultBodyRangeMin and
+     effortNoResultBearBodyAtr >= effortNoResultBodyAtrMin and
+     effortNoResultCloseLocation <= effortNoResultCloseLocationMax and
+     effortNoResultUpperBandReclaim
+effortNoResultStop = effortNoResultShortSetup ?
+     f_round_short_stop(math.max(effortNoResultAnchorHigh, high) + syminfo.mintick) : na
+
+// 该分支识别“放量卖出高潮后的三棒下跌冲击反包”，不要求前三根机械地全为阴线，
+// 但当前强阳必须吞没三根实体包络，并在底部同时完成量能、趋势与动量收回确认。
+threeBarHistoryValid = previousCandleValid and
+     high[2] >= math.max(open[2], close[2]) and low[2] <= math.min(open[2], close[2]) and high[2] > low[2] and open[2] > 0 and
+     high[3] >= math.max(open[3], close[3]) and low[3] <= math.min(open[3], close[3]) and high[3] > low[3] and open[3] > 0
+threeBarBearCount = (close[1] < open[1] ? 1 : 0) + (close[2] < open[2] ? 1 : 0) + (close[3] < open[3] ? 1 : 0)
+threeBarBodyLow = math.min(math.min(open[1], close[1]), math.min(math.min(open[2], close[2]), math.min(open[3], close[3])))
+threeBarBodyHigh = math.max(math.max(open[1], close[1]), math.max(math.max(open[2], close[2]), math.max(open[3], close[3])))
+threeBarPatternLow = math.min(low, math.min(low[1], math.min(low[2], low[3])))
+threeBarPrior48Low = ta.lowest(low[1], 48)
+threeBarEngulfBodyAtr = not na(atr14) and atr14 > 0 ? body / atr14 : na
+threeBarEngulfCloseLocation = candleValid ? (close - low) / candleRange : na
+threeBarEngulfDownRegime = ema12[1] < ema144[1] and ema144[1] < ema596[1] and
+     ema12[1] < ema12[4] and ema144[1] < ema144[4] and ema596[1] < ema596[4] and
+     close[1] < close[48]
+threeBarEngulfBottomLocation = not na(threeBarPrior48Low) and not na(atr14) and atr14 > 0 and
+     threeBarPatternLow <= threeBarPrior48Low + threeBarEngulfBottomBandAtr * atr14
+rsiCrossedMidlineUp = ta.crossover(rsi14, divergenceRsiMidline)
+threeBarEngulfReversalLong = barstate.isconfirmed and candleValid and threeBarHistoryValid and
+     close > open and threeBarBearCount >= 2 and close[1] < open[3] and
+     open <= threeBarBodyLow and close >= threeBarBodyHigh and
+     bodyRangeRatio >= threeBarEngulfMinBodyRangeRatio and
+     threeBarEngulfBodyAtr >= threeBarEngulfMinBodyAtr and
+     threeBarEngulfCloseLocation >= threeBarEngulfMinCloseLocation and
+     volumeEvent[1] and not na(filteredVolumeRatio) and filteredVolumeRatio >= volumeEventRatio and
+     threeBarEngulfDownRegime and threeBarEngulfBottomLocation and
+     close > ema12 and close > bollingerMiddle and rsiCrossedMidlineUp
+
+// 该分支只读取 t-1～t-48 的价格区间；信号棒不能用自身低点重新定义“区间底部”。
+bollingerLowerReclaimPriorHigh = ta.highest(high[1], bollingerLowerReclaimLocationLookback)
+bollingerLowerReclaimPriorLow = ta.lowest(low[1], bollingerLowerReclaimLocationLookback)
+bollingerLowerReclaimPriorRange = bollingerLowerReclaimPriorHigh - bollingerLowerReclaimPriorLow
+bollingerLowerReclaimBottomPosition = not na(bollingerLowerReclaimPriorRange) and
+     bollingerLowerReclaimPriorRange > 0 ?
+     math.max(0.0, (low - bollingerLowerReclaimPriorLow) / bollingerLowerReclaimPriorRange) : na
+bollingerLowerReclaimShadowRatio = candleValid ? lowerShadow / candleRange : na
+bollingerLowerReclaimCloseLocation = candleValid ? (close - low) / candleRange : na
+bollingerLowerReclaimRsiRising = rsi14 >= bollingerLowerReclaimRsiMin and
+     rsi14 <= bollingerLowerReclaimRsiMax and rsi14 > rsi14[1] and rsi14[1] > rsi14[2]
+// V1 只把连续缩短的负柱视为下跌动量衰减，避免把正柱减弱误标为多头改善。
+bollingerLowerReclaimMacdContracting = macdHistogram < 0 and macdHistogram[1] < 0 and
+     macdHistogram[2] < 0 and macdHistogram > macdHistogram[1] and
+     macdHistogram[1] > macdHistogram[2]
+bollingerLowerReclaimStop = f_round_long_stop(low - syminfo.mintick)
+bollingerLowerReclaimTarget = f_round_long_target(bollingerMiddle)
+bollingerLowerReclaimRisk = close - bollingerLowerReclaimStop
+bollingerLowerReclaimReward = bollingerLowerReclaimTarget - close
+bollingerLowerReclaimRewardRisk = bollingerLowerReclaimRisk > 0 ?
+     bollingerLowerReclaimReward / bollingerLowerReclaimRisk : na
+// t+1 开盘尚不可见，1.1R 只能以 t 收盘预检；绝不读取下一根开盘反向决定历史信号。
+bollingerLowerReclaimLong = barstate.isconfirmed and candleValid and volumeEvent and
+     low < bollingerLower and close > bollingerLower and
+     bollingerLowerReclaimShadowRatio >= bollingerLowerReclaimShadowMin and
+     bollingerLowerReclaimCloseLocation >= bollingerLowerReclaimCloseLocationMin and
+     bollingerLowerReclaimBottomPosition <= bollingerLowerReclaimBottomPositionMax and
+     bollingerLowerReclaimRsiRising and bollingerLowerReclaimMacdContracting and
+     bollingerLowerReclaimTarget > close and
+     bollingerLowerReclaimRewardRisk >= bollingerLowerReclaimMinRewardRisk
+
+// 量比不足3只保留观察；提前定义后，EMA趋势来源棒可在当时冻结目标档位。
+takeProfitAtr = filteredVolumeRatio >= 6 ? 4.5 : filteredVolumeRatio >= 4 ? 3.6 : filteredVolumeRatio >= 3 ? 2.7 : na
+
+// V10 普通 RSI 形态必须先离开30/70极值区，并突破上一根结构。严格逆势时还要
+// 收复EMA12，避免把“仍在加速的超买/超卖”误当成已经确认的反转。
+rsiPatternLong = volumeEvent and not rsiBearishDivergence and not rsiBullishDivergence and
+     rsi14[1] <= 30 and rsi14 > 30 and rsi14 <= 50 and bullishReversalPattern and
+     close > high[1] and close > ema12
+rawRsiPatternShort = volumeEvent and not rsiBearishDivergence and not rsiBullishDivergence and
+     rsi14[1] >= 70 and rsi14 < 70 and rsi14 >= 50 and bearishReversalPattern and
+     close < low[1] and close < ema12
+
+// t-4～t 的五根已完成 K 线共同描述刚启动的多头制度切换；两个上穿可发生在窗口内不同 K 线上。
+// 保护只拦截 RSI 超买形态空单，结构性顶背离、EMA 空头趋势与假突破空单仍按各自证据独立判断。
+strongBullishVolumeImpulse = barstate.isconfirmed and volumeEvent and filteredVolumeRatio >= bullishTransitionImpulseVolumeRatio and
+     close > open and not na(atr14) and atr14 > 0 and (close - open) / atr14 >= bullishTransitionImpulseBodyAtr
+ema12Crossed144Up = ta.crossover(ema12, ema144)
+ema12Crossed596Up = ta.crossover(ema12, ema596)
+barsSinceBullishVolumeImpulse = ta.barssince(strongBullishVolumeImpulse)
+barsSinceEma12Crossed144Up = ta.barssince(ema12Crossed144Up)
+barsSinceEma12Crossed596Up = ta.barssince(ema12Crossed596Up)
+recentBullishVolumeImpulse = not na(barsSinceBullishVolumeImpulse) and barsSinceBullishVolumeImpulse < bullishTransitionProtectionWindow
+recentEma12Crossed144Up = not na(barsSinceEma12Crossed144Up) and barsSinceEma12Crossed144Up < bullishTransitionProtectionWindow
+recentEma12Crossed596Up = not na(barsSinceEma12Crossed596Up) and barsSinceEma12Crossed596Up < bullishTransitionProtectionWindow
+recentBullishVolumeEmaTransition = recentBullishVolumeImpulse and recentEma12Crossed144Up and recentEma12Crossed596Up and
+     ema12 > ema144 and ema12 > ema596 and close > ema12
+
+// 放量大阳线刚收复 EMA596/696 两条慢线的上沿时，长上影更可能是突破过程中的
+// 检验而不是已确认顶部。只给普通 RSI 超买长上影空五根完成棒的冷却期；任一
+// 收盘重新落回当根慢线带上沿即失效，顶背离、扫高和假突破仍由各自结构独立触发。
+slowEmaBandUpper = math.max(ema596, ema696)
+closeCrossedSlowEmaBandUp = ta.crossover(close, slowEmaBandUpper)
+slowEmaBandReclaimUp = strongBullishVolumeImpulse and closeCrossedSlowEmaBandUp
+barsSinceSlowEmaBandReclaimUp = ta.barssince(slowEmaBandReclaimUp)
+recentSlowEmaBandReclaim = not na(barsSinceSlowEmaBandReclaimUp) and
+     barsSinceSlowEmaBandReclaimUp < slowEmaBandReclaimProtectionWindow
+bool slowEmaBandReclaimHeld = recentSlowEmaBandReclaim
+if recentSlowEmaBandReclaim
+    for offset = 0 to slowEmaBandReclaimProtectionWindow - 1
+        if offset <= barsSinceSlowEmaBandReclaimUp and
+             (na(slowEmaBandUpper[offset]) or close[offset] <= slowEmaBandUpper[offset])
+            slowEmaBandReclaimHeld := false
+freshSlowEmaBandReclaimShortGuard = slowEmaBandReclaimHeld and longUpperShadow
+rsiPatternShort = rawRsiPatternShort and not recentBullishVolumeEmaTransition and
+     not freshSlowEmaBandReclaimShortGuard
+rsiLong = rsiBullishDivergence or rsiPatternLong
+rsiShort = rsiBearishDivergence or rsiPatternShort
+emaLongSourceBase = volumeEvent and ema12 > ema144 and ema144 > ema696 and close > ema12 and
+     close > open and isModerateLargeBody and rsi14 < 70 and not na(takeProfitAtr)
+emaTrendLongPriorHigh = ta.highest(high[1], emaExpansionStructureLookback)
+emaTrendLongSourceDistanceAtr = not na(atr14) and atr14 > 0 ? (close - ema12) / atr14 : na
+emaTrendLongBreakDistanceAtr = not na(atr14) and atr14 > 0 and not na(emaTrendLongPriorHigh) ?
+     (close - emaTrendLongPriorHigh) / atr14 : na
+emaTrendLongSourceCandidate = barstate.isconfirmed and emaLongSourceBase and
+     close > emaTrendLongPriorHigh and
+     emaTrendLongSourceDistanceAtr >= 0 and emaTrendLongSourceDistanceAtr <= v10EmaSourceDistanceAtrMax and
+     emaTrendLongBreakDistanceAtr >= 0 and emaTrendLongBreakDistanceAtr <= v10EmaTrendBreakDistanceAtrMax
+
+var bool emaTrendLongPending = false
+var int emaTrendLongSourceBar = na
+var int emaTrendLongFrozenTime = na
+var float emaTrendLongFrozenLine = na
+var float emaTrendLongFrozenClose = na
+var float emaTrendLongFrozenAtr = na
+var float emaTrendLongFrozenVolumeRatio = na
+var float emaTrendLongFrozenTakeProfitAtr = na
+bool emaLong = false
+bool emaTrendLongStateClosed = false
+float emaTrendLongAcceptedAtr = na
+float emaTrendLongAcceptedVolumeRatio = na
+float emaTrendLongAcceptedTakeProfitAtr = na
+if emaTrendLongPending
+    emaTrendLongAge = bar_index - emaTrendLongSourceBar
+    emaTrendLongInvalidated = close <= emaTrendLongFrozenLine
+    emaTrendLongRetestAccepted = emaTrendLongAge >= 1 and emaTrendLongAge <= v10AcceptanceWindow and
+         not emaTrendLongInvalidated and
+         low <= emaTrendLongFrozenLine + v10EmaTrendRetestBandAtr * emaTrendLongFrozenAtr and
+         ema12 > ema144 and ema144 > ema696 and close > ema12
+    if emaTrendLongRetestAccepted
+        emaLong := true
+        emaTrendLongAcceptedAtr := emaTrendLongFrozenAtr
+        emaTrendLongAcceptedVolumeRatio := emaTrendLongFrozenVolumeRatio
+        emaTrendLongAcceptedTakeProfitAtr := emaTrendLongFrozenTakeProfitAtr
+        emaTrendLongPending := false
+        emaTrendLongStateClosed := true
+    else if emaTrendLongInvalidated or emaTrendLongAge >= v10AcceptanceWindow
+        emaTrendLongPending := false
+        emaTrendLongStateClosed := true
+if not emaTrendLongStateClosed and not emaTrendLongPending and emaTrendLongSourceCandidate
+    // 来源棒只冻结当时可见证据；确认棒不得重算突破线、ATR、量比或目标档位。
+    emaTrendLongPending := true
+    emaTrendLongSourceBar := bar_index
+    emaTrendLongFrozenTime := time
+    emaTrendLongFrozenLine := emaTrendLongPriorHigh
+    emaTrendLongFrozenClose := close
+    emaTrendLongFrozenAtr := atr14
+    emaTrendLongFrozenVolumeRatio := filteredVolumeRatio
+    emaTrendLongFrozenTakeProfitAtr := takeProfitAtr
+emaShort = volumeEvent and ema12 < ema144 and ema144 < ema696 and close < ema12 and close < open and isModerateLargeBody and rsi14 > 30
+
+// 首根放量长上影只是观察锚点；只有后续完成多次独立测试并再次扫高收回，才把它升级为可交易假突破。
+// 锚点必须在当时触发多头切换保护，避免用本分支绕回已经证伪的首次拒绝空单。
+int transitionSweepAnchorOffset = na
+float transitionSweepAnchorPriorHigh = na
+for offset = transitionSweepAnchorMinDistance to transitionSweepAnchorMaxDistance
+    float candidatePriorHigh = na
+    bool candidateHistoryReady = true
+    for priorOffset = 1 to transitionSweepPriorHighLookback
+        candidateHighSample = high[offset + priorOffset]
+        if na(candidateHighSample)
+            candidateHistoryReady := false
+        else
+            candidatePriorHigh := na(candidatePriorHigh) ? candidateHighSample : math.max(candidatePriorHigh, candidateHighSample)
+
+    candidateRange = high[offset] - low[offset]
+    candidateBody = math.abs(close[offset] - open[offset])
+    candidateUpperShadow = high[offset] - math.max(open[offset], close[offset])
+    candidateLowerShadow = math.min(open[offset], close[offset]) - low[offset]
+    candidateLongUpperShadow = candidateRange > 0 and candidateBody / candidateRange > 0.10 and
+         candidateUpperShadow / candidateRange >= 0.60 and candidateUpperShadow > candidateLowerShadow
+    candidateAnchor = candidateHistoryReady and volumeEvent[offset] and recentBullishVolumeEmaTransition[offset] and
+         rsi14[offset] >= transitionSweepAnchorRsiMin and candidateLongUpperShadow and
+         high[offset] > candidatePriorHigh and close[offset] < candidatePriorHigh
+    if na(transitionSweepAnchorOffset) and candidateAnchor
+        transitionSweepAnchorOffset := offset
+        transitionSweepAnchorPriorHigh := candidatePriorHigh
+
+float transitionSweepAnchorHigh = na
+float transitionSweepAnchorRsi = na
+float transitionSweepAnchorAtr = na
+float transitionSweepAnchorVolumeRatio = na
+float transitionSweepTouchBand = na
+float transitionSweepConsolidationLow = na
+int transitionSweepTouchGroups = 0
+int transitionSweepLastTouchOffset = na
+if not na(transitionSweepAnchorOffset)
+    transitionSweepAnchorHigh := high[transitionSweepAnchorOffset]
+    transitionSweepAnchorRsi := rsi14[transitionSweepAnchorOffset]
+    transitionSweepAnchorAtr := atr14[transitionSweepAnchorOffset]
+    transitionSweepAnchorVolumeRatio := filteredVolumeRatio[transitionSweepAnchorOffset]
+    transitionSweepTouchBand := math.max(
+         transitionSweepAnchorHigh * transitionSweepTouchBandRatio,
+         transitionSweepAnchorAtr * transitionSweepTouchBandAtr)
+
+    // 从近到远统计不会改变“至少间隔2根”的分组结果；路径低点只读取锚点和信号之间的已完成K线。
+    for pathOffset = 1 to transitionSweepAnchorMaxDistance - 1
+        if pathOffset < transitionSweepAnchorOffset
+            transitionSweepConsolidationLow := na(transitionSweepConsolidationLow) ?
+                 low[pathOffset] : math.min(transitionSweepConsolidationLow, low[pathOffset])
+            touchesAnchor = high[pathOffset] >= transitionSweepAnchorHigh - transitionSweepTouchBand and
+                 high[pathOffset] <= transitionSweepAnchorHigh and close[pathOffset] < transitionSweepAnchorHigh
+            if touchesAnchor
+                if na(transitionSweepLastTouchOffset) or pathOffset - transitionSweepLastTouchOffset >= transitionSweepTouchGap
+                    transitionSweepTouchGroups += 1
+                transitionSweepLastTouchOffset := pathOffset
+
+transitionLiquiditySweepShort = barstate.isconfirmed and not na(transitionSweepAnchorOffset) and
+     transitionSweepTouchGroups >= transitionSweepMinTouchGroups and
+     high > transitionSweepAnchorHigh and close < transitionSweepAnchorHigh and
+     rsi14 >= transitionSweepSignalRsiMin and rsi14 < transitionSweepAnchorRsi and
+     ema12 > ema144 and ema12 > ema596 and close > ema12 and
+     not na(transitionSweepConsolidationLow) and transitionSweepConsolidationLow < close
+
+// 压缩只读取 t 之前12根，信号棒本身不参与“此前几乎重合”的判定，避免下跌后反向美化 setup。
+emaCompressionDistanceAtr = not na(atr14) and atr14 > 0 ? math.abs(ema12 - ema596) / atr14 : na
+emaCompressionMeanDistanceAtr = ta.sma(emaCompressionDistanceAtr[1], emaCompressionLookback)
+emaCompressionMaxDistanceAtr = ta.highest(emaCompressionDistanceAtr[1], emaCompressionLookback)
+emaCompressionMinDistanceAtr = ta.lowest(emaCompressionDistanceAtr[1], emaCompressionLookback)
+emaCompressionReady = not na(emaCompressionMeanDistanceAtr) and
+     emaCompressionMeanDistanceAtr <= emaCompressionMeanAtrMax and
+     emaCompressionMaxDistanceAtr <= emaCompressionMaxAtrMax and
+     emaCompressionMinDistanceAtr <= emaCompressionTouchAtrMax
+
+ema12SlopeAtr = not na(atr14) and atr14 > 0 ? (ema12 - ema12[emaSlopeLookback]) / (emaSlopeLookback * atr14) : na
+ema144SlopeAtr = not na(atr14) and atr14 > 0 ? (ema144 - ema144[emaSlopeLookback]) / (emaSlopeLookback * atr14) : na
+ema596SlopeAtr = not na(atr14) and atr14 > 0 ? (ema596 - ema596[emaSlopeLookback]) / (emaSlopeLookback * atr14) : na
+emaSlopesReady = not na(ema12SlopeAtr) and not na(ema144SlopeAtr) and not na(ema596SlopeAtr) and
+     not na(ema12SlopeAtr[1]) and not na(ema144SlopeAtr[1]) and not na(ema596SlopeAtr[1])
+emaSlopeMagnitudesExpanding = emaSlopesReady and
+     math.abs(ema12SlopeAtr) >= math.abs(ema12SlopeAtr[1]) * emaSlopeAccelerationMin and
+     math.abs(ema144SlopeAtr) >= math.abs(ema144SlopeAtr[1]) * emaSlopeAccelerationMin and
+     math.abs(ema596SlopeAtr) >= math.abs(ema596SlopeAtr[1]) * emaSlopeAccelerationMin
+emaLongSpreadsExpanding = ema12 - ema144 > ema12[1] - ema144[1] and
+     ema12 - ema596 > ema12[1] - ema596[1]
+emaShortSpreadsExpanding = ema144 - ema12 > ema144[1] - ema12[1] and
+     ema596 - ema12 > ema596[1] - ema12[1]
+emaExpansionPriorStructureHigh = ta.highest(high[1], emaExpansionStructureLookback)
+emaExpansionPriorStructureLow = ta.lowest(low[1], emaExpansionStructureLookback)
+
+emaExpansionLongState = emaCompressionReady and emaSlopeMagnitudesExpanding and
+     ema12SlopeAtr >= ema12SlopeAtrMin and ema144SlopeAtr >= ema144SlopeAtrMin and ema596SlopeAtr >= ema596SlopeAtrMin and
+     ema12 > ema144 and ema12 > ema596 and emaLongSpreadsExpanding and close > ema12 and close > open and
+     not recentMacdDeathCross
+emaExpansionShortState = emaCompressionReady and emaSlopeMagnitudesExpanding and
+     ema12SlopeAtr <= -ema12SlopeAtrMin and ema144SlopeAtr <= -ema144SlopeAtrMin and ema596SlopeAtr <= -ema596SlopeAtrMin and
+     ema12 < ema144 and ema12 < ema596 and emaShortSpreadsExpanding and close < ema12 and close < open
+
+emaExpansionLongSourceDistanceAtr = not na(atr14) and atr14 > 0 ?
+     (close - ema12) / atr14 : na
+emaExpansionShortSourceDistanceAtr = not na(atr14) and atr14 > 0 ?
+     (ema12 - close) / atr14 : na
+emaExpansionLongSource = barstate.isconfirmed and emaExpansionLongState and volumeEvent and
+     filteredVolumeRatio >= 3.0 and
+     rsi14 >= v10EmaExpansionLongRsiMin and rsi14 <= v10EmaExpansionLongRsiMax and
+     open <= emaExpansionPriorStructureHigh and close > emaExpansionPriorStructureHigh and
+     emaExpansionLongSourceDistanceAtr <= v10EmaSourceDistanceAtrMax
+emaExpansionShortSource = barstate.isconfirmed and emaExpansionShortState and volumeEvent and
+     rsi14 >= v10EmaExpansionShortRsiMin and rsi14 <= v10EmaExpansionShortRsiMax and
+     open >= emaExpansionPriorStructureLow and close < emaExpansionPriorStructureLow and
+     emaExpansionShortSourceDistanceAtr <= v10EmaSourceDistanceAtrMax
+
+// V10 把“斜率扩张”降为来源条件：先放量穿越冻结结构，再在3根内回踩失败并继续站在
+// EMA12同侧才成交。来源棒和确认棒分离，避免在横盘底部/顶部第一根破位时追单。
+var int lastEmaExpansionSignalBar = na
+emaExpansionCooldownReady = na(lastEmaExpansionSignalBar) or bar_index - lastEmaExpansionSignalBar > emaExpansionCooldown
+var bool emaExpansionPending = false
+var int emaExpansionPendingDirection = 0
+var int emaExpansionSourceBar = na
+var float emaExpansionFrozenLine = na
+var float emaExpansionFrozenAtr = na
+bool emaCompressionExpansionLong = false
+bool emaCompressionExpansionShort = false
+bool emaExpansionStateClosed = false
+if emaExpansionPending
+    emaExpansionAge = bar_index - emaExpansionSourceBar
+    emaExpansionInvalidated = emaExpansionPendingDirection == 1 ?
+         close <= emaExpansionFrozenLine : close >= emaExpansionFrozenLine
+    emaExpansionRetestAccepted = emaExpansionAge >= 1 and
+         emaExpansionAge <= v10AcceptanceWindow and not emaExpansionInvalidated and
+         (emaExpansionPendingDirection == 1 ?
+              low <= emaExpansionFrozenLine + v10EmaExpansionRetestBandAtr * emaExpansionFrozenAtr and
+              close > ema12 :
+              high >= emaExpansionFrozenLine - v10EmaExpansionRetestBandAtr * emaExpansionFrozenAtr and
+              close < ema12 and rsi14 >= v10EmaExpansionShortRsiMin)
+    if emaExpansionRetestAccepted
+        emaCompressionExpansionLong := emaExpansionPendingDirection == 1
+        emaCompressionExpansionShort := emaExpansionPendingDirection == -1
+        emaExpansionPending := false
+        emaExpansionStateClosed := true
+    else if emaExpansionInvalidated or emaExpansionAge >= v10AcceptanceWindow
+        emaExpansionPending := false
+        emaExpansionStateClosed := true
+if not emaExpansionStateClosed and not emaExpansionPending and emaExpansionCooldownReady and
+     (emaExpansionLongSource or emaExpansionShortSource)
+    emaExpansionPending := true
+    emaExpansionPendingDirection := emaExpansionLongSource ? 1 : -1
+    emaExpansionSourceBar := bar_index
+    emaExpansionFrozenLine := emaExpansionLongSource ?
+         emaExpansionPriorStructureHigh : emaExpansionPriorStructureLow
+    emaExpansionFrozenAtr := atr14
+if emaCompressionExpansionLong or emaCompressionExpansionShort
+    lastEmaExpansionSignalBar := bar_index
+
+// 收复发生后允许最多观察一个8小时交易段；窗口内任一收盘重新跌回EMA596即宣告接受失败。
+// 当前棒必须从贴线状态一次性扩张至1 ATR之外，避免在已经远离均线的成熟趋势中重复追涨。
+ema596PriceCrossedUp = ta.crossover(close, ema596)
+ema596ReclaimAge = ta.barssince(ema596PriceCrossedUp)
+bool ema596ReclaimHeld = not na(ema596ReclaimAge) and ema596ReclaimAge <= ema596ReclaimMaxAge
+for offset = 0 to ema596ReclaimMaxAge
+    if ema596ReclaimHeld and offset <= ema596ReclaimAge and close[offset] <= ema596[offset]
+        ema596ReclaimHeld := false
+
+ema596DeparturePreviousDistanceAtr = not na(atr14[1]) and atr14[1] > 0 ?
+     (close[1] - ema596[1]) / atr14[1] : na
+ema596DepartureCurrentDistanceAtr = not na(atr14) and atr14 > 0 ?
+     (close - ema596) / atr14 : na
+ema596DeparturePriorHigh = ta.highest(high[1], ema596DepartureStructureLookback)
+ema596DeparturePriorLow = ta.lowest(low[1], ema596DepartureStructureLookback)
+ema596DepartureMedianVolume = ta.percentile_nearest_rank(
+     volume[1], ema596DepartureVolumeMedianLookback, 50)
+ema596DepartureMedianVolumeRatio = not na(ema596DepartureMedianVolume) and ema596DepartureMedianVolume > 0 ?
+     volume / ema596DepartureMedianVolume : na
+ema596DepartureVolumeReady = weeklyVolumeReady and volume >= weeklyP90 and
+     ema596DepartureMedianVolumeRatio >= ema596DepartureMedianVolumeRatioMin
+ema596DepartureStructureReady = close > ema596DeparturePriorHigh and
+     high > high[1] and low > low[1]
+// V3 要求信号前快、中、慢三条均线已共同朝上，信号棒不能替下跌/过渡阶段追涨洗白。
+ema596DeparturePriorTrendReady = emaSlopesReady and
+     ema12SlopeAtr[1] > 0 and ema144SlopeAtr[1] >= 0 and ema596SlopeAtr[1] >= 0
+ema596ReclaimDepartureStop = f_round_long_stop(ema596DeparturePriorLow - syminfo.mintick)
+ema596ReclaimDepartureRisk = close - ema596ReclaimDepartureStop
+ema596ReclaimDepartureTarget = f_round_long_target(
+     close + ema596DepartureTargetRisk * ema596ReclaimDepartureRisk)
+
+// V3 同时限制当前离轨不超过2.5 ATR，并把 HH/HL 结构扩展到前8根已完成K线。
+ema596ReclaimDepartureLongSetup = barstate.isconfirmed and candleValid and
+     ema596ReclaimHeld and ema596ReclaimAge >= 1 and ema596DepartureVolumeReady and
+     ema596DeparturePreviousDistanceAtr > 0 and
+     ema596DeparturePreviousDistanceAtr <= ema596DeparturePreviousDistanceAtrMax and
+     ema596DepartureCurrentDistanceAtr >= ema596DepartureCurrentDistanceAtrMin and
+     ema596DepartureCurrentDistanceAtr <= ema596DepartureCurrentDistanceAtrMax and
+     rsi14 <= 70 and
+     ema596DeparturePriorTrendReady and
+     ema596DepartureStructureReady and close > open and
+     bodyRangeRatio >= ema596DepartureBodyRangeMin and
+     ema596ReclaimDepartureRisk > 0 and ema596ReclaimDepartureTarget > close
+
+// Z 与 D_min 尚未经过发布回测，规范要求 MACD 背离默认关闭，故不在图表版中生成其候选。
+hasLong = rsiLong or emaLong
+hasShort = rsiShort or emaShort
+patternLongParticipated = rsiPatternLong
+patternShortParticipated = rsiPatternShort
+
+// 大型水平箱体研究的是长期均线尚未完成多头排列时的结构突破，因此只要求收盘站上EMA696，不要求EMA144已在其上方。
+largeHorizontalRangeMomentumGate = barstate.isconfirmed and volumeEvent and not na(takeProfitAtr) and close > open and
+     rsi14[1] < largeHorizontalRangeBreakoutRsiMin and
+     rsi14 >= largeHorizontalRangeBreakoutRsiMin and rsi14 <= largeHorizontalRangeBreakoutRsiMax and
+     ema12 > ema144 and ema12[1] <= ema144[1] and close > ema696
+bool largeHorizontalRangeBreakoutLong = false
+int largeHorizontalRangeSelectedLength = na
+float largeHorizontalRangeUpper = na
+float largeHorizontalRangeLower = na
+float largeHorizontalRangeRawHigh = na
+float largeHorizontalRangeWidthRatio = na
+float largeHorizontalRangeContainmentRatio = na
+float largeHorizontalRangeUpperDriftRatio = na
+float largeHorizontalRangeLowerDriftRatio = na
+int largeHorizontalRangeUpperTouchGroups = na
+int largeHorizontalRangeLowerTouchGroups = na
+if largeHorizontalRangeMomentumGate
+    for candidateLength = largeHorizontalRangeLookbackMin to largeHorizontalRangeLookbackMax by largeHorizontalRangeLookbackStep
+        [candidateValid, candidateUpper, candidateLower, candidateRawHigh, candidateWidthRatio,
+             candidateContainmentRatio, candidateUpperDriftRatio, candidateLowerDriftRatio,
+             candidateUpperTouchGroups, candidateLowerTouchGroups] =
+             f_large_horizontal_range(candidateLength, atr14)
+        // 稳健上沿负责识别箱体，收盘还必须越过窗口真实最高价；最长有效窗口代表当前可确认的大结构。
+        if candidateValid and close > candidateRawHigh
+            largeHorizontalRangeBreakoutLong := true
+            largeHorizontalRangeSelectedLength := candidateLength
+            largeHorizontalRangeUpper := candidateUpper
+            largeHorizontalRangeLower := candidateLower
+            largeHorizontalRangeRawHigh := candidateRawHigh
+            largeHorizontalRangeWidthRatio := candidateWidthRatio
+            largeHorizontalRangeContainmentRatio := candidateContainmentRatio
+            largeHorizontalRangeUpperDriftRatio := candidateUpperDriftRatio
+            largeHorizontalRangeLowerDriftRatio := candidateLowerDriftRatio
+            largeHorizontalRangeUpperTouchGroups := candidateUpperTouchGroups
+            largeHorizontalRangeLowerTouchGroups := candidateLowerTouchGroups
+
+// 大型三角只在动量、量能和“本根刚上穿”门禁已满足时扫描，既减少历史计算，也不会借后续K线回填信号。
+largeTriangleMomentumGate = barstate.isconfirmed and volumeEvent and not na(takeProfitAtr) and close > open and
+     rsi14[1] < largeTriangleBreakoutRsiMin and
+     rsi14 >= largeTriangleBreakoutRsiMin and rsi14 <= largeTriangleBreakoutRsiMax and
+     ema12 > ema144 and ema12[1] <= ema144[1] and ema144 > ema696
+bool largeTriangleBreakoutLong = false
+int largeTriangleSelectedLength = na
+float largeTriangleResistance = na
+float largeTriangleEarlyLow = na
+float largeTriangleMiddleLow = na
+float largeTriangleRecentLow = na
+float largeTriangleResistanceSpreadRatio = na
+float largeTriangleContractionRatio = na
+int largeTriangleUpperTouchGroups = na
+if largeTriangleMomentumGate
+    for candidateLength = largeTriangleLookbackMin to largeTriangleLookbackMax by largeTriangleLookbackStep
+        [candidateValid, candidateResistance, candidateEarlyLow, candidateMiddleLow, candidateRecentLow,
+             candidateResistanceSpreadRatio, candidateContractionRatio, candidateUpperTouchGroups] =
+             f_large_ascending_triangle(candidateLength, atr14)
+        // 由短到长扫描并覆盖已选结果，最终保留最长有效结构，避免把大形态降格成短窗口突破。
+        if candidateValid and close > candidateResistance
+            largeTriangleBreakoutLong := true
+            largeTriangleSelectedLength := candidateLength
+            largeTriangleResistance := candidateResistance
+            largeTriangleEarlyLow := candidateEarlyLow
+            largeTriangleMiddleLow := candidateMiddleLow
+            largeTriangleRecentLow := candidateRecentLow
+            largeTriangleResistanceSpreadRatio := candidateResistanceSpreadRatio
+            largeTriangleContractionRatio := candidateContractionRatio
+            largeTriangleUpperTouchGroups := candidateUpperTouchGroups
+
+// 原 v1 极值突破继续只负责假突破做空观察；做多由独立 v2 箱体确认与接受状态机负责，避免改写旧空头样本。
+failureAnchorHigh = ta.highest(high[1], falseBreakoutAnchorLength)
+failureAnchorLow = ta.lowest(low[1], falseBreakoutAnchorLength)
+anchorUpsideBreakout = barstate.isconfirmed and volumeEvent and not na(takeProfitAtr) and
+     not na(failureAnchorHigh) and not na(failureAnchorLow) and
+     close > failureAnchorHigh and close > open
+
+var bool falseBreakoutPending = false
+var int pendingBreakoutBarIndex = na
+var int pendingBreakoutTime = na
+var int pendingAnchorStartTime = na
+var int pendingAnchorEndTime = na
+var float pendingAnchorHigh = na
+var float pendingAnchorLow = na
+var float pendingBreakoutVolumeRatio = na
+var float pendingBreakoutTakeProfitAtr = na
+
+[confirmedRangeValid, confirmedRangeUpper, confirmedRangeLower, confirmedRangeRawHigh,
+     confirmedRangeRawLow, confirmedRangeWidthRatio, confirmedRangeContainmentRatio,
+     confirmedRangeUpperDriftRatio, confirmedRangeLowerDriftRatio,
+     confirmedRangeContractionRatio, confirmedRangeUpperTouchGroups,
+     confirmedRangeLowerTouchGroups] = f_confirmed_anchor_range(atr14[1])
+
+var bool confirmedRangeAcceptancePending = false
+var int pendingConfirmedRangeBreakoutBarIndex = na
+var int pendingConfirmedRangeBreakoutTime = na
+var int pendingConfirmedRangeStartTime = na
+var int pendingConfirmedRangeEndTime = na
+var float pendingConfirmedRangeUpper = na
+var float pendingConfirmedRangeLower = na
+var float pendingConfirmedRangeRawHigh = na
+var float pendingConfirmedRangeRawLow = na
+var float pendingConfirmedRangeWidthRatio = na
+var float pendingConfirmedRangeContainmentRatio = na
+var float pendingConfirmedRangeUpperDriftRatio = na
+var float pendingConfirmedRangeLowerDriftRatio = na
+var float pendingConfirmedRangeContractionRatio = na
+var int pendingConfirmedRangeUpperTouchGroups = na
+var int pendingConfirmedRangeLowerTouchGroups = na
+var float pendingConfirmedRangeVolumeRatio = na
+var float pendingConfirmedRangeTakeProfitAtr = na
+var float pendingConfirmedRangeRetestBand = na
+
+bool falseBreakoutShort = false
+int falseBreakoutBarsElapsed = na
+int falseBreakoutSourceTime = na
+int falseBreakoutAnchorStartTime = na
+int falseBreakoutAnchorEndTime = na
+float falseBreakoutFrozenHigh = na
+float falseBreakoutFrozenLow = na
+float falseBreakoutVolumeRatio = na
+float falseBreakoutTakeProfitAtr = na
+
+if falseBreakoutPending
+    candidateAge = bar_index - pendingBreakoutBarIndex
+    if candidateAge >= 1 and candidateAge <= falseBreakoutFailureWindow and close < open and close < pendingAnchorLow
+        falseBreakoutShort := true
+        falseBreakoutBarsElapsed := candidateAge
+        falseBreakoutSourceTime := pendingBreakoutTime
+        falseBreakoutAnchorStartTime := pendingAnchorStartTime
+        falseBreakoutAnchorEndTime := pendingAnchorEndTime
+        falseBreakoutFrozenHigh := pendingAnchorHigh
+        falseBreakoutFrozenLow := pendingAnchorLow
+        falseBreakoutVolumeRatio := pendingBreakoutVolumeRatio
+        falseBreakoutTakeProfitAtr := pendingBreakoutTakeProfitAtr
+        falseBreakoutPending := false
+    else if candidateAge >= falseBreakoutFailureWindow
+        falseBreakoutPending := false
+
+// 首个原始上破启动失败观察；等待期内后续冲高不重置倒计时。
+newAnchorUpsideBreakout = not falseBreakoutPending and anchorUpsideBreakout
+if newAnchorUpsideBreakout
+    falseBreakoutPending := true
+    pendingBreakoutBarIndex := bar_index
+    pendingBreakoutTime := time
+    pendingAnchorStartTime := time[falseBreakoutAnchorLength]
+    pendingAnchorEndTime := time[1]
+    pendingAnchorHigh := failureAnchorHigh
+    pendingAnchorLow := failureAnchorLow
+    pendingBreakoutVolumeRatio := filteredVolumeRatio
+    pendingBreakoutTakeProfitAtr := takeProfitAtr
+
+confirmedRangeBreakoutCandidate = newAnchorUpsideBreakout and confirmedRangeValid and
+     ema12 > ema144 and ema144 > ema696 and rsi14 < 70
+bool rangeUpsideBreakoutLong = false
+int confirmedRangeAcceptanceBars = na
+int acceptedConfirmedRangeBreakoutTime = na
+int acceptedConfirmedRangeStartTime = na
+int acceptedConfirmedRangeEndTime = na
+float acceptedConfirmedRangeUpper = na
+float acceptedConfirmedRangeLower = na
+float acceptedConfirmedRangeRawHigh = na
+float acceptedConfirmedRangeRawLow = na
+float acceptedConfirmedRangeWidthRatio = na
+float acceptedConfirmedRangeContainmentRatio = na
+float acceptedConfirmedRangeUpperDriftRatio = na
+float acceptedConfirmedRangeLowerDriftRatio = na
+float acceptedConfirmedRangeContractionRatio = na
+int acceptedConfirmedRangeUpperTouchGroups = na
+int acceptedConfirmedRangeLowerTouchGroups = na
+float acceptedConfirmedRangeVolumeRatio = na
+float acceptedConfirmedRangeTakeProfitAtr = na
+string confirmedRangeAcceptanceType = ""
+
+if confirmedRangeAcceptancePending
+    acceptanceAge = bar_index - pendingConfirmedRangeBreakoutBarIndex
+    acceptanceRetest = low <= pendingConfirmedRangeRawHigh + pendingConfirmedRangeRetestBand and
+         close > pendingConfirmedRangeRawHigh
+    acceptanceHeldTwice = close > pendingConfirmedRangeRawHigh and close[1] > pendingConfirmedRangeRawHigh
+    acceptanceInvalidated = close < pendingConfirmedRangeUpper
+    if acceptanceAge >= 1 and acceptanceAge <= confirmedRangeAcceptanceWindow and
+         not acceptanceInvalidated and (acceptanceRetest or acceptanceHeldTwice) and
+         ema12 > ema144 and ema144 > ema696
+        rangeUpsideBreakoutLong := true
+        confirmedRangeAcceptanceBars := acceptanceAge
+        confirmedRangeAcceptanceType := acceptanceRetest ? "回踩真实上沿后收回" : "连续两根收盘站稳真实上沿"
+        acceptedConfirmedRangeBreakoutTime := pendingConfirmedRangeBreakoutTime
+        acceptedConfirmedRangeStartTime := pendingConfirmedRangeStartTime
+        acceptedConfirmedRangeEndTime := pendingConfirmedRangeEndTime
+        acceptedConfirmedRangeUpper := pendingConfirmedRangeUpper
+        acceptedConfirmedRangeLower := pendingConfirmedRangeLower
+        acceptedConfirmedRangeRawHigh := pendingConfirmedRangeRawHigh
+        acceptedConfirmedRangeRawLow := pendingConfirmedRangeRawLow
+        acceptedConfirmedRangeWidthRatio := pendingConfirmedRangeWidthRatio
+        acceptedConfirmedRangeContainmentRatio := pendingConfirmedRangeContainmentRatio
+        acceptedConfirmedRangeUpperDriftRatio := pendingConfirmedRangeUpperDriftRatio
+        acceptedConfirmedRangeLowerDriftRatio := pendingConfirmedRangeLowerDriftRatio
+        acceptedConfirmedRangeContractionRatio := pendingConfirmedRangeContractionRatio
+        acceptedConfirmedRangeUpperTouchGroups := pendingConfirmedRangeUpperTouchGroups
+        acceptedConfirmedRangeLowerTouchGroups := pendingConfirmedRangeLowerTouchGroups
+        acceptedConfirmedRangeVolumeRatio := pendingConfirmedRangeVolumeRatio
+        acceptedConfirmedRangeTakeProfitAtr := pendingConfirmedRangeTakeProfitAtr
+        confirmedRangeAcceptancePending := false
+    else if acceptanceInvalidated or acceptanceAge >= confirmedRangeAcceptanceWindow
+        confirmedRangeAcceptancePending := false
+
+if confirmedRangeBreakoutCandidate and not confirmedRangeAcceptancePending
+    // setup 只在突破棒收盘冻结；接受窗内绝不重算历史边界，防止用后续走势美化原箱体。
+    confirmedRangeAcceptancePending := true
+    pendingConfirmedRangeBreakoutBarIndex := bar_index
+    pendingConfirmedRangeBreakoutTime := time
+    pendingConfirmedRangeStartTime := time[falseBreakoutAnchorLength]
+    pendingConfirmedRangeEndTime := time[1]
+    pendingConfirmedRangeUpper := confirmedRangeUpper
+    pendingConfirmedRangeLower := confirmedRangeLower
+    pendingConfirmedRangeRawHigh := confirmedRangeRawHigh
+    pendingConfirmedRangeRawLow := confirmedRangeRawLow
+    pendingConfirmedRangeWidthRatio := confirmedRangeWidthRatio
+    pendingConfirmedRangeContainmentRatio := confirmedRangeContainmentRatio
+    pendingConfirmedRangeUpperDriftRatio := confirmedRangeUpperDriftRatio
+    pendingConfirmedRangeLowerDriftRatio := confirmedRangeLowerDriftRatio
+    pendingConfirmedRangeContractionRatio := confirmedRangeContractionRatio
+    pendingConfirmedRangeUpperTouchGroups := confirmedRangeUpperTouchGroups
+    pendingConfirmedRangeLowerTouchGroups := confirmedRangeLowerTouchGroups
+    pendingConfirmedRangeVolumeRatio := filteredVolumeRatio
+    pendingConfirmedRangeTakeProfitAtr := takeProfitAtr
+    pendingConfirmedRangeRetestBand := math.max(confirmedRangeRawHigh * confirmedRangeRetestBandRatio,
+         atr14[1] * confirmedRangeRetestBandAtr)
+
+// 突破多单只冻结产生真实入场订单的结构线；同棒多结构取最高线，代表价格最近越过的有效阻力。
+// 保护状态只由确认收盘跌回该线或既有重复扫高收回结构解除，单根影线触碰不会提前放行普通反手空单。
+currentBreakoutLongCandidate = rangeUpsideBreakoutLong or largeHorizontalRangeBreakoutLong or largeTriangleBreakoutLong
+float currentBreakoutLongLine = na
+string currentBreakoutLongSource = ""
+if rangeUpsideBreakoutLong
+    currentBreakoutLongLine := acceptedConfirmedRangeRawHigh
+    currentBreakoutLongSource := "20根确认箱体"
+if largeHorizontalRangeBreakoutLong and
+     (na(currentBreakoutLongLine) or largeHorizontalRangeRawHigh > currentBreakoutLongLine)
+    currentBreakoutLongLine := largeHorizontalRangeRawHigh
+    currentBreakoutLongSource := "大型水平箱体"
+if largeTriangleBreakoutLong and
+     (na(currentBreakoutLongLine) or largeTriangleResistance > currentBreakoutLongLine)
+    currentBreakoutLongLine := largeTriangleResistance
+    currentBreakoutLongSource := "大型上升三角"
+
+var bool postBreakoutLongShortGuardActive = false
+var float postBreakoutLongFrozenLine = na
+var int postBreakoutLongSignalBarIndex = na
+postBreakoutLongClosedBackBelow = postBreakoutLongShortGuardActive and
+     barstate.isconfirmed and close <= postBreakoutLongFrozenLine
+postBreakoutLongSecondSweepReclaimed = postBreakoutLongShortGuardActive and
+     barstate.isconfirmed and bar_index > postBreakoutLongSignalBarIndex and transitionLiquiditySweepShort
+if postBreakoutLongClosedBackBelow or postBreakoutLongSecondSweepReclaimed
+    postBreakoutLongShortGuardActive := false
+    postBreakoutLongFrozenLine := na
+    postBreakoutLongSignalBarIndex := na
+
+postBreakoutLongOrdinaryShortGuard = (postBreakoutLongShortGuardActive and close > postBreakoutLongFrozenLine) or
+     currentBreakoutLongCandidate
+rsiPatternShort := rsiPatternShort and not postBreakoutLongOrdinaryShortGuard
+rsiShort := rsiBearishDivergence or rsiPatternShort
+hasShort := rsiShort or emaShort
+patternShortParticipated := rsiPatternShort
+// 新家族属于独立高位拒绝结构，但仍尊重已冻结的突破多单保护，避免在有效突破线上方过早反手。
+effortNoResultShort = effortNoResultShortSetup and not postBreakoutLongOrdinaryShortGuard
+
+// EMA趋势多在来源棒冻结量能与目标，确认棒只验证回踩接受，不要求再次放量。
+standardLongCandidate = (volumeEvent and rsiLong and not na(takeProfitAtr)) or emaLong
+standardShortCandidate = volumeEvent and hasShort and not na(takeProfitAtr)
+existingRawLongCandidate = standardLongCandidate or rangeUpsideBreakoutLong or
+     largeHorizontalRangeBreakoutLong or largeTriangleBreakoutLong or emaCompressionExpansionLong or
+     threeBarEngulfReversalLong or bollingerLowerReclaimLong
+// 重合棒继续归属旧家族及其退出合同；新版本只统计此前没有被覆盖的独占机会。
+ema596ReclaimDepartureLong = ema596ReclaimDepartureLongSetup and not existingRawLongCandidate
+rawLongCandidate = existingRawLongCandidate or ema596ReclaimDepartureLong
+rawShortCandidate = standardShortCandidate or falseBreakoutShort or
+     transitionLiquiditySweepShort or emaCompressionExpansionShort or effortNoResultShort
+counterTrendLong = ema12 < ema144 and ema144 < ema696
+counterTrendShort = ema12 > ema144 and ema144 > ema696
+strictTrendLong = ema12 > ema144 and ema144 > ema696
+strictTrendShort = ema12 < ema144 and ema144 < ema696
+// 严格排列年龄包含当前已确认信号棒；任一层级失效立即归零，并在600封顶以避免无意义增长。
+var int strictBearEmaOrderAge = 0
+var int strictBullEmaOrderAge = 0
+strictBearEmaOrderAge := counterTrendLong ?
+     int(math.min(rsiCounterTrendMaturityBars, nz(strictBearEmaOrderAge[1], 0) + 1)) : 0
+strictBullEmaOrderAge := counterTrendShort ?
+     int(math.min(rsiCounterTrendMaturityBars, nz(strictBullEmaOrderAge[1], 0) + 1)) : 0
+// 只有不与其他独立家族重合的纯 RSI 背离才按 EMA 三态分流：严格逆势进入 V5，
+// 严格顺势保留 V4 原退出合同；只有两种严格排列都不成立的中性/过渡状态才阻断。
+divergenceOnlyLongCandidate = standardLongCandidate and rsiBullishDivergence and not emaLong and
+     not rangeUpsideBreakoutLong and not largeHorizontalRangeBreakoutLong and
+     not largeTriangleBreakoutLong and not emaCompressionExpansionLong and
+     not threeBarEngulfReversalLong and not bollingerLowerReclaimLong and
+     not ema596ReclaimDepartureLong
+divergenceOnlyShortCandidate = standardShortCandidate and rsiBearishDivergence and not emaShort and
+     not falseBreakoutShort and not transitionLiquiditySweepShort and not emaCompressionExpansionShort and
+     not effortNoResultShort
+pureRsiCounterTrendLongCandidate = divergenceOnlyLongCandidate and counterTrendLong
+pureRsiCounterTrendShortCandidate = divergenceOnlyShortCandidate and counterTrendShort
+pureRsiStrictTrendLongCandidate = divergenceOnlyLongCandidate and strictTrendLong
+pureRsiStrictTrendShortCandidate = divergenceOnlyShortCandidate and strictTrendShort
+// 与其他家族重合时仍由原家族决定；本门禁只删除 EMA 排列无法归类的纯背离交易。
+blockedPureRsiLongCandidate = divergenceOnlyLongCandidate and
+     not pureRsiCounterTrendLongCandidate and not pureRsiStrictTrendLongCandidate
+blockedPureRsiShortCandidate = divergenceOnlyShortCandidate and
+     not pureRsiCounterTrendShortCandidate and not pureRsiStrictTrendShortCandidate
+qualifiedRawLongCandidate = rawLongCandidate and not blockedPureRsiLongCandidate
+qualifiedRawShortCandidate = rawShortCandidate and not blockedPureRsiShortCandidate
+// V4 的1R/1.5R“中性背离反转”分支已被中性门禁取代；严格顺势仍走其原 ATR 合同。
+divergenceReversalLongCandidate = false
+divergenceReversalShortCandidate = false
+// 只把截图中的两个续跌家族纳入扩展退出。假突破还必须已经形成可见的空头排列、三线负斜率与扩大价差，
+// 避免把任意反转空单仅凭“顺势”标签放大目标。
+falseBreakoutBearTrendContinuation = falseBreakoutShort and emaSlopesReady and
+     ema12 < ema144 and ema144 < ema596 and
+     ema12SlopeAtr < 0 and ema144SlopeAtr < 0 and ema596SlopeAtr < 0 and
+     emaShortSpreadsExpanding and close < ema12
+shortTrendExtension = emaCompressionExpansionShort or falseBreakoutBearTrendContinuation
+counterTrendPrior96High = ta.highest(high[1], counterTrendDisplacementLookback)
+counterTrendPrior96Low = ta.lowest(low[1], counterTrendDisplacementLookback)
+counterTrendDownDisplacement = not na(counterTrendPrior96High) ? counterTrendPrior96High - close : na
+counterTrendUpDisplacement = not na(counterTrendPrior96Low) ? close - counterTrendPrior96Low : na
+counterTrendDownDisplacementAtr = not na(counterTrendDownDisplacement) and not na(atr14) and atr14 > 0 ?
+     counterTrendDownDisplacement / atr14 : na
+counterTrendUpDisplacementAtr = not na(counterTrendUpDisplacement) and not na(atr14) and atr14 > 0 ?
+     counterTrendUpDisplacement / atr14 : na
+counterTrendDownDisplacementRatio = not na(counterTrendDownDisplacement) and counterTrendPrior96High > 0 ?
+     counterTrendDownDisplacement / counterTrendPrior96High : na
+counterTrendUpDisplacementRatio = not na(counterTrendUpDisplacement) and counterTrendPrior96Low > 0 ?
+     counterTrendUpDisplacement / counterTrendPrior96Low : na
+counterTrendLargeDownDisplacement = not na(counterTrendDownDisplacement) and
+     not na(atr14) and atr14 > 0 and counterTrendPrior96High > 0 and
+     counterTrendDownDisplacement >= math.max(
+          counterTrendDisplacementAtrMin * atr14,
+          counterTrendDisplacementRatioMin * counterTrendPrior96High)
+counterTrendLargeUpDisplacement = not na(counterTrendUpDisplacement) and
+     not na(atr14) and atr14 > 0 and counterTrendPrior96Low > 0 and
+     counterTrendUpDisplacement >= math.max(
+          counterTrendDisplacementAtrMin * atr14,
+          counterTrendDisplacementRatioMin * counterTrendPrior96Low)
+counterTrendFreshBreakLong = counterTrendLong and freshBreakdownZoneFound
+counterTrendFreshBreakShort = counterTrendShort and freshBreakoutZoneFound
+
+// fresh 破位后的逆势仓只吃回被破区间的近边；96根位移同时达到6ATR与5%时，才放大到远边。
+// 没有 fresh 身份的逆势仓保留原来的远边目标，避免这次 V4 静默改写全部历史结构目标。
+longStructureTarget = counterTrendFreshBreakLong ?
+     f_round_long_target(counterTrendLargeDownDisplacement ?
+          freshBreakdownZoneHigh : freshBreakdownZoneLow) :
+     sidewaysZoneFound ? f_round_long_target(sidewaysZoneHigh) : na
+shortStructureTarget = counterTrendFreshBreakShort ?
+     f_round_short_target(counterTrendLargeUpDisplacement ?
+          freshBreakoutZoneLow : freshBreakoutZoneHigh) :
+     transitionLiquiditySweepShort ?
+     f_round_short_target(transitionSweepConsolidationLow) :
+     sidewaysZoneFound ? f_round_short_target(sidewaysZoneLow) : na
+longStructureZoneFound = counterTrendFreshBreakLong or sidewaysZoneFound
+shortStructureZoneFound = counterTrendFreshBreakShort or
+     transitionLiquiditySweepShort or sidewaysZoneFound
+pureRsiCounterTrendLongMature = pureRsiCounterTrendLongCandidate and
+     strictBearEmaOrderAge >= rsiCounterTrendMaturityBars
+pureRsiCounterTrendShortMature = pureRsiCounterTrendShortCandidate and
+     strictBullEmaOrderAge >= rsiCounterTrendMaturityBars
+pureRsiCounterTrendLongNearTarget = sidewaysZoneFound ? f_round_long_target(sidewaysZoneLow) : na
+pureRsiCounterTrendLongFarTarget = sidewaysZoneFound ? f_round_long_target(sidewaysZoneHigh) : na
+pureRsiCounterTrendShortNearTarget = sidewaysZoneFound ? f_round_short_target(sidewaysZoneHigh) : na
+pureRsiCounterTrendShortFarTarget = sidewaysZoneFound ? f_round_short_target(sidewaysZoneLow) : na
+pureRsiCounterTrendLongTarget = pureRsiCounterTrendLongMature ?
+     pureRsiCounterTrendLongFarTarget : pureRsiCounterTrendLongNearTarget
+pureRsiCounterTrendShortTarget = pureRsiCounterTrendShortMature ?
+     pureRsiCounterTrendShortFarTarget : pureRsiCounterTrendShortNearTarget
+selectedLongStructureTarget = pureRsiCounterTrendLongCandidate ?
+     pureRsiCounterTrendLongTarget : longStructureTarget
+selectedShortStructureTarget = pureRsiCounterTrendShortCandidate ?
+     pureRsiCounterTrendShortTarget : shortStructureTarget
+selectedLongStructureZoneFound = pureRsiCounterTrendLongCandidate ?
+     sidewaysZoneFound : longStructureZoneFound
+selectedShortStructureZoneFound = pureRsiCounterTrendShortCandidate ?
+     sidewaysZoneFound : shortStructureZoneFound
+counterTrendStructureLongCandidate = counterTrendLong and qualifiedRawLongCandidate and
+     not threeBarEngulfReversalLong and not bollingerLowerReclaimLong and
+     not ema596ReclaimDepartureLong
+counterTrendStructureShortCandidate = not effortNoResultShort and
+     (transitionLiquiditySweepShort or (counterTrendShort and qualifiedRawShortCandidate))
+
+// 逆势交易没有已确认横盘区或目标已落在信号收盘价错误一侧时直接阻断，禁止回退到 ATR 止盈。
+counterTrendLongReady = not counterTrendLong or
+     (selectedLongStructureZoneFound and not na(selectedLongStructureTarget) and
+      selectedLongStructureTarget > close)
+counterTrendShortReady = transitionLiquiditySweepShort ?
+     (not na(shortStructureTarget) and shortStructureTarget < close) :
+     not counterTrendShort or
+     (selectedShortStructureZoneFound and not na(selectedShortStructureTarget) and
+      selectedShortStructureTarget < close)
+// 两个独立反转家族使用各自结构止损和目标，不能被逆势横盘门禁改写成另一套交易。
+allLongCandidate = (qualifiedRawLongCandidate and counterTrendLongReady) or
+     threeBarEngulfReversalLong or bollingerLowerReclaimLong or ema596ReclaimDepartureLong
+// “努力无结果”使用自身两高结构止损和 R 退出，因此不允许逆势横盘目标门禁静默改写或阻断它。
+allShortCandidate = (qualifiedRawShortCandidate and counterTrendShortReady) or effortNoResultShort
+longSignal = barstate.isconfirmed and allLongCandidate and not allShortCandidate
+shortSignal = barstate.isconfirmed and allShortCandidate and not allLongCandidate
+longEntryOrder = longSignal and strategy.position_size <= 0
+shortEntryOrder = shortSignal and strategy.position_size >= 0
+
+// 只有图表真正生成突破多单入场订单时才启动跨 K 线保护；未成交的冲突候选不会污染后续市场状态。
+if longEntryOrder and currentBreakoutLongCandidate and not na(currentBreakoutLongLine)
+    postBreakoutLongShortGuardActive := true
+    postBreakoutLongFrozenLine := currentBreakoutLongLine
+    postBreakoutLongSignalBarIndex := bar_index
+
+string longTrigger = ""
+longTrigger := f_append_trigger(longTrigger, standardLongCandidate, "量能事件")
+longTrigger := f_append_trigger(longTrigger, rsiBullishDivergence, "RSI 结构性底背离")
+longTrigger := f_append_trigger(longTrigger, rsiPatternLong and bullishEngulfing, "RSI 超卖 + 看涨吞没")
+longTrigger := f_append_trigger(longTrigger, rsiPatternLong and longLowerShadow, "RSI 超卖 + 长下影")
+longTrigger := f_append_trigger(longTrigger, emaLong, "EMA 多头趋势")
+longTrigger := f_append_trigger(longTrigger, rangeUpsideBreakoutLong, "20根确认箱体突破后获得接受")
+longTrigger := f_append_trigger(longTrigger, largeHorizontalRangeBreakoutLong, "大型水平箱体放量突破")
+longTrigger := f_append_trigger(longTrigger, largeTriangleBreakoutLong, "大型上升三角放量突破")
+longTrigger := f_append_trigger(longTrigger, emaCompressionExpansionLong,
+     emaFastLabel + "/" + str.tostring(emaMediumLength) + "/" +
+     str.tostring(emaStructureLength) + " 压缩后同步向上扩张")
+longTrigger := f_append_trigger(longTrigger, threeBarEngulfReversalLong, "放量卖出高潮后三棒强势反包")
+longTrigger := f_append_trigger(longTrigger, bollingerLowerReclaimLong, "放量下破布林下轨后收回")
+longTrigger := f_append_trigger(longTrigger, ema596ReclaimDepartureLong,
+     emaStructureLabel + "收复后放量HH/HL离轨扩张")
+
+string shortTrigger = ""
+shortTrigger := f_append_trigger(shortTrigger, standardShortCandidate, "量能事件")
+shortTrigger := f_append_trigger(shortTrigger, rsiBearishDivergence, "RSI 结构性顶背离")
+shortTrigger := f_append_trigger(shortTrigger, rsiPatternShort and bearishEngulfing, "RSI 超买 + 看跌吞没")
+shortTrigger := f_append_trigger(shortTrigger, rsiPatternShort and longUpperShadow, "RSI 超买 + 长上影")
+shortTrigger := f_append_trigger(shortTrigger, emaShort, "EMA 空头趋势")
+shortTrigger := f_append_trigger(shortTrigger, falseBreakoutShort, "放量上破20根锚定区间后8根内跌破下沿")
+shortTrigger := f_append_trigger(shortTrigger, transitionLiquiditySweepShort, "多头切换后重复扫高假突破")
+shortTrigger := f_append_trigger(shortTrigger, emaCompressionExpansionShort,
+     emaFastLabel + "/" + str.tostring(emaMediumLength) + "/" +
+     str.tostring(emaStructureLength) + " 压缩后同步向下扩张")
+shortTrigger := f_append_trigger(shortTrigger, effortNoResultShort, "高位放量努力无结果 + 次高点拒绝 + 布林上轨收回")
+
+string postBreakoutLongGuardDetails = ""
+if longEntryOrder and currentBreakoutLongCandidate
+    postBreakoutLongGuardDetails := "\n保护  冻结" + currentBreakoutLongSource +
+         "突破线 " + str.tostring(currentBreakoutLongLine, format.mintick) +
+         "\n      站在线上只拦普通RSI超买空单" +
+         "\n解除  收盘跌回突破线 / 第二次扫高并收回" +
+         "\n版本  " + postBreakoutLongShortGuardVersion
+
+longStopDescription = bollingerLowerReclaimLong ?
+     "信号低点下方1 tick " + str.tostring(bollingerLowerReclaimStop, format.mintick) :
+     ema596ReclaimDepartureLong ?
+     "前8根结构低点下方1 tick " + str.tostring(ema596ReclaimDepartureStop, format.mintick) :
+     threeBarEngulfReversalLong ?
+     "四棒形态低点 " + str.tostring(threeBarPatternLow, format.mintick) :
+     patternLongParticipated ? (bullishEngulfing ? "吞没形态低点" : "下影线低点") : "1.5 ATR"
+shortStopDescription = effortNoResultShort ?
+     "两高较高者上方1 tick " + str.tostring(effortNoResultStop, format.mintick) :
+     transitionLiquiditySweepShort ? "最终扫高高点" :
+     falseBreakoutShort ? "冻结锚定区间上沿" :
+     patternShortParticipated ? (bearishEngulfing ? "吞没形态高点" : "上影线高点") : "1.5 ATR"
+longTakeProfitAtr = rangeUpsideBreakoutLong ? acceptedConfirmedRangeTakeProfitAtr :
+     largeHorizontalRangeBreakoutLong or largeTriangleBreakoutLong ? takeProfitAtr :
+     emaLong ? emaTrendLongAcceptedTakeProfitAtr :
+     standardLongCandidate ? takeProfitAtr :
+     emaCompressionExpansionLong ? emaExpansionTakeProfitAtr : na
+shortBaseTakeProfitAtr = falseBreakoutShort ? falseBreakoutTakeProfitAtr :
+     standardShortCandidate ? takeProfitAtr :
+     emaCompressionExpansionShort ? emaExpansionTakeProfitAtr : na
+shortTakeProfitAtr = shortTrendExtension ? shortTrendExtensionTargetAtr : shortBaseTakeProfitAtr
+longTakeProfitDescription = bollingerLowerReclaimLong ?
+     "冻结布林中轨 " + str.tostring(bollingerLowerReclaimTarget, format.mintick) + " · 100%" :
+     ema596ReclaimDepartureLong ?
+     "信号收盘风险2R " + str.tostring(ema596ReclaimDepartureTarget, format.mintick) + " · 100%" :
+     threeBarEngulfReversalLong ? "1R激活近似保本 · 1.5R全平" :
+     pureRsiCounterTrendLongCandidate ?
+     (pureRsiCounterTrendLongMature ?
+          "EMA逆势600+根 · 远边 " +
+          str.tostring(pureRsiCounterTrendLongFarTarget, format.mintick) +
+          " · 近边收盘确认后成本保本 · 2R后宽跟踪" :
+          "EMA逆势" + str.tostring(strictBearEmaOrderAge) + "/600根 · 近边 " +
+          str.tostring(pureRsiCounterTrendLongNearTarget, format.mintick) +
+          " · 1R后1R跟踪") :
+     counterTrendFreshBreakLong ?
+     (counterTrendLargeDownDisplacement ? "96根大跌 · 放大到原横盘上沿 " : "刚跌破 · 回到原横盘下沿 ") +
+     str.tostring(longStructureTarget, format.mintick) + " · 1R后移动保护" :
+     counterTrendLong ? "横盘上沿 " + str.tostring(longStructureTarget, format.mintick) +
+     " · 1R后移动保护" :
+     divergenceReversalLongCandidate ? "1R激活近似保本 · 1.5R全平" :
+     str.tostring(longTakeProfitAtr, "#.#") + " ATR"
+shortTakeProfitDescription = effortNoResultShort ? "1R激活近似保本 · 1.5R全平" :
+     pureRsiCounterTrendShortCandidate ?
+     (pureRsiCounterTrendShortMature ?
+          "EMA逆势600+根 · 远边 " +
+          str.tostring(pureRsiCounterTrendShortFarTarget, format.mintick) +
+          " · 近边收盘确认后成本保本 · 2R后宽跟踪" :
+          "EMA逆势" + str.tostring(strictBullEmaOrderAge) + "/600根 · 近边 " +
+          str.tostring(pureRsiCounterTrendShortNearTarget, format.mintick) +
+          " · 1R后1R跟踪") :
+     counterTrendFreshBreakShort ?
+     (counterTrendLargeUpDisplacement ? "96根大涨 · 放大到原横盘下沿 " : "刚上破 · 回到原横盘上沿 ") +
+     str.tostring(shortStructureTarget, format.mintick) + " · 1R后移动保护" :
+     transitionLiquiditySweepShort ?
+     "扫高盘整低点 " + str.tostring(shortStructureTarget, format.mintick) + " · 1R后移动保护" :
+     counterTrendShort ? "横盘下沿 " + str.tostring(shortStructureTarget, format.mintick) +
+     " · 1R后移动保护" :
+     divergenceReversalShortCandidate ? "1R激活近似保本 · 1.5R全平" :
+     shortTrendExtension ?
+     str.tostring(shortBaseTakeProfitAtr, "#.#") + " ATR激活 · 近似保本 · 8 ATR全平" :
+     str.tostring(shortTakeProfitAtr, "#.#") + " ATR"
+longDisplayVolumeRatio = emaLong ? emaTrendLongAcceptedVolumeRatio :
+     ema596ReclaimDepartureLong ? ema596DepartureMedianVolumeRatio :
+     rangeUpsideBreakoutLong ? acceptedConfirmedRangeVolumeRatio : filteredVolumeRatio
+shortDisplayVolumeRatio = falseBreakoutShort ? falseBreakoutVolumeRatio : filteredVolumeRatio
+string longDivergenceDetails = ""
+if rsiBullishDivergence
+    longDivergenceDetails := "\n锚点  " + str.format_time(time[qOffset], "MM-dd HH:mm", "Asia/Shanghai") +
+         " · 相隔 " + str.tostring(qOffset) + " 根" +
+         "\n对比  低点 " + str.tostring(qLow, format.mintick) + " → " + str.tostring(low, format.mintick) +
+         "\n      RSI " + str.tostring(qRsi, "#.##") + " → " + str.tostring(rsi14, "#.##") +
+         "\n幅度  下破 " + str.tostring(bullishBreakRatio * 100, "#.##") + "% · " +
+         str.tostring(bullishBreakAtr, "#.##") + " ATR" +
+         "\n结构  中间反弹 " + str.tostring(bullishIntermediateSwingAtr, "#.##") + " ATR" +
+         "\n等级  " + (bullishDivergenceWeak ? "弱背离 · 收回确认" : "完整背离") +
+         "\n收回  " + (bullishDivergenceReclaimed ? "已收回锚点低点" : "完整背离可不收回") +
+         "\nK线   " + (close > open ? "阳线确认" :
+              "下影拒绝 " + str.tostring(lowerShadow / candleRange * 100, "#.##") + "%") +
+         "\n路径  中间 RSI 最高 " + str.tostring(pathRsiMax, "#.##") + " ≤ 50" +
+         "\n版本  " + divergenceStructureVersion
+string shortDivergenceDetails = ""
+if rsiBearishDivergence
+    shortDivergenceDetails := "\n锚点  " + str.format_time(time[qOffset], "MM-dd HH:mm", "Asia/Shanghai") +
+         " · 相隔 " + str.tostring(qOffset) + " 根" +
+         "\n对比  高点 " + str.tostring(qHigh, format.mintick) + " → " + str.tostring(high, format.mintick) +
+         "\n      RSI " + str.tostring(qRsi, "#.##") + " → " + str.tostring(rsi14, "#.##") +
+         "\n幅度  上破 " + str.tostring(bearishBreakRatio * 100, "#.##") + "% · " +
+         str.tostring(bearishBreakAtr, "#.##") + " ATR" +
+         "\n结构  中间回落 " + str.tostring(bearishIntermediateSwingAtr, "#.##") + " ATR" +
+         "\n等级  " + (bearishDivergenceWeak ? "弱背离 · 收回确认" : "完整背离") +
+         "\n收回  " + (bearishDivergenceReclaimed ? "已跌回锚点高点" : "完整背离可不收回") +
+         "\nK线   " + (close < open ? "阴线确认" :
+              "上影拒绝 " + str.tostring(upperShadow / candleRange * 100, "#.##") + "%") +
+         "\n路径  中间 RSI 最低 " + str.tostring(pathRsiMin, "#.##") + " ≥ 50" +
+         "\n版本  " + divergenceStructureVersion
+string effortNoResultDetails = ""
+if effortNoResultShort
+    effortNoResultDetails := "\n模式  高位放量努力无结果 · 次高点拒绝" +
+         "\n锚点  " + str.format_time(time[effortNoResultAnchorOffset], "MM-dd HH:mm", "Asia/Shanghai") +
+         " · 相隔 " + str.tostring(effortNoResultAnchorOffset) + " 根" +
+         "\n高点  " + str.tostring(effortNoResultAnchorHigh, format.mintick) +
+         " → " + str.tostring(high, format.mintick) +
+         "\n差距  " + str.tostring(effortNoResultHighGapRatio * 100, "#.###") +
+         "% · " + str.tostring(effortNoResultHighGapAtr, "#.##") + " ATR · OR通过" +
+         "\n量能  vol_ccy " + str.tostring(effortNoResultAnchorVolume, "#.##") +
+         " → " + str.tostring(volume, "#.##") +
+         " · " + str.tostring(effortNoResultVolumeMultiple, "#.##") + "x" +
+         "\n动量  RSI " + str.tostring(effortNoResultAnchorRsi, "#.##") +
+         " → " + str.tostring(rsi14, "#.##") +
+         "\n阴线  实体 " + str.tostring(bodyRangeRatio * 100, "#.##") +
+         "%振幅 · " + str.tostring(effortNoResultBearBodyAtr, "#.##") +
+         " ATR · 收盘位置 " + str.tostring(effortNoResultCloseLocation * 100, "#.##") + "%" +
+         "\n布林  高点 " + str.tostring(high, format.mintick) +
+         " > 上轨 " + str.tostring(bollingerUpper, format.mintick) +
+         " · 收盘 " + str.tostring(close, format.mintick) + " 已回轨内" +
+         "\n版本  " + effortNoResultShortVersion
+string falseBreakoutDetails = ""
+if falseBreakoutShort
+    falseBreakoutDetails := "\n锚区  " +
+         str.format_time(falseBreakoutAnchorStartTime, "MM-dd HH:mm", "Asia/Shanghai") + " → " +
+         str.format_time(falseBreakoutAnchorEndTime, "MM-dd HH:mm", "Asia/Shanghai") +
+         "\n边界  高 " + str.tostring(falseBreakoutFrozenHigh, format.mintick) +
+         " · 低 " + str.tostring(falseBreakoutFrozenLow, format.mintick) +
+         "\n突破  " + str.format_time(falseBreakoutSourceTime, "MM-dd HH:mm", "Asia/Shanghai") +
+         " · 量比 " + str.tostring(falseBreakoutVolumeRatio, "#.##") + "x" +
+         "\n失败  第 " + str.tostring(falseBreakoutBarsElapsed) + " 根收盘跌破下沿"
+string transitionLiquiditySweepDetails = ""
+if transitionLiquiditySweepShort
+    transitionLiquiditySweepDetails := "\n模式  多头切换后重复扫高假突破" +
+         "\n锚点  " + str.format_time(time[transitionSweepAnchorOffset], "MM-dd HH:mm", "Asia/Shanghai") +
+         " · 相隔 " + str.tostring(transitionSweepAnchorOffset) + " 根" +
+         "\n边界  前高 " + str.tostring(transitionSweepAnchorPriorHigh, format.mintick) +
+         " · 锚高 " + str.tostring(transitionSweepAnchorHigh, format.mintick) +
+         "\n量能  锚点量比 " + str.tostring(transitionSweepAnchorVolumeRatio, "#.##") + "x" +
+         " · RSI " + str.tostring(transitionSweepAnchorRsi, "#.##") +
+         "\n测试  " + str.tostring(transitionSweepTouchGroups) +
+         "组 · 触碰带 " + str.tostring(transitionSweepTouchBand, format.mintick) +
+         "\n扫高  " + str.tostring(transitionSweepAnchorHigh, format.mintick) +
+         " → " + str.tostring(high, format.mintick) +
+         " · 收盘 " + str.tostring(close, format.mintick) + " 已收回" +
+         "\n背离  RSI " + str.tostring(transitionSweepAnchorRsi, "#.##") +
+         " → " + str.tostring(rsi14, "#.##") +
+         "\n目标  盘整低点 " + str.tostring(transitionSweepConsolidationLow, format.mintick) +
+         "\n版本  " + transitionLiquiditySweepShortVersion
+string rangeUpsideBreakoutLongDetails = ""
+if rangeUpsideBreakoutLong
+    rangeUpsideBreakoutLongDetails := "\n模式  20根确认箱体放量突破" +
+         "\n箱体  " + str.format_time(acceptedConfirmedRangeStartTime, "MM-dd HH:mm", "Asia/Shanghai") + " → " +
+         str.format_time(acceptedConfirmedRangeEndTime, "MM-dd HH:mm", "Asia/Shanghai") +
+         "\n边界  P85高 " + str.tostring(acceptedConfirmedRangeUpper, format.mintick) +
+         " · P15低 " + str.tostring(acceptedConfirmedRangeLower, format.mintick) +
+         " · 宽 " + str.tostring(acceptedConfirmedRangeWidthRatio * 100, "#.##") + "%" +
+         "\n极值  高 " + str.tostring(acceptedConfirmedRangeRawHigh, format.mintick) +
+         " · 低 " + str.tostring(acceptedConfirmedRangeRawLow, format.mintick) +
+         "\n触碰  上 " + str.tostring(acceptedConfirmedRangeUpperTouchGroups) +
+         "组 · 下 " + str.tostring(acceptedConfirmedRangeLowerTouchGroups) +
+         "组 · 收盘留存 " + str.tostring(acceptedConfirmedRangeContainmentRatio * 100, "#.##") + "%" +
+         "\n稳定  上沿漂移 " + str.tostring(acceptedConfirmedRangeUpperDriftRatio * 100, "#.##") +
+         "% · 下沿漂移 " + str.tostring(acceptedConfirmedRangeLowerDriftRatio * 100, "#.##") + "%" +
+         "\n收敛  末5根/前15根TR " + str.tostring(acceptedConfirmedRangeContractionRatio, "#.##") +
+         "\n突破  " + str.format_time(acceptedConfirmedRangeBreakoutTime, "MM-dd HH:mm", "Asia/Shanghai") +
+         " · 量比 " + str.tostring(acceptedConfirmedRangeVolumeRatio, "#.##") + "x" +
+         "\n接受  第 " + str.tostring(confirmedRangeAcceptanceBars) + " 根 · " + confirmedRangeAcceptanceType +
+         "\n版本  " + confirmedRangeBreakLongVersion
+string largeHorizontalRangeBreakoutLongDetails = ""
+if largeHorizontalRangeBreakoutLong
+    largeHorizontalRangeBreakoutLongDetails := "\n模式  大型水平箱体放量突破" +
+         "\n结构  " + str.tostring(largeHorizontalRangeSelectedLength) + "根 · " +
+         str.format_time(time[largeHorizontalRangeSelectedLength], "MM-dd HH:mm", "Asia/Shanghai") + " → " +
+         str.format_time(time[1], "MM-dd HH:mm", "Asia/Shanghai") +
+         "\n边界  P90高 " + str.tostring(largeHorizontalRangeUpper, format.mintick) +
+         " · P10低 " + str.tostring(largeHorizontalRangeLower, format.mintick) +
+         " · 宽 " + str.tostring(largeHorizontalRangeWidthRatio * 100, "#.##") + "%" +
+         "\n触碰  上 " + str.tostring(largeHorizontalRangeUpperTouchGroups) +
+         "组 · 下 " + str.tostring(largeHorizontalRangeLowerTouchGroups) +
+         "组 · 收盘留存 " + str.tostring(largeHorizontalRangeContainmentRatio * 100, "#.##") + "%" +
+         "\n稳定  上沿漂移 " + str.tostring(largeHorizontalRangeUpperDriftRatio * 100, "#.##") +
+         "% · 下沿漂移 " + str.tostring(largeHorizontalRangeLowerDriftRatio * 100, "#.##") + "%" +
+         "\n突破  收盘 " + str.tostring(close, format.mintick) +
+         " > 历史最高 " + str.tostring(largeHorizontalRangeRawHigh, format.mintick) +
+         "\n动量  RSI " + str.tostring(rsi14[1], "#.##") + " → " +
+         str.tostring(rsi14, "#.##") + " · " + emaFastLabel + "刚上穿" +
+         emaMediumLabel + " · 收盘站上" + emaRegimeLabel +
+         "\n量能  量比 " + str.tostring(filteredVolumeRatio, "#.##") + "x · 周P90通过" +
+         "\n版本  " + largeHorizontalRangeLongVersion
+string largeTriangleBreakoutLongDetails = ""
+if largeTriangleBreakoutLong
+    largeTriangleBreakoutLongDetails := "\n模式  大型上升三角放量突破" +
+         "\n结构  " + str.tostring(largeTriangleSelectedLength) + "根 · " +
+         str.format_time(time[largeTriangleSelectedLength], "MM-dd HH:mm", "Asia/Shanghai") + " → " +
+         str.format_time(time[1], "MM-dd HH:mm", "Asia/Shanghai") +
+         "\n阻力  " + str.tostring(largeTriangleResistance, format.mintick) +
+         " · 三段峰差 " + str.tostring(largeTriangleResistanceSpreadRatio * 100, "#.##") + "%" +
+         " · 触碰 " + str.tostring(largeTriangleUpperTouchGroups) + "组" +
+         "\n低点  " + str.tostring(largeTriangleEarlyLow, format.mintick) + " → " +
+         str.tostring(largeTriangleMiddleLow, format.mintick) + " → " +
+         str.tostring(largeTriangleRecentLow, format.mintick) +
+         "\n收敛  末段/首段 " + str.tostring(largeTriangleContractionRatio * 100, "#.##") + "%" +
+         "\n动量  RSI " + str.tostring(rsi14[1], "#.##") + " → " +
+         str.tostring(rsi14, "#.##") + " · " + emaFastLabel + "刚上穿" + emaMediumLabel +
+         "\n量能  量比 " + str.tostring(filteredVolumeRatio, "#.##") + "x · 周P90通过" +
+         "\n版本  " + largeAscendingTriangleLongVersion
+string shortTrendExtensionDetails = ""
+if shortTrendExtension
+    shortTrendExtensionDetails := "\n模式  空头趋势延续扩展 · " +
+         (emaCompressionExpansionShort ? "EMA压缩扩张" : "假突破续跌") +
+         "\n版本  short_trend_extension_8atr_be_v1"
+string emaExpansionDetails = ""
+if emaCompressionExpansionLong or emaCompressionExpansionShort
+    emaExpansionDetails := "\n压缩  前" + str.tostring(emaCompressionLookback) +
+         "根均值 " + str.tostring(emaCompressionMeanDistanceAtr, "#.###") +
+         " · 最大 " + str.tostring(emaCompressionMaxDistanceAtr, "#.###") + " ATR" +
+         "\n斜率  " + str.tostring(emaFastLength) + " " + str.tostring(ema12SlopeAtr, "#.####") +
+         " · " + str.tostring(emaMediumLength) + " " + str.tostring(ema144SlopeAtr, "#.####") +
+         " · " + str.tostring(emaStructureLength) + " " +
+         str.tostring(ema596SlopeAtr, "#.####") + " ATR/根" +
+         "\n来源  放量穿越前20根结构 " +
+         str.tostring(emaExpansionFrozenLine, format.mintick) +
+         "\n确认  " + str.tostring(bar_index - emaExpansionSourceBar) +
+         "根内回踩失败 · 收盘保持" + emaFastLabel + "同侧" +
+         "\n版本  " + v10EntryQualityVersion
+string emaTrendLongDetails = ""
+if emaLong
+    emaTrendLongDetails := "\n模式  EMA多头趋势突破后回踩接受" +
+         "\n来源  " + str.format_time(emaTrendLongFrozenTime, "MM-dd HH:mm", "Asia/Shanghai") +
+         " · 冻结线 " + str.tostring(emaTrendLongFrozenLine, format.mintick) +
+         "\n确认  " + str.tostring(bar_index - emaTrendLongSourceBar) +
+         "根内回踩 · 收盘仍在" + emaFastLabel + "上方" +
+         "\n距离  来源离" + emaFastLabel + "不超过 " +
+         str.tostring(v10EmaSourceDistanceAtrMax, "#.##") + " ATR" +
+         "\n版本  " + v10EntryQualityVersion
+string ema596ReclaimDepartureDetails = ""
+if ema596ReclaimDepartureLong
+    ema596ReclaimDepartureDetails := "\n模式  " + emaStructureLabel + "收复接受后放量离轨扩张" +
+         "\n收复  " + str.tostring(ema596ReclaimAge) + "根前上穿 · 此后未收回线下" +
+         "\n离轨  " + str.tostring(ema596DeparturePreviousDistanceAtr, "#.##") +
+         " → " + str.tostring(ema596DepartureCurrentDistanceAtr, "#.##") + " ATR" +
+         "\n结构  收盘突破前8高 " + str.tostring(ema596DeparturePriorHigh, format.mintick) +
+         " · 高点/低点同步抬高" +
+         "\n量能  vol_ccy " + str.tostring(volume, "#.##") +
+         " ≥ 周P90 " + str.tostring(weeklyP90, "#.##") +
+         " · 中位量比 " + str.tostring(ema596DepartureMedianVolumeRatio, "#.##") + "x" +
+         "\n前趋势  " + emaFastLabel + "斜率 " + str.tostring(ema12SlopeAtr[1], "#.####") +
+         " · " + emaMediumLabel + "斜率 " + str.tostring(ema144SlopeAtr[1], "#.####") +
+         " · " + emaStructureLabel + "斜率 " +
+         str.tostring(ema596SlopeAtr[1], "#.####") + " ATR/根" +
+         "\n风控  结构低点 " + str.tostring(ema596DeparturePriorLow, format.mintick) +
+         " · 目标 " + str.tostring(ema596ReclaimDepartureTarget, format.mintick) +
+         "\n版本  " + ema596ReclaimDepartureLongVersion
+string longCounterTrendDetails = ""
+if longEntryOrder and counterTrendLong and
+     not threeBarEngulfReversalLong and not bollingerLowerReclaimLong and
+     not ema596ReclaimDepartureLong
+    longCounterTrendDetails := pureRsiCounterTrendLongCandidate ?
+         "\n模式  RSI底背离 · EMA严格逆势V5" +
+         "\nEMA   12 < 144 < 696 · 连续 " +
+         (pureRsiCounterTrendLongMature ? "600+" : str.tostring(strictBearEmaOrderAge)) + " 根" +
+         "\n阶段  " + (pureRsiCounterTrendLongMature ?
+              "成熟逆势 · 结构确认后允许放大利润" :
+              "新生逆势 · 只回归最近结构") +
+         "\n横盘  " + str.format_time(time[sidewaysZoneStartOffset], "MM-dd HH:mm", "Asia/Shanghai") + " → " +
+         str.format_time(time[sidewaysZoneEndOffset], "MM-dd HH:mm", "Asia/Shanghai") +
+         "\n边界  高 " + str.tostring(sidewaysZoneHigh, format.mintick) +
+         " · 低 " + str.tostring(sidewaysZoneLow, format.mintick) +
+         " · 宽 " + str.tostring(sidewaysZoneWidthRatio * 100, "#.##") + "%" +
+         "\n目标  " + (pureRsiCounterTrendLongMature ?
+              "远边 " + str.tostring(pureRsiCounterTrendLongFarTarget, format.mintick) :
+              "近边 " + str.tostring(pureRsiCounterTrendLongNearTarget, format.mintick)) +
+         (pureRsiCounterTrendLongMature ?
+              "\n确认  完成K线收盘站上近边 " +
+              str.tostring(pureRsiCounterTrendLongNearTarget, format.mintick) +
+              "\n保护  1R不移动 · 确认后单边8bps成本净保本 · MFE≥2R后距最高价2R" :
+              "\n保护  实际成交1R后 · 距最高有利价1R单向跟踪") +
+         "\n时序  信号收盘冻结 · 完成棒更新 · 下一棒生效" +
+         "\n版本  " + rsiCounterTrendMaturityExitVersion :
+         counterTrendFreshBreakLong ?
+         "\n模式  逆势多单 · 刚跌破已确认横盘" +
+         "\n横盘  " + str.format_time(time[freshBreakdownZoneStartOffset], "MM-dd HH:mm", "Asia/Shanghai") + " → " +
+         str.format_time(time[freshBreakdownZoneEndOffset], "MM-dd HH:mm", "Asia/Shanghai") +
+         "\n边界  高 " + str.tostring(freshBreakdownZoneHigh, format.mintick) +
+         " · 低 " + str.tostring(freshBreakdownZoneLow, format.mintick) +
+         "\n破位  " + str.tostring(freshBreakdownAge) + "根前首次收盘下破 · 此后持续在线下" +
+         "\n96根  下跌 " + str.tostring(counterTrendDownDisplacementRatio * 100, "#.##") +
+         "% · " + str.tostring(counterTrendDownDisplacementAtr, "#.##") + " ATR" +
+         "\n目标  " + (counterTrendLargeDownDisplacement ? "大跌放大到远边" : "普通回归到近边") +
+         "\n保护  实际成交1R后 · 距最高有利价1R单向跟踪" +
+         "\n版本  " + counterTrendFreshBreakVersion + " / " + counterTrendStructureExitVersion :
+         "\n模式  逆势多单 · " + emaFastLabel + " < " + emaMediumLabel +
+         " < " + emaRegimeLabel +
+         "\n横盘  " + str.format_time(time[sidewaysZoneStartOffset], "MM-dd HH:mm", "Asia/Shanghai") + " → " +
+         str.format_time(time[sidewaysZoneEndOffset], "MM-dd HH:mm", "Asia/Shanghai") +
+         "\n边界  高 " + str.tostring(sidewaysZoneHigh, format.mintick) +
+         " · 低 " + str.tostring(sidewaysZoneLow, format.mintick) +
+         " · 宽 " + str.tostring(sidewaysZoneWidthRatio * 100, "#.##") + "%" +
+         "\n触碰  上 " + str.tostring(sidewaysZoneUpperTouchGroups) +
+         " 组 · 下 " + str.tostring(sidewaysZoneLowerTouchGroups) + " 组" +
+         "\n保护  实际成交1R后 · 距最高有利价1R单向跟踪" +
+         "\n版本  " + counterTrendStructureExitVersion
+string threeBarEngulfReversalDetails = ""
+if threeBarEngulfReversalLong
+    threeBarEngulfReversalDetails := "\n模式  放量卖出高潮后三棒强势反包" +
+         "\n冲击  前三棒 " + str.tostring(threeBarBearCount) + " 阴 · 整体净下跌" +
+         "\n吞没  实体包络 " + str.tostring(threeBarBodyLow, format.mintick) +
+         " → " + str.tostring(threeBarBodyHigh, format.mintick) +
+         "\n强度  实体 " + str.tostring(bodyRangeRatio * 100, "#.##") +
+         "% · " + str.tostring(threeBarEngulfBodyAtr, "#.##") +
+         " ATR · 收盘位置 " + str.tostring(threeBarEngulfCloseLocation * 100, "#.##") + "%" +
+         "\n量能  前棒完整事件 · 当前过滤量比 " + str.tostring(filteredVolumeRatio, "#.##") + "x" +
+         "\n位置  四棒低点 " + str.tostring(threeBarPatternLow, format.mintick) +
+         " · 前48根低点 " + str.tostring(threeBarPrior48Low, format.mintick) +
+         "\n确认  RSI穿回50 · 收盘站上" + emaFastLabel + "与布林中轨" +
+         "\n版本  " + threeBarEngulfReversalLongVersion
+string bollingerLowerReclaimDetails = ""
+if bollingerLowerReclaimLong
+    bollingerLowerReclaimDetails := "\n模式  放量下破布林下轨后收回" +
+         "\n布林  低点 " + str.tostring(low, format.mintick) +
+         " < 下轨 " + str.tostring(bollingerLower, format.mintick) +
+         " · 收盘 " + str.tostring(close, format.mintick) + " 已回轨内" +
+         "\n形态  下影 " + str.tostring(bollingerLowerReclaimShadowRatio * 100, "#.##") +
+         "% · 收盘位置 " + str.tostring(bollingerLowerReclaimCloseLocation * 100, "#.##") + "%" +
+         "\n位置  前48根 " + str.tostring(bollingerLowerReclaimPriorLow, format.mintick) +
+         " → " + str.tostring(bollingerLowerReclaimPriorHigh, format.mintick) +
+         " · 底部 " + str.tostring(bollingerLowerReclaimBottomPosition * 100, "#.##") + "%" +
+         "\nRSI   " + str.tostring(rsi14[2], "#.##") + " → " +
+         str.tostring(rsi14[1], "#.##") + " → " + str.tostring(rsi14, "#.##") +
+         "\nMACD  " + str.tostring(macdHistogram[2], "#.#####") + " → " +
+         str.tostring(macdHistogram[1], "#.#####") + " → " +
+         str.tostring(macdHistogram, "#.#####") + " · 负柱收缩" +
+         "\n目标  冻结中轨 " + str.tostring(bollingerLowerReclaimTarget, format.mintick) +
+         " · 信号收盘预期 " + str.tostring(bollingerLowerReclaimRewardRisk, "#.##") + "R" +
+         "\n版本  " + bollingerLowerReclaimLongVersion
+string shortCounterTrendDetails = ""
+if shortEntryOrder and (counterTrendShort or transitionLiquiditySweepShort)
+    shortCounterTrendDetails := effortNoResultShort ?
+         "\n模式  逆势空单 · " + emaFastLabel + " > " + emaMediumLabel +
+         " > " + emaRegimeLabel +
+         "\n退出  使用两高结构止损与1R/1.5R，不回退横盘或ATR" :
+         pureRsiCounterTrendShortCandidate ?
+         "\n模式  RSI顶背离 · EMA严格逆势V5" +
+         "\nEMA   " + str.tostring(emaFastLength) + " > " +
+         str.tostring(emaMediumLength) + " > " + str.tostring(emaRegimeLength) + " · 连续 " +
+         (pureRsiCounterTrendShortMature ? "600+" : str.tostring(strictBullEmaOrderAge)) + " 根" +
+         "\n阶段  " + (pureRsiCounterTrendShortMature ?
+              "成熟逆势 · 结构确认后允许放大利润" :
+              "新生逆势 · 只回归最近结构") +
+         "\n横盘  " + str.format_time(time[sidewaysZoneStartOffset], "MM-dd HH:mm", "Asia/Shanghai") + " → " +
+         str.format_time(time[sidewaysZoneEndOffset], "MM-dd HH:mm", "Asia/Shanghai") +
+         "\n边界  高 " + str.tostring(sidewaysZoneHigh, format.mintick) +
+         " · 低 " + str.tostring(sidewaysZoneLow, format.mintick) +
+         " · 宽 " + str.tostring(sidewaysZoneWidthRatio * 100, "#.##") + "%" +
+         "\n目标  " + (pureRsiCounterTrendShortMature ?
+              "远边 " + str.tostring(pureRsiCounterTrendShortFarTarget, format.mintick) :
+              "近边 " + str.tostring(pureRsiCounterTrendShortNearTarget, format.mintick)) +
+         (pureRsiCounterTrendShortMature ?
+              "\n确认  完成K线收盘跌破近边 " +
+              str.tostring(pureRsiCounterTrendShortNearTarget, format.mintick) +
+              "\n保护  1R不移动 · 确认后单边8bps成本净保本 · MFE≥2R后距最低价2R" :
+              "\n保护  实际成交1R后 · 距最低有利价1R单向跟踪") +
+         "\n时序  信号收盘冻结 · 完成棒更新 · 下一棒生效" +
+         "\n版本  " + rsiCounterTrendMaturityExitVersion :
+         counterTrendFreshBreakShort ?
+         "\n模式  逆势空单 · 刚上破已确认横盘" +
+         "\n横盘  " + str.format_time(time[freshBreakoutZoneStartOffset], "MM-dd HH:mm", "Asia/Shanghai") + " → " +
+         str.format_time(time[freshBreakoutZoneEndOffset], "MM-dd HH:mm", "Asia/Shanghai") +
+         "\n边界  高 " + str.tostring(freshBreakoutZoneHigh, format.mintick) +
+         " · 低 " + str.tostring(freshBreakoutZoneLow, format.mintick) +
+         "\n破位  " + str.tostring(freshBreakoutAge) + "根前首次收盘上破 · 此后持续在线上" +
+         "\n96根  上涨 " + str.tostring(counterTrendUpDisplacementRatio * 100, "#.##") +
+         "% · " + str.tostring(counterTrendUpDisplacementAtr, "#.##") + " ATR" +
+         "\n目标  " + (counterTrendLargeUpDisplacement ? "大涨放大到远边" : "普通回归到近边") +
+         "\n保护  实际成交1R后 · 距最低有利价1R单向跟踪" +
+         "\n版本  " + counterTrendFreshBreakVersion + " / " + counterTrendStructureExitVersion :
+         transitionLiquiditySweepShort ?
+         "\n模式  逆势空单 · " + emaFastLabel + " > " + emaMediumLabel +
+         " > " + emaRegimeLabel +
+         "\n退出  扫高路径冻结低点 · 实际成交1R后移动保护" +
+         "\n版本  " + counterTrendStructureExitVersion :
+         "\n模式  逆势空单 · " + emaFastLabel + " > " + emaMediumLabel +
+         " > " + emaRegimeLabel +
+         "\n横盘  " + str.format_time(time[sidewaysZoneStartOffset], "MM-dd HH:mm", "Asia/Shanghai") + " → " +
+         str.format_time(time[sidewaysZoneEndOffset], "MM-dd HH:mm", "Asia/Shanghai") +
+         "\n边界  高 " + str.tostring(sidewaysZoneHigh, format.mintick) +
+         " · 低 " + str.tostring(sidewaysZoneLow, format.mintick) +
+         " · 宽 " + str.tostring(sidewaysZoneWidthRatio * 100, "#.##") + "%" +
+         "\n触碰  上 " + str.tostring(sidewaysZoneUpperTouchGroups) +
+         " 组 · 下 " + str.tostring(sidewaysZoneLowerTouchGroups) + " 组" +
+         "\n保护  实际成交1R后 · 距最低有利价1R单向跟踪" +
+         "\n版本  " + counterTrendStructureExitVersion
+string longRsiStrictTrendDetails = ""
+if longEntryOrder and pureRsiStrictTrendLongCandidate
+    longRsiStrictTrendDetails := "\n模式  RSI底背离 · EMA严格顺势V4" +
+         "\nEMA   12 > 144 > 696" +
+         "\n退出  保留原ATR目标与止损 · 不套逆势结构保护" +
+         "\n分流  中性/过渡阻断 · 严格逆势才进入V5"
+string shortRsiStrictTrendDetails = ""
+if shortEntryOrder and pureRsiStrictTrendShortCandidate
+    shortRsiStrictTrendDetails := "\n模式  RSI顶背离 · EMA严格顺势V4" +
+         "\nEMA   12 < 144 < 696" +
+         "\n退出  保留原ATR目标与止损 · 不套逆势结构保护" +
+         "\n分流  中性/过渡阻断 · 严格逆势才进入V5"
+longTooltip = "买入 · 多单\n信号  " + longTrigger +
+     "\n价格  " + str.tostring(close, format.mintick) +
+     "\n指标  量比 " + str.tostring(longDisplayVolumeRatio, "#.##") + "x · RSI " + str.tostring(rsi14, "#.##") +
+     longDivergenceDetails +
+     rangeUpsideBreakoutLongDetails +
+     largeHorizontalRangeBreakoutLongDetails +
+     largeTriangleBreakoutLongDetails +
+     emaTrendLongDetails +
+     emaExpansionDetails +
+     ema596ReclaimDepartureDetails +
+     threeBarEngulfReversalDetails +
+     bollingerLowerReclaimDetails +
+     postBreakoutLongGuardDetails +
+     longCounterTrendDetails +
+     longRsiStrictTrendDetails +
+     "\n风控  止损 " + longStopDescription +
+     "\n      止盈 " + longTakeProfitDescription
+shortTooltip = "开空 · 空单\n信号  " + shortTrigger +
+     "\n价格  " + str.tostring(close, format.mintick) +
+     "\n指标  量比 " + str.tostring(shortDisplayVolumeRatio, "#.##") + "x · RSI " + str.tostring(rsi14, "#.##") +
+     shortDivergenceDetails +
+     effortNoResultDetails +
+     falseBreakoutDetails +
+     transitionLiquiditySweepDetails +
+     shortTrendExtensionDetails +
+     emaExpansionDetails +
+     shortCounterTrendDetails +
+     shortRsiStrictTrendDetails +
+     "\n风控  止损 " + shortStopDescription +
+     "\n      止盈 " + shortTakeProfitDescription
+
+// 入场单与保护单在 t 收盘同次提交，profit/loss 的 tick 距离会以 t+1 的实际模拟成交价为基准。
+// 这样无需在历史 K 线成交后重新执行脚本，避免 calc_on_order_fills 引入前瞻偏差。
+var int pendingStopTicks = na
+var int pendingTargetTicks = na
+var float pendingPatternStop = na
+var float pendingStructureTarget = na
+var float pendingEntryAtr = na
+var float activeEntryAtr = na
+var bool pendingLongDivergenceReversalExit = false
+var bool pendingShortDivergenceReversalExit = false
+var int pendingLongDivergenceActivationTicks = na
+var int pendingShortDivergenceActivationTicks = na
+var int pendingLongDivergenceTargetTicks = na
+var int pendingShortDivergenceTargetTicks = na
+var bool activeLongDivergenceReversalExit = false
+var bool activeShortDivergenceReversalExit = false
+var bool activeLongDivergenceActivated = false
+var bool activeShortDivergenceActivated = false
+var int activeLongDivergenceActivationTicks = na
+var int activeShortDivergenceActivationTicks = na
+var int activeLongDivergenceTargetTicks = na
+var int activeShortDivergenceTargetTicks = na
+var bool pendingEffortNoResultReversalExit = false
+var int pendingEffortNoResultActivationTicks = na
+var int pendingEffortNoResultTargetTicks = na
+var bool activeEffortNoResultReversalExit = false
+var bool activeEffortNoResultActivated = false
+var int activeEffortNoResultActivationTicks = na
+var int activeEffortNoResultTargetTicks = na
+var bool pendingThreeBarEngulfReversalExit = false
+var int pendingThreeBarEngulfActivationTicks = na
+var int pendingThreeBarEngulfTargetTicks = na
+var bool activeThreeBarEngulfReversalExit = false
+var bool activeThreeBarEngulfActivated = false
+var int activeThreeBarEngulfActivationTicks = na
+var int activeThreeBarEngulfTargetTicks = na
+var bool pendingShortTrendExtension = false
+var int pendingShortExtensionActivationTicks = na
+var int pendingShortExtensionLockTicks = na
+var int pendingShortExtensionTargetTicks = na
+var bool activeShortTrendExtension = false
+var bool activeShortTrendExtensionActivated = false
+var int activeShortExtensionActivationTicks = na
+var int activeShortExtensionLockTicks = na
+var int activeShortExtensionTargetTicks = na
+var bool pendingLongCounterTrendStructureExit = false
+var bool pendingShortCounterTrendStructureExit = false
+var float pendingLongCounterTrendInitialStop = na
+var float pendingShortCounterTrendInitialStop = na
+var int pendingLongCounterTrendStopTicks = na
+var int pendingShortCounterTrendStopTicks = na
+var float pendingLongCounterTrendTarget = na
+var float pendingShortCounterTrendTarget = na
+var bool pendingLongRsiCounterTrendMature = false
+var bool pendingShortRsiCounterTrendMature = false
+var float pendingLongRsiCounterTrendNearTarget = na
+var float pendingShortRsiCounterTrendNearTarget = na
+var bool activeLongCounterTrendStructureExit = false
+var bool activeShortCounterTrendStructureExit = false
+var bool activeLongCounterTrendActivated = false
+var bool activeShortCounterTrendActivated = false
+var float activeLongCounterTrendInitialRisk = na
+var float activeShortCounterTrendInitialRisk = na
+var float activeLongCounterTrendBestPrice = na
+var float activeShortCounterTrendBestPrice = na
+var float activeLongCounterTrendTrailStop = na
+var float activeShortCounterTrendTrailStop = na
+var float activeLongCounterTrendTarget = na
+var float activeShortCounterTrendTarget = na
+// 成熟身份与近边都在信号棒冻结；持仓后不得用新K线重新识别横盘或改写保护门槛。
+var bool activeLongRsiCounterTrendMature = false
+var bool activeShortRsiCounterTrendMature = false
+var bool activeLongRsiCounterTrendStructureConfirmed = false
+var bool activeShortRsiCounterTrendStructureConfirmed = false
+var float activeLongRsiCounterTrendNearTarget = na
+var float activeShortRsiCounterTrendNearTarget = na
+var float activeLongRsiCounterTrendNetBreakEven = na
+var float activeShortRsiCounterTrendNetBreakEven = na
+
+longSignalAtr = emaLong ? emaTrendLongAcceptedAtr : atr14
+stopDistanceTicks = not na(atr14) ? f_stop_distance_ticks(1.5 * atr14) : na
+longTargetDistanceTicks = not counterTrendLong and not na(longSignalAtr) and not na(longTakeProfitAtr) ?
+     f_target_distance_ticks(longTakeProfitAtr * longSignalAtr) : na
+shortTargetDistanceTicks = not counterTrendShort and not na(atr14) and not na(shortTakeProfitAtr) ?
+     f_target_distance_ticks(shortTakeProfitAtr * atr14) : na
+shortExtensionActivationTicks = shortTrendExtension and not na(atr14) and not na(shortBaseTakeProfitAtr) ?
+     f_target_distance_ticks(shortBaseTakeProfitAtr * atr14) : na
+divergenceActivationTicks = not na(stopDistanceTicks) ?
+     int(math.max(1, math.floor(stopDistanceTicks * divergenceBreakEvenRisk))) : na
+divergenceFinalTargetTicks = not na(stopDistanceTicks) ?
+     int(math.max(1, math.floor(stopDistanceTicks * divergenceFinalTargetRisk))) : na
+effortNoResultRiskTicks = effortNoResultShort and not na(effortNoResultStop) and effortNoResultStop > close ?
+     f_stop_distance_ticks(effortNoResultStop - close) : na
+effortNoResultActivationTicks = not na(effortNoResultRiskTicks) ?
+     int(math.max(1, math.floor(effortNoResultRiskTicks * effortNoResultBreakEvenRisk))) : na
+effortNoResultTargetTicks = not na(effortNoResultRiskTicks) ?
+     int(math.max(1, math.floor(effortNoResultRiskTicks * effortNoResultFinalTargetRisk))) : na
+threeBarEngulfRiskTicks = threeBarEngulfReversalLong and close > threeBarPatternLow ?
+     f_stop_distance_ticks(close - threeBarPatternLow) : na
+threeBarEngulfActivationTicks = not na(threeBarEngulfRiskTicks) ?
+     int(math.max(1, math.floor(threeBarEngulfRiskTicks * threeBarEngulfBreakEvenRisk))) : na
+threeBarEngulfTargetTicks = not na(threeBarEngulfRiskTicks) ?
+     int(math.max(1, math.floor(threeBarEngulfRiskTicks * threeBarEngulfFinalTargetRisk))) : na
+// Research 图表未计手续费与滑点，1 tick 仅表示“略过成交价”的近似保本；正式回测必须改为成本后保本价。
+shortExtensionLockTicks = shortTrendExtension ? 1 : na
+
+// 组合箭头直接锚定 K 线高低点：三角头贴近 K 线，6 像素实线保证箭尾在高分屏上仍清晰。
+entryMarkerGap = math.max(syminfo.mintick * 4, atr14 * 0.08)
+entryMarkerTailInner = atr14 * 0.12
+entryMarkerTailOuter = atr14 * 0.70
+
+if longEntryOrder
+    pendingStopTicks := emaLong ?
+         f_stop_distance_ticks(1.5 * emaTrendLongAcceptedAtr) : stopDistanceTicks
+    // 下一根开盘才成交；冻结信号棒 ATR，避免把开仓后尚不可见的高低点纳入入场风险尺度。
+    pendingEntryAtr := longSignalAtr
+    pendingTargetTicks := threeBarEngulfReversalLong ? threeBarEngulfTargetTicks :
+         divergenceReversalLongCandidate and not counterTrendLong ?
+         divergenceFinalTargetTicks : longTargetDistanceTicks
+    pendingStructureTarget := bollingerLowerReclaimLong ? bollingerLowerReclaimTarget :
+         ema596ReclaimDepartureLong ? ema596ReclaimDepartureTarget :
+         counterTrendLong and not threeBarEngulfReversalLong ? selectedLongStructureTarget : na
+    pendingLongDivergenceReversalExit := divergenceReversalLongCandidate and
+         not counterTrendLong and not threeBarEngulfReversalLong and
+         not bollingerLowerReclaimLong and not ema596ReclaimDepartureLong
+    pendingLongDivergenceActivationTicks := pendingLongDivergenceReversalExit ? divergenceActivationTicks : na
+    pendingLongDivergenceTargetTicks := pendingLongDivergenceReversalExit ? divergenceFinalTargetTicks : na
+    pendingThreeBarEngulfReversalExit := threeBarEngulfReversalLong and not bollingerLowerReclaimLong
+    pendingThreeBarEngulfActivationTicks := pendingThreeBarEngulfReversalExit ? threeBarEngulfActivationTicks : na
+    pendingThreeBarEngulfTargetTicks := pendingThreeBarEngulfReversalExit ? threeBarEngulfTargetTicks : na
+    pendingPatternStop := bollingerLowerReclaimLong ? bollingerLowerReclaimStop :
+         ema596ReclaimDepartureLong ? ema596ReclaimDepartureStop :
+         threeBarEngulfReversalLong ? f_round_long_stop(threeBarPatternLow) :
+         patternLongParticipated ? f_round_long_stop(bullishEngulfing ? math.min(low[1], low) : low) : na
+    pendingLongCounterTrendStructureExit := counterTrendStructureLongCandidate
+    pendingLongCounterTrendInitialStop := pendingLongCounterTrendStructureExit ? pendingPatternStop : na
+    pendingLongCounterTrendStopTicks := pendingLongCounterTrendStructureExit and na(pendingPatternStop) ?
+         pendingStopTicks : na
+    pendingLongCounterTrendTarget := pendingLongCounterTrendStructureExit ? pendingStructureTarget : na
+    pendingLongRsiCounterTrendMature := pendingLongCounterTrendStructureExit and
+         pureRsiCounterTrendLongMature
+    pendingLongRsiCounterTrendNearTarget := pendingLongCounterTrendStructureExit and
+         pureRsiCounterTrendLongCandidate ? pureRsiCounterTrendLongNearTarget : na
+    f_add_hover_target(bar_index, hl2, longTooltip)
+    longMarkerTip = low - entryMarkerGap
+    label.new(bar_index, longMarkerTip, "", xloc = xloc.bar_index, yloc = yloc.price,
+         style = label.style_triangleup, color = color.green, size = size.small, tooltip = longTooltip)
+    line.new(bar_index, longMarkerTip - entryMarkerTailOuter, bar_index, longMarkerTip - entryMarkerTailInner,
+         xloc = xloc.bar_index, color = color.green, width = 6)
+    if bollingerLowerReclaimLong
+        strategy.entry("Long BLR", strategy.long, comment = bollingerLowerReclaimLongVersion)
+        strategy.exit("Long BLR protection", from_entry = "Long BLR",
+             stop = pendingPatternStop, limit = pendingStructureTarget, qty_percent = 100,
+             comment_profit = "BLR_TP", comment_loss = "SL")
+    else if ema596ReclaimDepartureLong
+        strategy.entry("Long EMA596-D2", strategy.long, comment = ema596ReclaimDepartureLongVersion)
+        strategy.exit("Long EMA596-D2 protection", from_entry = "Long EMA596-D2",
+             stop = pendingPatternStop, limit = pendingStructureTarget, qty_percent = 100,
+             comment_profit = "EMA596_TP", comment_loss = "SL")
+    else if threeBarEngulfReversalLong
+        strategy.entry("Long 3Bar", strategy.long, comment = threeBarEngulfReversalLongVersion)
+        strategy.exit("Long 3Bar protection", from_entry = "Long 3Bar",
+             stop = pendingPatternStop, profit = pendingTargetTicks,
+             comment_profit = "ENG_TP", comment_loss = "SL")
+    else
+        strategy.entry("Long", strategy.long, comment = "15m velocity long")
+        if na(pendingPatternStop)
+            if na(pendingStructureTarget)
+                strategy.exit("Long protection", from_entry = "Long", loss = pendingStopTicks, profit = pendingTargetTicks,
+                     comment_profit = "TP", comment_loss = "SL")
+            else
+                strategy.exit("Long protection", from_entry = "Long", loss = pendingStopTicks, limit = pendingStructureTarget,
+                     qty_percent = 100, comment_profit = "TP_STRUCT", comment_loss = "SL")
+        else
+            if na(pendingStructureTarget)
+                strategy.exit("Long protection", from_entry = "Long", stop = pendingPatternStop, profit = pendingTargetTicks,
+                     comment_profit = "TP", comment_loss = "SL")
+            else
+                strategy.exit("Long protection", from_entry = "Long", stop = pendingPatternStop, limit = pendingStructureTarget,
+                     qty_percent = 100, comment_profit = "TP_STRUCT", comment_loss = "SL")
+
+if shortEntryOrder
+    pendingStopTicks := stopDistanceTicks
+    pendingEntryAtr := atr14
+    pendingTargetTicks := effortNoResultShort ? effortNoResultTargetTicks :
+         divergenceReversalShortCandidate and not counterTrendShort ?
+         divergenceFinalTargetTicks : shortTargetDistanceTicks
+    pendingStructureTarget := effortNoResultShort ? na :
+         transitionLiquiditySweepShort ?
+         shortStructureTarget : counterTrendShort ? selectedShortStructureTarget : na
+    pendingShortDivergenceReversalExit := divergenceReversalShortCandidate and
+         not counterTrendShort and not effortNoResultShort
+    pendingShortDivergenceActivationTicks := pendingShortDivergenceReversalExit ? divergenceActivationTicks : na
+    pendingShortDivergenceTargetTicks := pendingShortDivergenceReversalExit ? divergenceFinalTargetTicks : na
+    pendingEffortNoResultReversalExit := effortNoResultShort
+    pendingEffortNoResultActivationTicks := pendingEffortNoResultReversalExit ? effortNoResultActivationTicks : na
+    pendingEffortNoResultTargetTicks := pendingEffortNoResultReversalExit ? effortNoResultTargetTicks : na
+    pendingShortTrendExtension := shortTrendExtension and not counterTrendShort and not effortNoResultShort
+    pendingShortExtensionActivationTicks := pendingShortTrendExtension ? shortExtensionActivationTicks : na
+    pendingShortExtensionLockTicks := pendingShortTrendExtension ? shortExtensionLockTicks : na
+    pendingShortExtensionTargetTicks := pendingShortTrendExtension ? shortTargetDistanceTicks : na
+    // 独立高位拒绝与两类假突破都使用各自冻结的结构失效位，优先于同根偶然出现的普通K线形态。
+    pendingPatternStop := effortNoResultShort ? effortNoResultStop :
+         transitionLiquiditySweepShort ? f_round_short_stop(high) :
+         falseBreakoutShort ? f_round_short_stop(falseBreakoutFrozenHigh) :
+         patternShortParticipated ? f_round_short_stop(bearishEngulfing ? math.max(high[1], high) : high) : na
+    pendingShortCounterTrendStructureExit := counterTrendStructureShortCandidate
+    pendingShortCounterTrendInitialStop := pendingShortCounterTrendStructureExit ? pendingPatternStop : na
+    pendingShortCounterTrendStopTicks := pendingShortCounterTrendStructureExit and na(pendingPatternStop) ?
+         pendingStopTicks : na
+    pendingShortCounterTrendTarget := pendingShortCounterTrendStructureExit ? pendingStructureTarget : na
+    pendingShortRsiCounterTrendMature := pendingShortCounterTrendStructureExit and
+         pureRsiCounterTrendShortMature
+    pendingShortRsiCounterTrendNearTarget := pendingShortCounterTrendStructureExit and
+         pureRsiCounterTrendShortCandidate ? pureRsiCounterTrendShortNearTarget : na
+    f_add_hover_target(bar_index, hl2, shortTooltip)
+    shortMarkerTip = high + entryMarkerGap
+    label.new(bar_index, shortMarkerTip, "", xloc = xloc.bar_index, yloc = yloc.price,
+         style = label.style_triangledown, color = color.red, size = size.small, tooltip = shortTooltip)
+    line.new(bar_index, shortMarkerTip + entryMarkerTailOuter, bar_index, shortMarkerTip + entryMarkerTailInner,
+         xloc = xloc.bar_index, color = color.red, width = 6)
+    if effortNoResultShort
+        strategy.entry("Short ENR", strategy.short, comment = effortNoResultShortVersion)
+        strategy.exit("Short ENR protection", from_entry = "Short ENR",
+             stop = pendingPatternStop, profit = pendingTargetTicks,
+             comment_profit = "ENR_TP", comment_loss = "SL")
+    else
+        strategy.entry("Short", strategy.short, comment = "15m velocity short")
+        if na(pendingPatternStop)
+            if na(pendingStructureTarget)
+                strategy.exit("Short protection", from_entry = "Short", loss = pendingStopTicks, profit = pendingTargetTicks,
+                     comment_profit = shortTrendExtension ? "TP_EXT" : "TP", comment_loss = "SL")
+            else
+                strategy.exit("Short protection", from_entry = "Short", loss = pendingStopTicks, limit = pendingStructureTarget,
+                     qty_percent = 100, comment_profit = "TP_STRUCT", comment_loss = "SL")
+        else
+            if na(pendingStructureTarget)
+                strategy.exit("Short protection", from_entry = "Short", stop = pendingPatternStop, profit = pendingTargetTicks,
+                     comment_profit = shortTrendExtension ? "TP_EXT" : "TP", comment_loss = "SL")
+            else
+                strategy.exit("Short protection", from_entry = "Short", stop = pendingPatternStop, limit = pendingStructureTarget,
+                     qty_percent = 100, comment_profit = "TP_STRUCT", comment_loss = "SL")
+
+rangeSqueezeV18EntryId = strategy.position_size != 0 and strategy.opentrades > 0 ?
+     strategy.opentrades.entry_id(strategy.opentrades - 1) : ""
+rangeSqueezeV18Position = rangeSqueezeV18EntryId == "RSB18-L" or
+     rangeSqueezeV18EntryId == "RSB18-S"
+
+newLongPosition = strategy.position_size > 0 and strategy.position_size[1] <= 0 and
+     not rangeSqueezeV18Position
+if newLongPosition
+    activeEntryAtr := pendingEntryAtr
+    pendingEntryAtr := na
+    activeLongDivergenceReversalExit := pendingLongDivergenceReversalExit
+    activeLongDivergenceActivated := false
+    activeLongDivergenceActivationTicks := pendingLongDivergenceActivationTicks
+    activeLongDivergenceTargetTicks := pendingLongDivergenceTargetTicks
+    activeThreeBarEngulfReversalExit := pendingThreeBarEngulfReversalExit
+    activeThreeBarEngulfActivated := false
+    activeThreeBarEngulfActivationTicks := pendingThreeBarEngulfActivationTicks
+    activeThreeBarEngulfTargetTicks := pendingThreeBarEngulfTargetTicks
+    activeLongCounterTrendStructureExit := pendingLongCounterTrendStructureExit
+    activeLongCounterTrendActivated := false
+    longCounterTrendInitialStop = not na(pendingLongCounterTrendInitialStop) ?
+         pendingLongCounterTrendInitialStop :
+         strategy.position_avg_price - pendingLongCounterTrendStopTicks * syminfo.mintick
+    activeLongCounterTrendInitialRisk := activeLongCounterTrendStructureExit ?
+         math.abs(strategy.position_avg_price - longCounterTrendInitialStop) : na
+    activeLongCounterTrendBestPrice := activeLongCounterTrendStructureExit ?
+         strategy.position_avg_price : na
+    activeLongCounterTrendTrailStop := activeLongCounterTrendStructureExit ?
+         longCounterTrendInitialStop : na
+    activeLongCounterTrendTarget := activeLongCounterTrendStructureExit ?
+         pendingLongCounterTrendTarget : na
+    activeLongRsiCounterTrendMature := pendingLongRsiCounterTrendMature
+    activeLongRsiCounterTrendStructureConfirmed := false
+    activeLongRsiCounterTrendNearTarget := pendingLongRsiCounterTrendNearTarget
+    activeLongRsiCounterTrendNetBreakEven := pendingLongRsiCounterTrendMature ?
+         f_round_long_net_break_even(
+              strategy.position_avg_price * (1 + rsiCounterTrendCostRatePerSide) /
+              (1 - rsiCounterTrendCostRatePerSide)) : na
+    pendingLongCounterTrendStructureExit := false
+    pendingLongCounterTrendInitialStop := na
+    pendingLongCounterTrendStopTicks := na
+    pendingLongCounterTrendTarget := na
+    pendingLongRsiCounterTrendMature := false
+    pendingLongRsiCounterTrendNearTarget := na
+
+newShortPosition = strategy.position_size < 0 and strategy.position_size[1] >= 0 and
+     not rangeSqueezeV18Position
+if newShortPosition
+    activeEntryAtr := pendingEntryAtr
+    pendingEntryAtr := na
+    activeShortDivergenceReversalExit := pendingShortDivergenceReversalExit
+    activeShortDivergenceActivated := false
+    activeShortDivergenceActivationTicks := pendingShortDivergenceActivationTicks
+    activeShortDivergenceTargetTicks := pendingShortDivergenceTargetTicks
+    activeEffortNoResultReversalExit := pendingEffortNoResultReversalExit
+    activeEffortNoResultActivated := false
+    activeEffortNoResultActivationTicks := pendingEffortNoResultActivationTicks
+    activeEffortNoResultTargetTicks := pendingEffortNoResultTargetTicks
+    activeShortTrendExtension := pendingShortTrendExtension
+    activeShortTrendExtensionActivated := false
+    activeShortExtensionActivationTicks := pendingShortExtensionActivationTicks
+    activeShortExtensionLockTicks := pendingShortExtensionLockTicks
+    activeShortExtensionTargetTicks := pendingShortExtensionTargetTicks
+    activeShortCounterTrendStructureExit := pendingShortCounterTrendStructureExit
+    activeShortCounterTrendActivated := false
+    shortCounterTrendInitialStop = not na(pendingShortCounterTrendInitialStop) ?
+         pendingShortCounterTrendInitialStop :
+         strategy.position_avg_price + pendingShortCounterTrendStopTicks * syminfo.mintick
+    activeShortCounterTrendInitialRisk := activeShortCounterTrendStructureExit ?
+         math.abs(shortCounterTrendInitialStop - strategy.position_avg_price) : na
+    activeShortCounterTrendBestPrice := activeShortCounterTrendStructureExit ?
+         strategy.position_avg_price : na
+    activeShortCounterTrendTrailStop := activeShortCounterTrendStructureExit ?
+         shortCounterTrendInitialStop : na
+    activeShortCounterTrendTarget := activeShortCounterTrendStructureExit ?
+         pendingShortCounterTrendTarget : na
+    activeShortRsiCounterTrendMature := pendingShortRsiCounterTrendMature
+    activeShortRsiCounterTrendStructureConfirmed := false
+    activeShortRsiCounterTrendNearTarget := pendingShortRsiCounterTrendNearTarget
+    activeShortRsiCounterTrendNetBreakEven := pendingShortRsiCounterTrendMature ?
+         f_round_short_net_break_even(
+              strategy.position_avg_price * (1 - rsiCounterTrendCostRatePerSide) /
+              (1 + rsiCounterTrendCostRatePerSide)) : na
+    pendingShortCounterTrendStructureExit := false
+    pendingShortCounterTrendInitialStop := na
+    pendingShortCounterTrendStopTicks := na
+    pendingShortCounterTrendTarget := na
+    pendingShortRsiCounterTrendMature := false
+    pendingShortRsiCounterTrendNearTarget := na
+
+// 逆势结构仓以真实开盘成交价到初始止损的距离定义1R；信号收盘价只负责预检，不能替代实际风险。
+// 成熟 RSI 逆势在1R不移动止损：只有完成棒突破冻结近边后才升到成本净保本，2R后才启动2R宽跟踪。
+// 最高/最低有利价可以读取当前完成棒，但新保护只在本次收盘提交并从下一棒生效，不回填棒内触发顺序。
+if barstate.isconfirmed and activeLongCounterTrendStructureExit and
+     strategy.position_size > 0 and activeLongCounterTrendInitialRisk > 0
+    activeLongCounterTrendBestPrice := math.max(activeLongCounterTrendBestPrice, high)
+    if activeLongRsiCounterTrendMature
+        if not activeLongRsiCounterTrendStructureConfirmed and
+             not na(activeLongRsiCounterTrendNearTarget) and
+             close > activeLongRsiCounterTrendNearTarget
+            activeLongRsiCounterTrendStructureConfirmed := true
+        if activeLongRsiCounterTrendStructureConfirmed
+            activeLongCounterTrendTrailStop := math.max(
+                 activeLongCounterTrendTrailStop, activeLongRsiCounterTrendNetBreakEven)
+            if not activeLongCounterTrendActivated and
+                 activeLongCounterTrendBestPrice >=
+                 strategy.position_avg_price +
+                 rsiCounterTrendWideTrailRisk * activeLongCounterTrendInitialRisk
+                activeLongCounterTrendActivated := true
+            if activeLongCounterTrendActivated
+                longCounterTrendCandidateStop = math.max(
+                     activeLongRsiCounterTrendNetBreakEven,
+                     f_round_long_stop(
+                          activeLongCounterTrendBestPrice -
+                          rsiCounterTrendWideTrailRisk * activeLongCounterTrendInitialRisk))
+                activeLongCounterTrendTrailStop := math.max(
+                     activeLongCounterTrendTrailStop, longCounterTrendCandidateStop)
+            matureLongExitComment = activeLongCounterTrendActivated ? "CT_V5_TRAIL" : "CT_V5_BE"
+            if close <= activeLongCounterTrendTrailStop
+                strategy.close("Long", comment = matureLongExitComment)
+            else
+                strategy.exit("Long protection", from_entry = "Long",
+                     stop = activeLongCounterTrendTrailStop, limit = activeLongCounterTrendTarget,
+                     qty_percent = 100, comment_profit = "TP_STRUCT",
+                     comment_loss = matureLongExitComment)
+    else
+        if not activeLongCounterTrendActivated and
+             activeLongCounterTrendBestPrice >= strategy.position_avg_price + activeLongCounterTrendInitialRisk
+            activeLongCounterTrendActivated := true
+        if activeLongCounterTrendActivated
+            longCounterTrendCandidateStop = f_round_long_stop(math.max(
+                 strategy.position_avg_price + syminfo.mintick,
+                 activeLongCounterTrendBestPrice -
+                 counterTrendTrailingDistanceRisk * activeLongCounterTrendInitialRisk))
+            activeLongCounterTrendTrailStop := math.max(
+                 activeLongCounterTrendTrailStop, longCounterTrendCandidateStop)
+            if close <= activeLongCounterTrendTrailStop
+                strategy.close("Long", comment = "CT_TRAIL")
+            else
+                strategy.exit("Long protection", from_entry = "Long",
+                     stop = activeLongCounterTrendTrailStop, limit = activeLongCounterTrendTarget,
+                     qty_percent = 100, comment_profit = "TP_STRUCT", comment_loss = "CT_TRAIL")
+
+if barstate.isconfirmed and activeShortCounterTrendStructureExit and
+     strategy.position_size < 0 and activeShortCounterTrendInitialRisk > 0
+    activeShortCounterTrendBestPrice := math.min(activeShortCounterTrendBestPrice, low)
+    if activeShortRsiCounterTrendMature
+        if not activeShortRsiCounterTrendStructureConfirmed and
+             not na(activeShortRsiCounterTrendNearTarget) and
+             close < activeShortRsiCounterTrendNearTarget
+            activeShortRsiCounterTrendStructureConfirmed := true
+        if activeShortRsiCounterTrendStructureConfirmed
+            activeShortCounterTrendTrailStop := math.min(
+                 activeShortCounterTrendTrailStop, activeShortRsiCounterTrendNetBreakEven)
+            if not activeShortCounterTrendActivated and
+                 activeShortCounterTrendBestPrice <=
+                 strategy.position_avg_price -
+                 rsiCounterTrendWideTrailRisk * activeShortCounterTrendInitialRisk
+                activeShortCounterTrendActivated := true
+            if activeShortCounterTrendActivated
+                shortCounterTrendCandidateStop = math.min(
+                     activeShortRsiCounterTrendNetBreakEven,
+                     f_round_short_stop(
+                          activeShortCounterTrendBestPrice +
+                          rsiCounterTrendWideTrailRisk * activeShortCounterTrendInitialRisk))
+                activeShortCounterTrendTrailStop := math.min(
+                     activeShortCounterTrendTrailStop, shortCounterTrendCandidateStop)
+            matureShortExitComment = activeShortCounterTrendActivated ? "CT_V5_TRAIL" : "CT_V5_BE"
+            if close >= activeShortCounterTrendTrailStop
+                strategy.close("Short", comment = matureShortExitComment)
+            else
+                strategy.exit("Short protection", from_entry = "Short",
+                     stop = activeShortCounterTrendTrailStop, limit = activeShortCounterTrendTarget,
+                     qty_percent = 100, comment_profit = "TP_STRUCT",
+                     comment_loss = matureShortExitComment)
+    else
+        if not activeShortCounterTrendActivated and
+             activeShortCounterTrendBestPrice <= strategy.position_avg_price - activeShortCounterTrendInitialRisk
+            activeShortCounterTrendActivated := true
+        if activeShortCounterTrendActivated
+            shortCounterTrendCandidateStop = f_round_short_stop(math.min(
+                 strategy.position_avg_price - syminfo.mintick,
+                 activeShortCounterTrendBestPrice +
+                 counterTrendTrailingDistanceRisk * activeShortCounterTrendInitialRisk))
+            activeShortCounterTrendTrailStop := math.min(
+                 activeShortCounterTrendTrailStop, shortCounterTrendCandidateStop)
+            if close >= activeShortCounterTrendTrailStop
+                strategy.close("Short", comment = "CT_TRAIL")
+            else
+                strategy.exit("Short protection", from_entry = "Short",
+                     stop = activeShortCounterTrendTrailStop, limit = activeShortCounterTrendTarget,
+                     qty_percent = 100, comment_profit = "TP_STRUCT", comment_loss = "CT_TRAIL")
+
+if activeLongDivergenceReversalExit and strategy.position_size > 0 and
+     not activeLongDivergenceActivated and
+     high >= strategy.position_avg_price + activeLongDivergenceActivationTicks * syminfo.mintick
+    activeLongDivergenceActivated := true
+
+if activeThreeBarEngulfReversalExit and strategy.position_size > 0 and
+     not activeThreeBarEngulfActivated and
+     high >= strategy.position_avg_price + activeThreeBarEngulfActivationTicks * syminfo.mintick
+    activeThreeBarEngulfActivated := true
+
+if activeShortDivergenceReversalExit and strategy.position_size < 0 and
+     not activeShortDivergenceActivated and
+     low <= strategy.position_avg_price - activeShortDivergenceActivationTicks * syminfo.mintick
+    activeShortDivergenceActivated := true
+
+if activeEffortNoResultReversalExit and strategy.position_size < 0 and
+     not activeEffortNoResultActivated and
+     low <= strategy.position_avg_price - activeEffortNoResultActivationTicks * syminfo.mintick
+    activeEffortNoResultActivated := true
+
+// 背离反转的保本保护只在确认棒收盘后更新；15m OHLC 无法证明同棒内的先后触价顺序。
+if activeLongDivergenceReversalExit and activeLongDivergenceActivated and strategy.position_size > 0
+    longDivergenceLockStop = f_round_long_stop(strategy.position_avg_price + syminfo.mintick)
+    longDivergenceFinalTarget = f_round_long_target(
+         strategy.position_avg_price + activeLongDivergenceTargetTicks * syminfo.mintick)
+    if close <= longDivergenceLockStop
+        strategy.close("Long", comment = "DIV_BE")
+    else
+        strategy.exit("Long protection", from_entry = "Long", stop = longDivergenceLockStop,
+             limit = longDivergenceFinalTarget, qty_percent = 100,
+             comment_profit = "DIV_TP", comment_loss = "DIV_BE")
+
+// 反包棒达到 1R 后才在确认棒收盘更新保护；同棒先触目标还是先回撤在 15m OHLC 中不可判定。
+if activeThreeBarEngulfReversalExit and activeThreeBarEngulfActivated and strategy.position_size > 0
+    threeBarEngulfLockStop = f_round_long_stop(strategy.position_avg_price + syminfo.mintick)
+    threeBarEngulfFinalTarget = f_round_long_target(
+         strategy.position_avg_price + activeThreeBarEngulfTargetTicks * syminfo.mintick)
+    if close <= threeBarEngulfLockStop
+        strategy.close("Long 3Bar", comment = "ENG_BE")
+    else
+        strategy.exit("Long 3Bar protection", from_entry = "Long 3Bar",
+             stop = threeBarEngulfLockStop, limit = threeBarEngulfFinalTarget, qty_percent = 100,
+             comment_profit = "ENG_TP", comment_loss = "ENG_BE")
+
+if activeShortDivergenceReversalExit and activeShortDivergenceActivated and strategy.position_size < 0
+    shortDivergenceLockStop = f_round_short_stop(strategy.position_avg_price - syminfo.mintick)
+    shortDivergenceFinalTarget = f_round_short_target(
+         strategy.position_avg_price - activeShortDivergenceTargetTicks * syminfo.mintick)
+    if close >= shortDivergenceLockStop
+        strategy.close("Short", comment = "DIV_BE")
+    else
+        strategy.exit("Short protection", from_entry = "Short", stop = shortDivergenceLockStop,
+             limit = shortDivergenceFinalTarget, qty_percent = 100,
+             comment_profit = "DIV_TP", comment_loss = "DIV_BE")
+
+// 努力无结果反转在1R确认后才更新近似保本；同棒先触目标或先回撤仍遵循15分钟 broker 路径。
+if activeEffortNoResultReversalExit and activeEffortNoResultActivated and strategy.position_size < 0
+    effortNoResultLockStop = f_round_short_stop(strategy.position_avg_price - syminfo.mintick)
+    effortNoResultFinalTarget = f_round_short_target(
+         strategy.position_avg_price - activeEffortNoResultTargetTicks * syminfo.mintick)
+    if close >= effortNoResultLockStop
+        strategy.close("Short ENR", comment = "ENR_BE")
+    else
+        strategy.exit("Short ENR protection", from_entry = "Short ENR",
+             stop = effortNoResultLockStop, limit = effortNoResultFinalTarget, qty_percent = 100,
+             comment_profit = "ENR_TP", comment_loss = "ENR_BE")
+
+if activeShortTrendExtension and strategy.position_size < 0 and
+     not activeShortTrendExtensionActivated and
+     low <= strategy.position_avg_price - activeShortExtensionActivationTicks * syminfo.mintick
+    activeShortTrendExtensionActivated := true
+
+// 原固定目标只负责证明趋势已经走出足够位移；近似保本在该确认棒收盘后才提交，下一根开始生效。
+// 若确认棒已经收回保本价之上，只能下一开盘主动退出，不能回看棒内路径伪造保本成交。
+if activeShortTrendExtension and activeShortTrendExtensionActivated and strategy.position_size < 0
+    shortExtensionLockStop = f_round_short_stop(
+         strategy.position_avg_price - activeShortExtensionLockTicks * syminfo.mintick)
+    shortExtensionFinalTarget = f_round_short_target(
+         strategy.position_avg_price - activeShortExtensionTargetTicks * syminfo.mintick)
+    if close >= shortExtensionLockStop
+        strategy.close("Short", comment = "TP_BE")
+    else
+        strategy.exit("Short protection", from_entry = "Short", stop = shortExtensionLockStop,
+             limit = shortExtensionFinalTarget, qty_percent = 100,
+             comment_profit = "TP_EXT", comment_loss = "TP_BE")
+
+if strategy.position_size <= 0 and strategy.position_size[1] > 0
+    activeLongDivergenceReversalExit := false
+    activeLongDivergenceActivated := false
+    activeLongDivergenceActivationTicks := na
+    activeLongDivergenceTargetTicks := na
+    activeThreeBarEngulfReversalExit := false
+    activeThreeBarEngulfActivated := false
+    activeThreeBarEngulfActivationTicks := na
+    activeThreeBarEngulfTargetTicks := na
+    activeLongCounterTrendStructureExit := false
+    activeLongCounterTrendActivated := false
+    activeLongCounterTrendInitialRisk := na
+    activeLongCounterTrendBestPrice := na
+    activeLongCounterTrendTrailStop := na
+    activeLongCounterTrendTarget := na
+    activeLongRsiCounterTrendMature := false
+    activeLongRsiCounterTrendStructureConfirmed := false
+    activeLongRsiCounterTrendNearTarget := na
+    activeLongRsiCounterTrendNetBreakEven := na
+
+if strategy.position_size >= 0 and strategy.position_size[1] < 0
+    activeShortDivergenceReversalExit := false
+    activeShortDivergenceActivated := false
+    activeShortDivergenceActivationTicks := na
+    activeShortDivergenceTargetTicks := na
+    activeEffortNoResultReversalExit := false
+    activeEffortNoResultActivated := false
+    activeEffortNoResultActivationTicks := na
+    activeEffortNoResultTargetTicks := na
+    activeShortTrendExtension := false
+    activeShortTrendExtensionActivated := false
+    activeShortExtensionActivationTicks := na
+    activeShortExtensionLockTicks := na
+    activeShortExtensionTargetTicks := na
+    activeShortCounterTrendStructureExit := false
+    activeShortCounterTrendActivated := false
+    activeShortCounterTrendInitialRisk := na
+    activeShortCounterTrendBestPrice := na
+    activeShortCounterTrendTrailStop := na
+    activeShortCounterTrendTarget := na
+    activeShortRsiCounterTrendMature := false
+    activeShortRsiCounterTrendStructureConfirmed := false
+    activeShortRsiCounterTrendNearTarget := na
+    activeShortRsiCounterTrendNetBreakEven := na
+
+if strategy.position_size == 0 and strategy.position_size[1] != 0
+    activeEntryAtr := na
+
+activeEntryPrice = strategy.position_size != 0 and not na(activeEntryAtr) ?
+     strategy.position_avg_price : na
+activeEntryAtrUpper = not na(activeEntryPrice) ? activeEntryPrice + activeEntryAtr : na
+activeEntryAtrLower = not na(activeEntryPrice) ? activeEntryPrice - activeEntryAtr : na
+activeEntryAtrColor = strategy.position_size > 0 ? color.rgb(76, 175, 80) : color.rgb(244, 67, 54)
+entryAtrUpperPlot = plot(activeEntryAtrUpper, "Entry +1 ATR", color = color.new(activeEntryAtrColor, 15),
+     linewidth = 1, style = plot.style_linebr)
+plot(activeEntryPrice, "Entry Price", color = activeEntryAtrColor, linewidth = 2, style = plot.style_linebr)
+entryAtrLowerPlot = plot(activeEntryAtrLower, "Entry -1 ATR", color = color.new(activeEntryAtrColor, 15),
+     linewidth = 1, style = plot.style_linebr)
+fill(entryAtrUpperPlot, entryAtrLowerPlot, color = color.new(activeEntryAtrColor, 92), title = "Entry ±1 ATR")
+
+// 使用成交记录上的退出注释识别止盈/止损，避免同根 K 线同时触及两侧时靠价格猜测。
+newClosedTrade = ta.change(strategy.closedtrades) > 0
+bool closedTradeIsStop = false
+bool closedTradeIsProfit = false
+bool closedTradeWasLong = false
+
+if newClosedTrade
+    lastTrade = strategy.closedtrades - 1
+    exitComment = strategy.closedtrades.exit_comment(lastTrade)
+    if exitComment == "SL" or exitComment == "TP" or exitComment == "TP_STRUCT" or
+         exitComment == "TP_EXT" or exitComment == "TP_BE" or
+         exitComment == "DIV_TP" or exitComment == "DIV_BE" or
+         exitComment == "ENG_TP" or exitComment == "ENG_BE" or
+         exitComment == "ENR_TP" or exitComment == "ENR_BE" or exitComment == "BLR_TP" or
+         exitComment == "EMA596_TP" or exitComment == "CT_TRAIL" or
+         exitComment == "CT_V5_BE" or exitComment == "CT_V5_TRAIL" or
+         exitComment == "BOX_TARGET" or exitComment == "STRUCTURE_SL" or
+         exitComment == "BOX_REENTRY" or exitComment == "NET_BE" or
+         exitComment == "2R_ATR_TRAIL" or exitComment == "1R_PARTIAL"
+        exitPrice = strategy.closedtrades.exit_price(lastTrade)
+        exitBarIndex = strategy.closedtrades.exit_bar_index(lastTrade)
+        closedTradeIsStop := exitComment == "SL" or exitComment == "STRUCTURE_SL" or
+             exitComment == "BOX_REENTRY"
+        closedTradeIsProfit := exitComment == "TP" or exitComment == "TP_STRUCT" or
+             exitComment == "TP_EXT" or exitComment == "TP_BE" or
+             exitComment == "DIV_TP" or exitComment == "DIV_BE" or
+             exitComment == "ENG_TP" or exitComment == "ENG_BE" or
+             exitComment == "ENR_TP" or exitComment == "ENR_BE" or exitComment == "BLR_TP" or
+             exitComment == "EMA596_TP" or exitComment == "CT_TRAIL" or
+             exitComment == "CT_V5_BE" or exitComment == "CT_V5_TRAIL" or
+             exitComment == "BOX_TARGET" or exitComment == "NET_BE" or
+             exitComment == "2R_ATR_TRAIL" or exitComment == "1R_PARTIAL"
+        closedTradeEntryId = strategy.closedtrades.entry_id(lastTrade)
+        closedTradeWasLong := str.contains(closedTradeEntryId, "Long") or closedTradeEntryId == "RSB18-L"
+        entrySide = closedTradeWasLong ? "多单" : "空单"
+        exitTitle = exitComment == "SL" ? "止损平仓" :
+             exitComment == "TP_STRUCT" ? "横盘结构止盈" :
+             exitComment == "TP_EXT" ? "趋势扩展止盈" :
+             exitComment == "TP_BE" ? "趋势保本" :
+             exitComment == "DIV_TP" ? "背离止盈" :
+             exitComment == "DIV_BE" ? "背离保本" :
+             exitComment == "ENG_TP" ? "三棒反包止盈" :
+             exitComment == "ENG_BE" ? "三棒反包保本" :
+             exitComment == "ENR_TP" ? "努力无结果止盈" :
+             exitComment == "ENR_BE" ? "努力无结果保本" :
+             exitComment == "BLR_TP" ? "布林中轨结构止盈" :
+             exitComment == "CT_TRAIL" ? "逆势1R移动保护" :
+             exitComment == "CT_V5_BE" ? "成熟逆势成本净保本" :
+             exitComment == "CT_V5_TRAIL" ? "成熟逆势2R宽跟踪" :
+             exitComment == "BOX_TARGET" ? "箱体量度目标止盈" :
+             exitComment == "STRUCTURE_SL" ? "箱体结构止损" :
+             exitComment == "BOX_REENTRY" ? "重新进入箱体退出" :
+             exitComment == "NET_BE" ? "箱体净保本" :
+             exitComment == "2R_ATR_TRAIL" ? "箱体2R后ATR跟踪" :
+             exitComment == "1R_PARTIAL" ? "箱体1R部分止盈" :
+             exitComment == "EMA596_TP" ? "EMA596离轨2R止盈" : "止盈平仓"
+        exitTooltip = exitTitle + " · " + entrySide +
+             "\n价格  " + str.tostring(exitPrice, format.mintick) +
+             "\n结果  " + str.tostring(strategy.closedtrades.profit_percent(lastTrade), "#.##") + "%"
+        f_add_hover_target(exitBarIndex, exitPrice, exitTooltip)
+
+// plotshape 的 tiny 圆点明显小于 label 圆形；方向决定上下位置，颜色只表达止损或止盈。
+plotshape(closedTradeIsStop and closedTradeWasLong, title = "多单止损", style = shape.circle,
+     location = location.belowbar, color = color.red, size = size.tiny, display = display.pane)
+plotshape(closedTradeIsStop and not closedTradeWasLong, title = "空单止损", style = shape.circle,
+     location = location.abovebar, color = color.red, size = size.tiny, display = display.pane)
+plotshape(closedTradeIsProfit and closedTradeWasLong, title = "多单止盈", style = shape.circle,
+     location = location.belowbar, color = color.green, size = size.tiny, display = display.pane)
+plotshape(closedTradeIsProfit and not closedTradeWasLong, title = "空单止盈", style = shape.circle,
+     location = location.abovebar, color = color.green, size = size.tiny, display = display.pane)
+
+// V18 新增家族：冻结 V17 真实箱体右侧触发；V11 同棒优先，变量与退出合同独立。
+const string rangeGroup = "真实箱体"
+const string breakoutGroup = "突破与右侧触发"
+const string riskGroup = "结构风险"
+const string displayGroup = "显示"
+
+rangeLength = input.int(48, "箱体历史 K 线", minval = 24, maxval = 96, group = rangeGroup)
+rangeMaxWidthRatio = input.float(0.03, "最大箱体宽度", minval = 0.005,
+     maxval = 0.10, step = 0.005, group = rangeGroup)
+touchBandRatio = input.float(0.0015, "边界触碰带比例", minval = 0.0001,
+     step = 0.0001, group = rangeGroup)
+touchBandAtr = input.float(0.35, "边界触碰带 ATR", minval = 0.05,
+     step = 0.05, group = rangeGroup)
+containmentMin = input.float(0.80, "最小收盘包含率", minval = 0.50,
+     maxval = 1.0, step = 0.05, group = rangeGroup)
+boundaryDriftMax = input.float(0.003, "前后半段最大边界漂移", minval = 0.0005,
+     step = 0.0005, group = rangeGroup)
+contractionMax = input.float(0.80, "近期/此前真实波幅上限", minval = 0.30,
+     maxval = 1.20, step = 0.05, group = rangeGroup)
+dryVolumeMax = input.float(0.85, "近期/此前均量上限", minval = 0.30,
+     maxval = 1.20, step = 0.05, group = rangeGroup)
+
+breakoutVolumeMultiplier = input.float(1.75, "突破量/箱体中位量", minval = 1.0,
+     step = 0.05, group = breakoutGroup)
+breakoutBodyRatioMin = input.float(0.60, "突破实体占振幅", minval = 0.30,
+     maxval = 1.0, step = 0.05, group = breakoutGroup)
+breakoutBufferAtr = input.float(0.15, "突破缓冲 ATR", minval = 0.0,
+     step = 0.05, group = breakoutGroup)
+breakoutBufferRatio = input.float(0.001, "突破缓冲价格比例", minval = 0.0,
+     step = 0.0001, group = breakoutGroup)
+maxBreakoutDistanceAtr = input.float(0.75, "最大追价距离 ATR", minval = 0.10,
+     step = 0.05, group = breakoutGroup)
+acceptanceWindow = input.int(4, "回踩接受窗口 K 线", minval = 1, maxval = 8,
+     group = breakoutGroup)
+retestBandAtr = input.float(0.20, "回踩带 ATR", minval = 0.0,
+     step = 0.05, group = breakoutGroup)
+triggerWindow = input.int(3, "右侧触发窗口 K 线", minval = 1, maxval = 5,
+     group = breakoutGroup)
+
+stopBufferAtr = input.float(0.15, "结构止损缓冲 ATR", minval = 0.0,
+     step = 0.05, group = riskGroup)
+maxInitialRiskAtr = input.float(1.50, "最大初始风险 ATR", minval = 0.50,
+     step = 0.10, group = riskGroup)
+partialPercent = input.float(33.0, "1R 平仓比例", minval = 1.0,
+     maxval = 80.0, step = 1.0, group = riskGroup)
+costBpsPerSide = input.float(8.0, "预计成本与净保本 bps/边", minval = 0.0,
+     step = 0.5, group = riskGroup)
+trailAtr = input.float(1.0, "2R 后追踪距离 ATR", minval = 0.25,
+     step = 0.25, group = riskGroup)
+
+showCandidateBox = input.bool(true, "显示当前候选箱体", group = displayGroup)
+showFrozenLevels = input.bool(true, "显示冻结触发与保护位", group = displayGroup)
+
+const int recentCompressionLength = 5
+const int minimumTouchGap = 2
+
+f_round_down(price) =>
+    math.floor(price / syminfo.mintick) * syminfo.mintick
+
+f_round_up(price) =>
+    math.ceil(price / syminfo.mintick) * syminfo.mintick
+
+// 最近秩与 Rust 共用 ceil(p * n) - 1；切片只读取当前棒之前的已完成历史。
+f_percentile_slice(source, startOffset, length, percentile) =>
+    samples = array.new_float()
+    for offset = startOffset to startOffset + length - 1
+        array.push(samples, source[offset])
+    array.sort(samples)
+    rank = int(math.max(0, math.min(length - 1, math.ceil(percentile * length) - 1)))
+    array.get(samples, rank)
+
+f_mean_slice(source, startOffset, length) =>
+    total = 0.0
+    for offset = startOffset to startOffset + length - 1
+        total += source[offset]
+    total / length
+
+// 相邻触碰只算一组；再次触碰至少间隔两根 K 线。
+f_touch_groups(source, edge, band, length) =>
+    groups = 0
+    lastTouch = int(na)
+    for offset = 1 to length
+        touches = math.abs(source[offset] - edge) <= band
+        if touches and (na(lastTouch) or offset - lastTouch >= minimumTouchGap)
+            groups += 1
+            lastTouch := offset
+    groups
+
+f_containment(upper, lower, length) =>
+    contained = 0
+    for offset = 1 to length
+        if close[offset] <= upper and close[offset] >= lower
+            contained += 1
+    contained / length
+
+trueRange = ta.tr(true)
+historyReady = bar_index >= rangeLength + 14
+rs18HalfLength = int(math.floor(rangeLength / 2))
+olderHalfLength = rangeLength - rs18HalfLength
+
+candidateUpperRaw = f_percentile_slice(high, 1, rangeLength, 0.85)
+candidateLowerRaw = f_percentile_slice(low, 1, rangeLength, 0.15)
+rs18CandidateUpper = historyReady ? candidateUpperRaw : na
+rs18CandidateLower = historyReady ? candidateLowerRaw : na
+candidateMiddle = (rs18CandidateUpper + rs18CandidateLower) / 2.0
+rs18CandidateHeight = rs18CandidateUpper - rs18CandidateLower
+rs18CandidateWidthRatio = rs18CandidateHeight / candidateMiddle
+rs18TouchBand = math.max(candidateMiddle * touchBandRatio, atr14 * touchBandAtr)
+upperTouchGroupsRaw = f_touch_groups(high, rs18CandidateUpper, rs18TouchBand, rangeLength)
+lowerTouchGroupsRaw = f_touch_groups(low, rs18CandidateLower, rs18TouchBand, rangeLength)
+containmentRaw = f_containment(rs18CandidateUpper, rs18CandidateLower, rangeLength)
+rs18UpperTouchGroups = historyReady ? upperTouchGroupsRaw : 0
+rs18LowerTouchGroups = historyReady ? lowerTouchGroupsRaw : 0
+containment = historyReady ? containmentRaw : 0.0
+
+recentUpperRaw = f_percentile_slice(high, 1, rs18HalfLength, 0.85)
+olderUpperRaw = f_percentile_slice(high, rs18HalfLength + 1, olderHalfLength, 0.85)
+recentLowerRaw = f_percentile_slice(low, 1, rs18HalfLength, 0.15)
+olderLowerRaw = f_percentile_slice(low, rs18HalfLength + 1, olderHalfLength, 0.15)
+rs18RecentUpper = historyReady ? recentUpperRaw : na
+olderUpper = historyReady ? olderUpperRaw : na
+rs18RecentLower = historyReady ? recentLowerRaw : na
+olderLower = historyReady ? olderLowerRaw : na
+upperDrift = math.abs(rs18RecentUpper - olderUpper) / candidateMiddle
+lowerDrift = math.abs(rs18RecentLower - olderLower) / candidateMiddle
+
+priorLength = rangeLength - recentCompressionLength
+recentTrueRangeMeanRaw = f_mean_slice(trueRange, 1, recentCompressionLength)
+olderTrueRangeMeanRaw = f_mean_slice(trueRange, recentCompressionLength + 1, priorLength)
+recentVolumeMeanRaw = f_mean_slice(volume, 1, recentCompressionLength)
+olderVolumeMeanRaw = f_mean_slice(volume, recentCompressionLength + 1, priorLength)
+boxMedianVolumeRaw = f_percentile_slice(volume, 1, rangeLength, 0.50)
+rs18RecentTrueRangeMean = historyReady ? recentTrueRangeMeanRaw : na
+olderTrueRangeMean = historyReady ? olderTrueRangeMeanRaw : na
+recentVolumeMean = historyReady ? recentVolumeMeanRaw : na
+olderVolumeMean = historyReady ? olderVolumeMeanRaw : na
+boxMedianVolume = historyReady ? boxMedianVolumeRaw : na
+
+validBox = historyReady and rs18CandidateHeight > 0 and
+     rs18CandidateWidthRatio <= rangeMaxWidthRatio and rs18UpperTouchGroups >= 2 and
+     rs18LowerTouchGroups >= 2 and containment >= containmentMin and
+     upperDrift <= boundaryDriftMax and lowerDrift <= boundaryDriftMax and
+     olderTrueRangeMean > 0 and
+     rs18RecentTrueRangeMean / olderTrueRangeMean <= contractionMax and
+     olderVolumeMean > 0 and recentVolumeMean / olderVolumeMean <= dryVolumeMax
+
+bodyRatio = candleRange > 0 ? math.abs(close - open) / candleRange : 0.0
+breakoutBufferUpper = math.max(math.max(atr14 * breakoutBufferAtr,
+     rs18CandidateUpper * breakoutBufferRatio), syminfo.mintick)
+breakoutBufferLower = math.max(math.max(atr14 * breakoutBufferAtr,
+     rs18CandidateLower * breakoutBufferRatio), syminfo.mintick)
+volumeBreakout = validBox and boxMedianVolume > 0 and
+     volume >= boxMedianVolume * breakoutVolumeMultiplier
+longBreakout = validBox and close > rs18CandidateUpper + breakoutBufferUpper and
+     close > open and bodyRatio >= breakoutBodyRatioMin and volumeBreakout and
+     (close - rs18CandidateUpper) / atr14 <= maxBreakoutDistanceAtr
+shortBreakout = validBox and close < rs18CandidateLower - breakoutBufferLower and
+     close < open and bodyRatio >= breakoutBodyRatioMin and volumeBreakout and
+     (rs18CandidateLower - close) / atr14 <= maxBreakoutDistanceAtr
+
+var int pendingBreakoutDirection = 0
+var int pendingBreakoutIndex = na
+var float frozenUpper = na
+var float frozenLower = na
+var float frozenAtr = na
+var float frozenBreakoutVolumeRatio = na
+
+var int pendingTriggerDirection = 0
+var int pendingTriggerIndex = na
+var float pendingTriggerPrice = na
+var float pendingTriggerStop = na
+var float pendingTriggerTarget = na
+var float pendingTriggerBoundary = na
+
+var float activeBoundary = na
+var float activeInitialStop = na
+var float activeFinalTarget = na
+var float activeEntry = na
+var float activeRisk = na
+var float activeOneR = na
+var float activeTwoR = na
+var float activeStop = na
+var float bestPrice = na
+var bool partialTaken = false
+var bool oneRCloseConfirmed = false
+var bool twoRCloseConfirmed = false
+
+v18MainEntryOrder = longEntryOrder or shortEntryOrder
+v18DiscardRangeCandidate = v18MainEntryOrder or
+     (strategy.position_size != 0 and not rangeSqueezeV18Position)
+if barstate.isconfirmed and v18DiscardRangeCandidate
+    strategy.cancel("RSB18-L")
+    strategy.cancel("RSB18-S")
+    pendingBreakoutDirection := 0
+    pendingBreakoutIndex := na
+    pendingTriggerDirection := 0
+    pendingTriggerIndex := na
+    pendingTriggerPrice := na
+    pendingTriggerStop := na
+    pendingTriggerTarget := na
+    pendingTriggerBoundary := na
+    if not rangeSqueezeV18Position
+        activeBoundary := na
+        activeInitialStop := na
+        activeFinalTarget := na
+
+if barstate.isconfirmed and strategy.position_size == 0 and not v18MainEntryOrder
+    if pendingTriggerDirection != 0
+        triggerAge = bar_index - pendingTriggerIndex
+        triggerStopTouched = pendingTriggerDirection == 1 ?
+             low <= pendingTriggerStop : high >= pendingTriggerStop
+        triggerCloseReentered = pendingTriggerDirection == 1 ?
+             close <= pendingTriggerBoundary : close >= pendingTriggerBoundary
+        if strategy.closedtrades > strategy.closedtrades[1] or triggerStopTouched or
+             triggerCloseReentered or triggerAge >= triggerWindow
+            strategy.cancel(pendingTriggerDirection == 1 ? "RSB18-L" : "RSB18-S")
+            pendingTriggerDirection := 0
+            pendingTriggerIndex := na
+            pendingTriggerPrice := na
+            pendingTriggerStop := na
+            pendingTriggerTarget := na
+            pendingTriggerBoundary := na
+            activeBoundary := na
+            activeInitialStop := na
+            activeFinalTarget := na
+    else if pendingBreakoutDirection == 0
+        if longBreakout
+            pendingBreakoutDirection := 1
+            pendingBreakoutIndex := bar_index
+            frozenUpper := rs18CandidateUpper
+            frozenLower := rs18CandidateLower
+            frozenAtr := atr14
+            frozenBreakoutVolumeRatio := volume / boxMedianVolume
+        else if shortBreakout
+            pendingBreakoutDirection := -1
+            pendingBreakoutIndex := bar_index
+            frozenUpper := rs18CandidateUpper
+            frozenLower := rs18CandidateLower
+            frozenAtr := atr14
+            frozenBreakoutVolumeRatio := volume / boxMedianVolume
+    else if bar_index > pendingBreakoutIndex
+        pendingAge = bar_index - pendingBreakoutIndex
+        expired = pendingAge > acceptanceWindow
+        invalidated = pendingBreakoutDirection == 1 ?
+             close <= frozenUpper : close >= frozenLower
+        if expired or invalidated
+            pendingBreakoutDirection := 0
+            pendingBreakoutIndex := na
+        else
+            retested = pendingBreakoutDirection == 1 ?
+                 low <= frozenUpper + retestBandAtr * frozenAtr :
+                 high >= frozenLower - retestBandAtr * frozenAtr
+            if retested
+                rawStop = pendingBreakoutDirection == 1 ?
+                     math.min(low, frozenUpper) - stopBufferAtr * frozenAtr :
+                     math.max(high, frozenLower) + stopBufferAtr * frozenAtr
+                roundedStop = pendingBreakoutDirection == 1 ?
+                     f_round_down(rawStop) : f_round_up(rawStop)
+                measuredTarget = pendingBreakoutDirection == 1 ?
+                     f_round_down(frozenUpper + frozenUpper - frozenLower) :
+                     f_round_up(frozenLower - (frozenUpper - frozenLower))
+                triggerPrice = pendingBreakoutDirection == 1 ?
+                     f_round_up(high + syminfo.mintick) :
+                     f_round_down(low - syminfo.mintick)
+                acceptanceRisk = math.abs(close - roundedStop)
+                acceptanceReward = pendingBreakoutDirection == 1 ?
+                     measuredTarget - close : close - measuredTarget
+                acceptanceR = acceptanceRisk > 0 ?
+                     acceptanceReward / acceptanceRisk : 0.0
+                expectedRisk = math.abs(triggerPrice - roundedStop)
+                expectedReward = pendingBreakoutDirection == 1 ?
+                     measuredTarget - triggerPrice : triggerPrice - measuredTarget
+                expectedR = expectedRisk > 0 ? expectedReward / expectedRisk : 0.0
+                projectedCost = 2.0 * triggerPrice * costBpsPerSide / 10000.0
+                projectedCostR = expectedRisk > 0 ? projectedCost / expectedRisk : 1000000.0
+                acceptanceValid = acceptanceRisk > 0 and
+                     acceptanceRisk <= maxInitialRiskAtr * frozenAtr and
+                     acceptanceReward > 0 and acceptanceR >= 1.80
+                triggerValid = expectedRisk > 0 and
+                     expectedRisk <= maxInitialRiskAtr * frozenAtr and
+                     expectedReward > 0
+                if acceptanceValid and triggerValid
+                    pendingTriggerDirection := pendingBreakoutDirection
+                    pendingTriggerIndex := bar_index
+                    pendingTriggerPrice := triggerPrice
+                    pendingTriggerStop := roundedStop
+                    pendingTriggerTarget := measuredTarget
+                    pendingTriggerBoundary := pendingBreakoutDirection == 1 ?
+                         frozenUpper : frozenLower
+                    activeBoundary := pendingTriggerBoundary
+                    activeInitialStop := pendingTriggerStop
+                    activeFinalTarget := pendingTriggerTarget
+                    if pendingTriggerDirection == 1
+                        strategy.entry("RSB18-L", strategy.long, stop = pendingTriggerPrice,
+                             comment = "range_squeeze_right_side_trigger_ablation_long_15m_v18")
+                        strategy.exit("RSB18-L-REST", from_entry = "RSB18-L",
+                             stop = pendingTriggerStop, limit = pendingTriggerTarget,
+                             qty_percent = 100, comment_profit = "BOX_TARGET",
+                             comment_loss = "STRUCTURE_SL")
+                        label.new(bar_index, low, "△", yloc = yloc.belowbar,
+                             color = color.new(color.green, 10), textcolor = color.white,
+                             style = label.style_label_up, size = size.small,
+                             tooltip = "多头右侧候选\n触发 " +
+                             str.tostring(pendingTriggerPrice) + "\n止损 " +
+                             str.tostring(pendingTriggerStop) + "\n目标 " +
+                             str.tostring(pendingTriggerTarget) + "\nV15接受 " +
+                             str.tostring(acceptanceR, "#.##") + "R\n触发后 " +
+                             str.tostring(expectedR, "#.##") + "R\n成本诊断 " +
+                             str.tostring(projectedCostR, "#.##") + "R")
+                    else
+                        strategy.entry("RSB18-S", strategy.short, stop = pendingTriggerPrice,
+                             comment = "range_squeeze_right_side_trigger_ablation_short_15m_v18")
+                        strategy.exit("RSB18-S-REST", from_entry = "RSB18-S",
+                             stop = pendingTriggerStop, limit = pendingTriggerTarget,
+                             qty_percent = 100, comment_profit = "BOX_TARGET",
+                             comment_loss = "STRUCTURE_SL")
+                        label.new(bar_index, high, "▽", yloc = yloc.abovebar,
+                             color = color.new(color.red, 10), textcolor = color.white,
+                             style = label.style_label_down, size = size.small,
+                             tooltip = "空头右侧候选\n触发 " +
+                             str.tostring(pendingTriggerPrice) + "\n止损 " +
+                             str.tostring(pendingTriggerStop) + "\n目标 " +
+                             str.tostring(pendingTriggerTarget) + "\nV15接受 " +
+                             str.tostring(acceptanceR, "#.##") + "R\n触发后 " +
+                             str.tostring(expectedR, "#.##") + "R\n成本诊断 " +
+                             str.tostring(projectedCostR, "#.##") + "R")
+                pendingBreakoutDirection := 0
+                pendingBreakoutIndex := na
+
+newPosition = rangeSqueezeV18Position and not rangeSqueezeV18Position[1]
+if newPosition
+    activeEntryAtr := frozenAtr
+    pendingTriggerDirection := 0
+    pendingTriggerIndex := na
+    pendingTriggerPrice := na
+    pendingTriggerStop := na
+    pendingTriggerTarget := na
+    pendingTriggerBoundary := na
+    activeEntry := strategy.position_avg_price
+    activeRisk := math.abs(activeEntry - activeInitialStop)
+    activeOneR := strategy.position_size > 0 ?
+         activeEntry + activeRisk : activeEntry - activeRisk
+    activeTwoR := strategy.position_size > 0 ?
+         activeEntry + 2.0 * activeRisk : activeEntry - 2.0 * activeRisk
+    activeStop := activeInitialStop
+    bestPrice := activeEntry
+    partialTaken := false
+    oneRCloseConfirmed := false
+    twoRCloseConfirmed := false
+
+if rangeSqueezeV18Position and activeRisk > 0
+    bestPrice := strategy.position_size > 0 ?
+         math.max(bestPrice, high) : math.min(bestPrice, low)
+    partialTaken := partialTaken or math.abs(strategy.position_size) < 0.999
+    oneRCloseConfirmed := oneRCloseConfirmed or
+         (strategy.position_size > 0 ? close >= activeOneR : close <= activeOneR)
+    twoRCloseConfirmed := twoRCloseConfirmed or
+         (strategy.position_size > 0 ? close >= activeTwoR : close <= activeTwoR)
+
+    costRate = costBpsPerSide / 10000.0
+    netBreakEven = strategy.position_size > 0 ?
+         f_round_up(activeEntry * (1.0 + costRate) / (1.0 - costRate)) :
+         f_round_down(activeEntry * (1.0 - costRate) / (1.0 + costRate))
+    if oneRCloseConfirmed
+        activeStop := strategy.position_size > 0 ?
+             math.max(activeStop, netBreakEven) : math.min(activeStop, netBreakEven)
+    if twoRCloseConfirmed
+        trailing = strategy.position_size > 0 ?
+             f_round_down(bestPrice - trailAtr * atr14) :
+             f_round_up(bestPrice + trailAtr * atr14)
+        activeStop := strategy.position_size > 0 ?
+             math.max(activeStop, trailing) : math.min(activeStop, trailing)
+
+    if strategy.position_size > 0
+        if not partialTaken
+            strategy.exit("RSB18-L-1R", from_entry = "RSB18-L", stop = activeStop,
+                 limit = activeOneR, qty_percent = partialPercent,
+                 comment_profit = "1R_PARTIAL")
+        else
+            strategy.cancel("RSB18-L-1R")
+        strategy.exit("RSB18-L-REST", from_entry = "RSB18-L", stop = activeStop,
+             limit = activeFinalTarget, qty_percent = 100,
+             comment_profit = "BOX_TARGET",
+             comment_loss = twoRCloseConfirmed ? "2R_ATR_TRAIL" :
+             oneRCloseConfirmed ? "NET_BE" : "STRUCTURE_SL")
+        if close <= activeBoundary
+            strategy.close("RSB18-L", comment = "BOX_REENTRY")
+    else
+        if not partialTaken
+            strategy.exit("RSB18-S-1R", from_entry = "RSB18-S", stop = activeStop,
+                 limit = activeOneR, qty_percent = partialPercent,
+                 comment_profit = "1R_PARTIAL")
+        else
+            strategy.cancel("RSB18-S-1R")
+        strategy.exit("RSB18-S-REST", from_entry = "RSB18-S", stop = activeStop,
+             limit = activeFinalTarget, qty_percent = 100,
+             comment_profit = "BOX_TARGET",
+             comment_loss = twoRCloseConfirmed ? "2R_ATR_TRAIL" :
+             oneRCloseConfirmed ? "NET_BE" : "STRUCTURE_SL")
+        if close >= activeBoundary
+            strategy.close("RSB18-S", comment = "BOX_REENTRY")
+
+closedPosition = not rangeSqueezeV18Position and rangeSqueezeV18Position[1]
+if closedPosition
+    activeBoundary := na
+    activeInitialStop := na
+    activeFinalTarget := na
+    activeEntry := na
+    activeRisk := na
+    activeOneR := na
+    activeTwoR := na
+    activeStop := na
+    bestPrice := na
+    partialTaken := false
+    oneRCloseConfirmed := false
+    twoRCloseConfirmed := false
+
+candidateColor = validBox ? color.new(color.blue, 65) : color.new(color.gray, 90)
+plot(showCandidateBox and validBox and pendingBreakoutDirection == 0 and
+     pendingTriggerDirection == 0 ? rs18CandidateUpper : na,
+     "候选箱体上沿", color = candidateColor, linewidth = 1)
+plot(showCandidateBox and validBox and pendingBreakoutDirection == 0 and
+     pendingTriggerDirection == 0 ? rs18CandidateLower : na,
+     "候选箱体下沿", color = candidateColor, linewidth = 1)
+plot(showFrozenLevels and pendingTriggerDirection != 0 ? pendingTriggerPrice : na,
+     "右侧触发价", color = color.new(color.blue, 0), linewidth = 2,
+     style = plot.style_linebr)
+plot(showFrozenLevels and
+     (pendingTriggerDirection != 0 or strategy.position_size != 0) ?
+     activeInitialStop : na, "冻结结构止损", color = color.new(color.red, 0),
+     linewidth = 1, style = plot.style_linebr)
+plot(showFrozenLevels and
+     (pendingTriggerDirection != 0 or strategy.position_size != 0) ?
+     activeFinalTarget : na, "冻结量度目标", color = color.new(color.green, 0),
+     linewidth = 1, style = plot.style_linebr)

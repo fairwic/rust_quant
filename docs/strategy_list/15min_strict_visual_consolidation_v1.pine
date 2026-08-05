@@ -1,0 +1,275 @@
+//@version=6
+// 仅用于 TradingView 视觉标注：不产生交易信号，也不得作为 V29 的新增开仓门禁。
+// 区间只由已完成 K 线确认；首次确认标记明确显示该区域从何时起才对当时交易者可见。
+indicator("15m Strict Visual Consolidation V1", overlay = true, max_bars_back = 200,
+     max_boxes_count = 100, max_lines_count = 200, max_labels_count = 300)
+
+const string qualityGroup = "严格横盘质量"
+const string displayGroup = "显示"
+
+maximumCandidateLength = input.int(96, "最长候选 K 线", minval = 8, maxval = 96,
+     group = qualityGroup,
+     tooltip = "按 8、12、16、24、32、48、64、96 根候选逐级选择最长有效父区间。")
+maximumWidthRatio = input.float(0.03, "最大区间宽度", minval = 0.005, maxval = 0.10,
+     step = 0.005, group = qualityGroup)
+minimumContainmentRatio = input.float(0.80, "最小收盘容纳率", minval = 0.50,
+     maxval = 1.00, step = 0.05, group = qualityGroup)
+maximumDirectionEfficiency = input.float(0.35, "最大方向效率", minval = 0.05,
+     maxval = 1.00, step = 0.05, group = qualityGroup,
+     tooltip = "净位移/完整收盘路径。越接近 1 越像单边推进，越接近 0 越像往返震荡。")
+minimumEdgeTransitions = input.int(3, "最少上下沿交替次数", minval = 1, maxval = 8,
+     group = qualityGroup,
+     tooltip = "默认至少形成 L→U→L→U 或 U→L→U→L；同一根同时触及两侧不补造盘中顺序。")
+maximumUpperDrift = input.float(0.25, "上沿最大漂移/区间高度", minval = 0.05,
+     maxval = 1.00, step = 0.05, group = qualityGroup)
+maximumLowerDrift = input.float(0.35, "下沿最大漂移/区间高度", minval = 0.05,
+     maxval = 1.00, step = 0.05, group = qualityGroup)
+
+maximumVisibleZones = input.int(30, "最多保留区间", minval = 5, maxval = 80,
+     group = displayGroup)
+showConfirmationMarkers = input.bool(true, "显示首次确认", group = displayGroup)
+showBoundaryBreakMarkers = input.bool(true, "显示收盘离开区间", group = displayGroup)
+zoneColor = input.color(color.new(color.blue, 82), "区间颜色", group = displayGroup)
+upperColor = input.color(color.new(color.red, 5), "上沿颜色", group = displayGroup)
+lowerColor = input.color(color.new(color.lime, 5), "下沿颜色", group = displayGroup)
+
+const int minimumTouchGap = 2
+const float touchBandHeightRatio = 0.10
+const float transitionBandHeightRatio = 0.20
+
+// 视觉扫描只取一组离散父区间长度，减少每根 K 线重复排序的成本，同时保留 8～96 根结构尺度。
+var array<int> candidateLengths = array.from(8, 12, 16, 24, 32, 48, 64, 96)
+
+// 使用最近秩计算稳健边界，孤立长影线不会单独把整个区间抬高或压低。
+f_percentile(source, startOffset, length, percentile) =>
+    samples = array.new_float(0)
+    for sampleIndex = 0 to length - 1
+        array.push(samples, source[startOffset + sampleIndex])
+    array.sort(samples)
+    rank = int(math.max(0, math.min(length - 1, math.ceil(percentile * length) - 1)))
+    array.get(samples, rank)
+
+// 相邻贴边棒属于同一触碰组；上下沿分别按“进入边界带”判断，不排除越界影线。
+f_touch_groups(source, edge, band, length, upperEdge) =>
+    groups = 0
+    lastTouchIndex = int(na)
+    for chronologicalIndex = 0 to length - 1
+        offset = length - 1 - chronologicalIndex
+        touches = upperEdge ? source[offset] >= edge - band : source[offset] <= edge + band
+        if touches
+            if na(lastTouchIndex) or chronologicalIndex - lastTouchIndex >= minimumTouchGap
+                groups += 1
+            lastTouchIndex := chronologicalIndex
+    groups
+
+// 容纳率允许少数影线或轻微收盘越界，但不允许大部分价格路径处于区间之外。
+f_containment_ratio(upper, lower, band, length) =>
+    contained = 0
+    for offset = 0 to length - 1
+        if close[offset] <= upper + band and close[offset] >= lower - band
+            contained += 1
+    contained / length
+
+// 净位移除以逐棒收盘路径；单边修复接近 1，反复来回接近 0。
+f_direction_efficiency(length) =>
+    pathLength = 0.0
+    for chronologicalIndex = 1 to length - 1
+        olderOffset = length - chronologicalIndex
+        newerOffset = olderOffset - 1
+        pathLength += math.abs(close[newerOffset] - close[olderOffset])
+    netDisplacement = math.abs(close - close[length - 1])
+    pathLength <= 0 ? 0.0 : netDisplacement / pathLength
+
+// 只统计按时间顺序发生的独立上下沿切换；一根同时扫到两侧时，OHLC 无法证明先后顺序。
+f_edge_transition_count(upper, lower, length) =>
+    edgeBand = math.max(syminfo.mintick * 2.0, (upper - lower) * transitionBandHeightRatio)
+    previousEdge = 0
+    transitions = 0
+    for chronologicalIndex = 0 to length - 1
+        offset = length - 1 - chronologicalIndex
+        touchesUpper = high[offset] >= upper - edgeBand
+        touchesLower = low[offset] <= lower + edgeBand
+        edge = touchesUpper and not touchesLower ? 1 : touchesLower and not touchesUpper ? -1 : 0
+        if edge != 0
+            if previousEdge != 0 and edge != previousEdge
+                transitions += 1
+            previousEdge := edge
+    transitions
+
+// 固定长度候选必须同时满足宽度、双边触碰、容纳、边界稳定、方向效率和真实往返六类证据。
+f_evaluate_range(length) =>
+    upper = f_percentile(high, 0, length, 0.90)
+    lower = f_percentile(low, 0, length, 0.10)
+    height = upper - lower
+    middle = (upper + lower) * 0.5
+    halfLength = int(math.floor(length * 0.5))
+    recentLength = length - halfLength
+    touchBand = math.max(syminfo.mintick * 2.0, height * touchBandHeightRatio)
+
+    upperTouchGroups = f_touch_groups(high, upper, touchBand, length, true)
+    lowerTouchGroups = f_touch_groups(low, lower, touchBand, length, false)
+    containmentRatio = f_containment_ratio(upper, lower, touchBand, length)
+    recentUpper = f_percentile(high, 0, recentLength, 0.80)
+    earlierUpper = f_percentile(high, recentLength, halfLength, 0.80)
+    recentLower = f_percentile(low, 0, recentLength, 0.20)
+    earlierLower = f_percentile(low, recentLength, halfLength, 0.20)
+    upperDrift = height > 0 ? math.abs(recentUpper - earlierUpper) / height : 1.0
+    lowerDrift = height > 0 ? math.abs(recentLower - earlierLower) / height : 1.0
+    directionEfficiency = f_direction_efficiency(length)
+    edgeTransitions = f_edge_transition_count(upper, lower, length)
+
+    valid = height > 0 and middle > 0 and height / middle <= maximumWidthRatio and
+         upperTouchGroups >= 2 and lowerTouchGroups >= 2 and
+         containmentRatio >= minimumContainmentRatio and upperDrift <= maximumUpperDrift and
+         lowerDrift <= maximumLowerDrift and directionEfficiency <= maximumDirectionEfficiency and
+         edgeTransitions >= minimumEdgeTransitions
+    [valid, upper, lower, containmentRatio, directionEfficiency, edgeTransitions,
+         upperTouchGroups, lowerTouchGroups, upperDrift, lowerDrift]
+
+selectedValid = false
+selectedLength = 0
+selectedUpper = float(na)
+selectedLower = float(na)
+selectedContainment = float(na)
+selectedDirectionEfficiency = float(na)
+selectedEdgeTransitions = 0
+selectedUpperTouches = 0
+selectedLowerTouches = 0
+selectedUpperDrift = float(na)
+selectedLowerDrift = float(na)
+
+// 每根完整 K 线只选择最长有效父区间；未收盘实时棒不会产生或修改任何图形。
+if barstate.isconfirmed
+    for candidateIndex = 0 to array.size(candidateLengths) - 1
+        candidateLength = array.get(candidateLengths, candidateIndex)
+        if candidateLength <= maximumCandidateLength and bar_index >= candidateLength - 1
+            [candidateValid, candidateUpper, candidateLower, candidateContainment,
+                 candidateDirectionEfficiency, candidateEdgeTransitions, candidateUpperTouches,
+                 candidateLowerTouches, candidateUpperDrift, candidateLowerDrift] =
+                 f_evaluate_range(candidateLength)
+            if candidateValid
+                selectedValid := true
+                selectedLength := candidateLength
+                selectedUpper := candidateUpper
+                selectedLower := candidateLower
+                selectedContainment := candidateContainment
+                selectedDirectionEfficiency := candidateDirectionEfficiency
+                selectedEdgeTransitions := candidateEdgeTransitions
+                selectedUpperTouches := candidateUpperTouches
+                selectedLowerTouches := candidateLowerTouches
+                selectedUpperDrift := candidateUpperDrift
+                selectedLowerDrift := candidateLowerDrift
+
+var bool active = false
+var int activeStartIndex = na
+var int activeEvidenceLength = na
+var float activeUpper = na
+var float activeLower = na
+var box activeBox = na
+var line activeUpperLine = na
+var line activeLowerLine = na
+var label activeConfirmationLabel = na
+var int lastClosedIndex = na
+
+var array<box> storedBoxes = array.new_box(0)
+var array<line> storedUpperLines = array.new_line(0)
+var array<line> storedLowerLines = array.new_line(0)
+var array<label> storedConfirmationLabels = array.new_label(0)
+var array<label> storedBreakLabels = array.new_label(0)
+
+justClosed = false
+
+if barstate.isconfirmed and active
+    closedAbove = close > activeUpper
+    closedBelow = close < activeLower
+    if closedAbove or closedBelow
+        finalRight = math.max(activeStartIndex, bar_index - 1)
+        box.set_right(activeBox, finalRight)
+        line.set_x2(activeUpperLine, finalRight)
+        line.set_x2(activeLowerLine, finalRight)
+        if showBoundaryBreakMarkers
+            breakText = closedAbove ? "收盘上破" : "收盘下破"
+            breakColor = closedAbove ? color.new(color.green, 10) : color.new(color.red, 10)
+            breakY = closedAbove ? high : low
+            breakStyle = closedAbove ? label.style_label_down : label.style_label_up
+            breakLabel = label.new(bar_index, breakY, breakText, yloc = yloc.price, style = breakStyle,
+                 color = breakColor, textcolor = color.white, size = size.tiny,
+                 tooltip = "仅表示价格收盘离开视觉区间，不是 V29 或任何交易策略信号。")
+            if array.size(storedBreakLabels) > 0
+                array.set(storedBreakLabels, array.size(storedBreakLabels) - 1, breakLabel)
+        active := false
+        lastClosedIndex := bar_index
+        activeStartIndex := na
+        activeEvidenceLength := na
+        activeUpper := na
+        activeLower := na
+        activeBox := na
+        activeUpperLine := na
+        activeLowerLine := na
+        activeConfirmationLabel := na
+        justClosed := true
+    else
+        selectedStartIndex = selectedValid ? bar_index - selectedLength + 1 : bar_index
+        overlapsActive = selectedValid and selectedUpper >= activeLower and selectedLower <= activeUpper
+        upgradesParent = overlapsActive and selectedStartIndex < activeStartIndex
+        if upgradesParent
+            activeStartIndex := selectedStartIndex
+            activeEvidenceLength := selectedLength
+            activeUpper := selectedUpper
+            activeLower := selectedLower
+            if not na(activeConfirmationLabel)
+                label.set_text(activeConfirmationLabel, "横盘确认\n" + str.tostring(activeEvidenceLength) + "根父区间")
+                label.set_tooltip(activeConfirmationLabel,
+                     "首次确认后发现更长的有效父区间；边界只由当时已完成 K 线更新。")
+        box.set_lefttop(activeBox, activeStartIndex, activeUpper)
+        box.set_rightbottom(activeBox, bar_index, activeLower)
+        line.set_xy1(activeUpperLine, activeStartIndex, activeUpper)
+        line.set_xy2(activeUpperLine, bar_index, activeUpper)
+        line.set_xy1(activeLowerLine, activeStartIndex, activeLower)
+        line.set_xy2(activeLowerLine, bar_index, activeLower)
+
+selectedStartIndex = selectedValid ? bar_index - selectedLength + 1 : bar_index
+startsAfterPreviousBreak = na(lastClosedIndex) or selectedStartIndex > lastClosedIndex
+
+// 已离开的旧区间不得被下一根的重叠窗口重新包装；新横盘必须从离开后重新积累完整证据。
+if barstate.isconfirmed and not active and not justClosed and selectedValid and startsAfterPreviousBreak
+    active := true
+    activeStartIndex := bar_index - selectedLength + 1
+    activeEvidenceLength := selectedLength
+    activeUpper := selectedUpper
+    activeLower := selectedLower
+    activeBox := box.new(activeStartIndex, activeUpper, bar_index, activeLower,
+         xloc = xloc.bar_index, border_color = color.new(zoneColor, 100), bgcolor = zoneColor)
+    activeUpperLine := line.new(activeStartIndex, activeUpper, bar_index, activeUpper,
+         xloc = xloc.bar_index, extend = extend.none, color = upperColor,
+         style = line.style_dashed, width = 1)
+    activeLowerLine := line.new(activeStartIndex, activeLower, bar_index, activeLower,
+         xloc = xloc.bar_index, extend = extend.none, color = lowerColor,
+         style = line.style_dashed, width = 1)
+    activeConfirmationLabel := showConfirmationMarkers ?
+         label.new(bar_index, activeUpper, "横盘确认\n" + str.tostring(selectedLength) + "根",
+             yloc = yloc.price, style = label.style_label_down, color = color.new(color.blue, 15),
+             textcolor = color.white, size = size.tiny,
+             tooltip = "首次可见：本棒收盘后\n上/下触碰组 " +
+                  str.tostring(selectedUpperTouches) + "/" + str.tostring(selectedLowerTouches) +
+                  "\n边界交替 " + str.tostring(selectedEdgeTransitions) +
+                  "\n容纳率 " + str.tostring(selectedContainment * 100.0, "#.0") + "%" +
+                  "\n方向效率 " + str.tostring(selectedDirectionEfficiency, "#.00") +
+                  "\n上/下沿漂移 " + str.tostring(selectedUpperDrift, "#.00") + "/" +
+                  str.tostring(selectedLowerDrift, "#.00")) : na
+
+    array.push(storedBoxes, activeBox)
+    array.push(storedUpperLines, activeUpperLine)
+    array.push(storedLowerLines, activeLowerLine)
+    array.push(storedConfirmationLabels, activeConfirmationLabel)
+    array.push(storedBreakLabels, na)
+    if array.size(storedBoxes) > maximumVisibleZones
+        box.delete(array.shift(storedBoxes))
+        line.delete(array.shift(storedUpperLines))
+        line.delete(array.shift(storedLowerLines))
+        expiredConfirmationLabel = array.shift(storedConfirmationLabels)
+        if not na(expiredConfirmationLabel)
+            label.delete(expiredConfirmationLabel)
+        expiredBreakLabel = array.shift(storedBreakLabels)
+        if not na(expiredBreakLabel)
+            label.delete(expiredBreakLabel)

@@ -24,4 +24,5 @@ pub mod market_worker;
 pub mod okx_historical_15m_backfill;
 pub mod okx_historical_universe;
 pub mod signal_worker;
+pub mod tradingview_velocity_parity;
 pub mod vegas_bear_failed_compressed_reclaim_research;

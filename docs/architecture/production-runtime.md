@@ -36,7 +36,7 @@ Core 保持同一仓库、同一 `core-runtime` image 和同一 `quant_core` own
 
 `schema-tool`、paper observation、全市场只读成交量观察和大范围历史 backfill 必须通过独立工件的 profile/短生命周期 Job 显式启动，不计入默认长期拓扑，也不得出现在 `core-runtime` binary allowlist。旧的按策略、preset 和 scheduler 拆分的容器只保留在 `legacy-runtime` profile，供一次性迁移回退，不得与新角色并跑消费同一任务。
 
-Topology rollout T1 只完成运行入口收敛，不代表 Account、Execution 与 Reconciliation 的目标业务边界已经全部迁移。任何尚未迁完的 legacy 例外必须只记录在对应 Migration Manifest/Evidence 中，不能因为 T1 正在进行而成为长期运行能力或新的调用入口：
+Topology rollout T1 只完成运行入口收敛，不代表 Account、Execution 与 Reconciliation 的目标业务边界已经全部迁移。任何尚未迁完的 legacy 例外必须登记到能力总账和对应 Domain Wave Evidence，不能因为 T1 正在进行而成为长期运行能力或新的调用入口：
 
 - `account-worker` 的目标边界是 AccountProjection、ExchangeSession 与持续 Risk 输入，绝不持有 OMS Outbox 或直接 mutation capability；
 - `reconciliation-worker` 的目标边界是差异检测、恢复编排与 typed owner command，不是 report replay 的别名；

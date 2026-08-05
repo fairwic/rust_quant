@@ -1,16 +1,17 @@
 use super::equity_stats::{analyze_profit_losses, format_optional_f64, trade_sharpe};
+use super::filtered_volume_rsi_ema_macd::FILTERED_VOLUME_V3_INVALID_AT_FILL_STOP_SOURCE;
 use super::{
-    runner_exit_for_target, select_stop_loss_for_confirmed_signal, volume_atr_target_r_with_policy,
-    BacktestCandle, ConfirmedEvent, MarketVelocityEventBacktestArgs, MarketVelocityTradeDirection,
-    RunnerExit,
+    effective_target_r_for_confirmed_signal, is_filtered_volume_weekly_base_version,
+    runner_exit_for_target, select_stop_loss_for_confirmed_signal,
+    uses_target_completion_profit_observation, uses_trend_managed_volume_trailing_exit,
+    BacktestCandle, CompletedCandleEntrySignalEvidence, ConfirmedEvent,
+    MarketVelocityEventBacktestArgs, MarketVelocityTradeDirection, RunnerExit,
 };
-use anyhow::{Context, Result};
-use chrono::{DateTime, FixedOffset, NaiveDateTime, TimeZone, Utc};
-use rust_quant_domain::entities::BacktestDetail;
+use chrono::{FixedOffset, TimeZone, Utc};
 use rust_quant_domain::SignalDirection;
 use rust_quant_strategies::framework::backtest::{
     run_indicator_strategy_backtest, BasicRiskStrategyConfig, IndicatorStrategyBacktest,
-    SignalResult, TradeRecord,
+    SignalResult, TradeRecord, IMMEDIATE_EXIT_AT_ENTRY_ADJUSTMENT,
 };
 use rust_quant_strategies::CandleItem;
 use serde_json::{json, Value};
@@ -18,16 +19,19 @@ use std::collections::{BTreeMap, HashMap};
 mod detail;
 mod market_structure_features;
 mod price_volume_diagnostics;
+pub(super) mod profit_observation;
+mod profit_observation_replay;
 mod replay_candles;
 mod replay_strategy;
-use detail::{market_velocity_detail_signal_value, market_velocity_detail_signal_value_for_leg};
+mod volume_atr_trailing_replay;
 pub use detail::{
-    market_velocity_risk_config_detail, market_velocity_strategy_detail,
-    market_velocity_strategy_type,
+    build_market_velocity_backtest_details, market_velocity_risk_config_detail,
+    market_velocity_strategy_detail, market_velocity_strategy_type,
 };
 use market_structure_features::push_market_structure_feature_reports;
 use price_volume_diagnostics::print_price_volume_diagnostic_reports;
 use replay_candles::{framework_replay_candle_items, replay_entry_candle_ts};
+use volume_atr_trailing_replay::VolumeAtrTrailingReplayState;
 const INITIAL_FUND_PER_SYMBOL: f64 = 100.0;
 #[derive(Debug, Clone, PartialEq)]
 pub struct FrameworkEquityReport {
@@ -149,6 +153,8 @@ pub struct FrameworkEquityTradeReport {
     pub initial_risk_amount: Option<f64>,
     /// 扣除回测成本后的本笔固定初始 R；为空时表示退出路径未提供该口径。
     pub net_profit_r: Option<f64>,
+    /// 入场时最终选中的止损来源，用于区分 ATR、吞没和长影线风险规则。
+    pub initial_stop_source: Option<String>,
     /// 数量。
     pub quantity: f64,
     /// outcome，用于展示或持久化查询结果。
@@ -161,6 +167,14 @@ pub struct FrameworkEquityTradeReport {
     pub delta_rank: i32,
     /// 价格涨跌幅百分比。
     pub price_change_pct: f64,
+    /// 信号时点冻结的过滤量比和 RSI/EMA/MACD 指标证据。
+    pub entry_signal_evidence: Option<CompletedCandleEntrySignalEvidence>,
+    /// 平仓信号自己的状态机证据；不得用开仓快照覆盖。
+    pub close_signal_value: Option<String>,
+    /// 平仓时实际生效的止损来源，可能是目标完成比例动态保护。
+    pub close_stop_loss_source: Option<String>,
+    /// 框架记录的逐次止损更新历史。
+    pub stop_loss_update_history: Option<String>,
     /// 列表数据。
     pub close_legs: Vec<FrameworkEquityCloseLegReport>,
 }
@@ -230,6 +244,8 @@ struct ReplayEntry {
     stop_loss_source: String,
     /// 本次交易实际使用的止盈 R；动态 ATR 模式下逐笔计算。
     target_r: f64,
+    /// v12 持仓放量保护的冻结 ATR、目标和成本状态；旧版本为空。
+    volume_atr_trailing: Option<VolumeAtrTrailingReplayState>,
 }
 #[derive(Debug, Clone, PartialEq)]
 struct ReplayActivePosition {
@@ -255,6 +271,10 @@ struct ReplayActivePosition {
     profit_protected: bool,
     /// observedK 线，用于记录交易或执行状态。
     observed_candles: usize,
+    /// 仅在 v7/v8 启用的逐笔目标完成比例状态。
+    profit_observation: Option<profit_observation::ProfitObservationState>,
+    /// v12 的逐笔放量台阶；只在实际更新止损后推进级别。
+    volume_atr_trailing: Option<VolumeAtrTrailingReplayState>,
 }
 #[derive(Debug, Clone, PartialEq)]
 struct ReplayOpenTrade {
@@ -286,6 +306,10 @@ struct MarketVelocityReplayStrategy {
     /// 最大持仓毫秒数；为空时保留历史上的无限制权益回放。
     max_holding_ms: Option<i64>,
     ignore_entry_signal_updates_while_open: bool,
+    /// 下一根开盘成交的版本必须在入场 K 线内立即检查固定保护单。
+    check_entry_candle_risk: bool,
+    /// 是否启用 0.5R 观察与真实目标完成比例保护。
+    target_completion_profit_observation: bool,
     /// 活动仓位；为空时表示没有活动仓位。
     active_position: Option<ReplayActivePosition>,
 }
@@ -384,9 +408,21 @@ pub fn build_framework_equity_report(
         let candle_items = framework_replay_candle_items(candles);
         let risk_config = BasicRiskStrategyConfig {
             max_loss_percent: args.stop_loss_pct,
+            enforce_base_max_loss: is_filtered_volume_weekly_base_version(
+                &args.paper_outcome_entry_rule_version,
+            )
+            .then_some(false),
+            check_entry_candle_risk: is_filtered_volume_weekly_base_version(
+                &args.paper_outcome_entry_rule_version,
+            )
+            .then_some(true),
             is_used_signal_k_line_stop_loss: Some(true),
             dynamic_max_loss: Some(false),
             trade_fee_rate: framework_trade_cost_rate(args),
+            account_risk_fraction_per_trade: is_filtered_volume_weekly_base_version(
+                &args.paper_outcome_entry_rule_version,
+            )
+            .then_some(0.01),
             ..BasicRiskStrategyConfig::default()
         };
         let result = run_indicator_strategy_backtest(&symbol, strategy, &candle_items, risk_config);
@@ -717,12 +753,17 @@ pub fn build_framework_equity_trade_reports(
                     profit_loss: trade.profit_loss,
                     initial_risk_amount: None,
                     net_profit_r: None,
+                    initial_stop_source: event.structure_stop_loss_source.clone(),
                     quantity: trade.quantity,
                     outcome: trade_outcome_label(trade.profit_loss),
                     trigger: event.trigger.clone(),
                     new_rank: event.event.new_rank,
                     delta_rank: event.event.delta_rank,
                     price_change_pct: event.event.price_change_pct,
+                    entry_signal_evidence: event.entry_signal_evidence.clone(),
+                    close_signal_value: None,
+                    close_stop_loss_source: None,
+                    stop_loss_update_history: None,
                     close_legs: trade.close_legs,
                 })
             }));
@@ -745,9 +786,21 @@ pub fn build_framework_equity_trade_reports(
         let candle_items = framework_replay_candle_items(candles);
         let risk_config = BasicRiskStrategyConfig {
             max_loss_percent: args.stop_loss_pct,
+            enforce_base_max_loss: is_filtered_volume_weekly_base_version(
+                &args.paper_outcome_entry_rule_version,
+            )
+            .then_some(false),
+            check_entry_candle_risk: is_filtered_volume_weekly_base_version(
+                &args.paper_outcome_entry_rule_version,
+            )
+            .then_some(true),
             is_used_signal_k_line_stop_loss: Some(true),
             dynamic_max_loss: Some(false),
             trade_fee_rate: framework_trade_cost_rate(args),
+            account_risk_fraction_per_trade: is_filtered_volume_weekly_base_version(
+                &args.paper_outcome_entry_rule_version,
+            )
+            .then_some(0.01),
             ..BasicRiskStrategyConfig::default()
         };
         let result = run_indicator_strategy_backtest(&symbol, strategy, &candle_items, risk_config);
@@ -784,6 +837,7 @@ pub fn build_framework_equity_trade_reports(
                 profit_loss: record.profit_loss,
                 initial_risk_amount: record.initial_risk_amount,
                 net_profit_r: record.net_profit_r,
+                initial_stop_source: event.structure_stop_loss_source.clone(),
                 quantity: if record.quantity > 0.0 {
                     record.quantity
                 } else {
@@ -794,6 +848,10 @@ pub fn build_framework_equity_trade_reports(
                 new_rank: event.event.new_rank,
                 delta_rank: event.event.delta_rank,
                 price_change_pct: event.event.price_change_pct,
+                entry_signal_evidence: event.entry_signal_evidence.clone(),
+                close_signal_value: record.signal_value.clone(),
+                close_stop_loss_source: record.stop_loss_source.clone(),
+                stop_loss_update_history: record.stop_loss_update_history.clone(),
                 close_legs: Vec::new(),
             });
         }
@@ -1144,6 +1202,19 @@ fn hit_target(
         MarketVelocityTradeDirection::Both => false,
     }
 }
+/// 判断价格是否严格穿越动态止盈，用于需要与框架动态止盈完全一致的版本。
+fn hit_target_strict(
+    candle_low: f64,
+    candle_high: f64,
+    target_price: f64,
+    direction: MarketVelocityTradeDirection,
+) -> bool {
+    match direction {
+        MarketVelocityTradeDirection::Long => candle_high > target_price,
+        MarketVelocityTradeDirection::Short => candle_low < target_price,
+        MarketVelocityTradeDirection::Both => false,
+    }
+}
 /// 停止 回测与策略研究 后台流程，确保退出时不留下未释放状态。
 fn stop_already_crossed(
     close_price: f64,
@@ -1232,143 +1303,6 @@ fn parse_replay_open_trade(record: &TradeRecord) -> Option<ReplayOpenTrade> {
         signal_status: record.signal_status,
         target_r,
     })
-}
-/// 构建 回测与策略研究 请求或响应载荷，把字段组装规则集中在同一入口。
-pub fn build_market_velocity_backtest_details(
-    trade: &FrameworkEquityTradeReport,
-    back_test_id: i64,
-    args: &MarketVelocityEventBacktestArgs,
-) -> Result<Vec<BacktestDetail>> {
-    let close_position_time = trade
-        .close_position_time
-        .as_deref()
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| anyhow::anyhow!("market velocity trade missing close_position_time"))?;
-    let signal_open_position_time = legacy_backtest_datetime(
-        &trade.signal_open_position_time,
-        "signal_open_position_time",
-    )?;
-    let open_position_time =
-        legacy_backtest_datetime(&trade.open_position_time, "open_position_time")?;
-    let close_position_time = legacy_backtest_datetime(close_position_time, "close_position_time")?;
-    let signal_value = market_velocity_detail_signal_value(trade, args).to_string();
-    let signal_result = "market_velocity_framework_replay".to_string();
-    let strategy_type = market_velocity_strategy_type(args).to_string();
-    let open_option_type = if trade.price_change_pct < 0.0 {
-        "short"
-    } else {
-        "long"
-    };
-    let open_price = trade.open_price.to_string();
-    let quantity = trade.quantity.to_string();
-    let (win_nums, loss_nums) = match trade.outcome {
-        "win" => (1, 0),
-        "loss" => (0, 1),
-        _ => (0, 0),
-    };
-    let mut details = vec![BacktestDetail::new(
-        back_test_id,
-        open_option_type.to_string(),
-        strategy_type.clone(),
-        trade.symbol.clone(),
-        "15m".to_string(),
-        open_position_time.clone(),
-        Some(signal_open_position_time.clone()),
-        trade.signal_status,
-        open_position_time.clone(),
-        open_price.clone(),
-        None,
-        "0".to_string(),
-        quantity.clone(),
-        "false".to_string(),
-        String::new(),
-        0,
-        0,
-        signal_value.clone(),
-        signal_result.clone(),
-        None,
-        None,
-        None,
-        None,
-        None,
-    )];
-    if trade.close_legs.is_empty() {
-        details.push(BacktestDetail::new(
-            back_test_id,
-            "close".to_string(),
-            strategy_type,
-            trade.symbol.clone(),
-            "15m".to_string(),
-            open_position_time.clone(),
-            Some(signal_open_position_time.clone()),
-            trade.signal_status,
-            close_position_time,
-            open_price,
-            trade.close_price.map(|value| value.to_string()),
-            trade.profit_loss.to_string(),
-            quantity,
-            "true".to_string(),
-            trade.close_type.clone(),
-            win_nums,
-            loss_nums,
-            signal_value,
-            signal_result,
-            None,
-            None,
-            None,
-            None,
-            None,
-        ));
-        return Ok(details);
-    }
-    for leg in &trade.close_legs {
-        let leg_signal_value =
-            market_velocity_detail_signal_value_for_leg(trade, args, leg).to_string();
-        let leg_close_position_time =
-            legacy_backtest_datetime(&leg.close_position_time, "leg.close_position_time")?;
-        let (leg_win_nums, leg_loss_nums) = if leg.full_close {
-            (win_nums, loss_nums)
-        } else {
-            (0, 0)
-        };
-        details.push(BacktestDetail::new(
-            back_test_id,
-            "close".to_string(),
-            strategy_type.clone(),
-            trade.symbol.clone(),
-            "15m".to_string(),
-            open_position_time.clone(),
-            Some(signal_open_position_time.clone()),
-            trade.signal_status,
-            leg_close_position_time,
-            open_price.clone(),
-            Some(leg.close_price.to_string()),
-            leg.profit_loss.to_string(),
-            leg.quantity.to_string(),
-            leg.full_close.to_string(),
-            leg.close_type.clone(),
-            leg_win_nums,
-            leg_loss_nums,
-            leg_signal_value,
-            signal_result.clone(),
-            None,
-            None,
-            None,
-            None,
-            None,
-        ));
-    }
-    Ok(details)
-}
-
-fn legacy_backtest_datetime(value: &str, field_name: &str) -> Result<String> {
-    let trimmed = value.trim();
-    if let Ok(value) = NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%d %H:%M:%S") {
-        return Ok(value.format("%Y-%m-%d %H:%M:%S").to_string());
-    }
-    DateTime::parse_from_str(trimmed, "%Y-%m-%d %H:%M:%S%:z")
-        .map(|value| value.naive_local().format("%Y-%m-%d %H:%M:%S").to_string())
-        .with_context(|| format!("invalid market velocity {field_name}: {value}"))
 }
 fn timestamp_ms_to_shanghai_datetime(timestamp_ms: i64) -> String {
     let offset = FixedOffset::east_opt(8 * 3600).expect("valid shanghai fixed offset");
@@ -1760,26 +1694,33 @@ impl MarketVelocityReplayStrategy {
         ignore_entry_signal_updates_while_open: bool,
     ) -> Self {
         let mut entries_by_ts = BTreeMap::new();
+        let volume_atr_trailing_cost =
+            uses_trend_managed_volume_trailing_exit(&args.paper_outcome_entry_rule_version)
+                .then(|| framework_trade_cost_rate(args))
+                .flatten();
         for event in events {
             let selected_stop_loss = select_stop_loss_for_confirmed_signal(&event, args);
-            let effective_target_r = if args.volume_atr_take_profit {
-                let Some(target_r) = volume_atr_target_r_with_policy(
-                    candles,
-                    event.event.ts,
-                    event.entry_ts,
-                    event.entry_price,
-                    selected_stop_loss.stop_loss_pct,
-                    args,
-                ) else {
-                    continue;
-                };
-                target_r
-            } else {
-                target_r
+            let Some(effective_target_r) = effective_target_r_for_confirmed_signal(
+                &event,
+                candles,
+                selected_stop_loss.stop_loss_pct,
+                target_r,
+                args,
+            ) else {
+                continue;
             };
             let Some(replay_ts) = replay_entry_candle_ts(candles, event.entry_ts) else {
                 continue;
             };
+            let volume_atr_trailing = volume_atr_trailing_cost.and_then(|per_side_cost_rate| {
+                let evidence = event.entry_signal_evidence.as_ref()?;
+                Some(VolumeAtrTrailingReplayState {
+                    atr14: evidence.atr14,
+                    target_atr_multiplier: evidence.take_profit_atr_multiplier?,
+                    per_side_cost_rate,
+                    accepted_updates: 0,
+                })
+            });
             entries_by_ts.entry(replay_ts).or_insert(ReplayEntry {
                 entry_price: event.entry_price,
                 event_id: event.event.id,
@@ -1789,6 +1730,7 @@ impl MarketVelocityReplayStrategy {
                 stop_loss_price: selected_stop_loss.price,
                 stop_loss_source: selected_stop_loss.source,
                 target_r: effective_target_r,
+                volume_atr_trailing,
             });
         }
         Self {
@@ -1801,13 +1743,19 @@ impl MarketVelocityReplayStrategy {
                 .and_then(|hours| i64::try_from(hours).ok())
                 .and_then(|hours| hours.checked_mul(60 * 60 * 1_000)),
             ignore_entry_signal_updates_while_open,
+            check_entry_candle_risk: is_filtered_volume_weekly_base_version(
+                &args.paper_outcome_entry_rule_version,
+            ),
+            target_completion_profit_observation: uses_target_completion_profit_observation(
+                &args.paper_outcome_entry_rule_version,
+            ),
             active_position: None,
         }
     }
     /// 构建 回测与策略研究 请求或响应载荷，把字段组装规则集中在同一入口。
-    fn build_entry_signal(&mut self, candle_ts: i64, entry: &ReplayEntry) -> SignalResult {
+    fn build_entry_signal(&mut self, candle: &CandleItem, entry: &ReplayEntry) -> SignalResult {
         self.active_position = Some(ReplayActivePosition {
-            entry_ts: candle_ts,
+            entry_ts: candle.ts,
             entry_price: entry.entry_price,
             event_id: entry.event_id,
             trigger: entry.trigger.clone(),
@@ -1818,9 +1766,13 @@ impl MarketVelocityReplayStrategy {
             target_r: entry.target_r,
             profit_protected: false,
             observed_candles: 0,
+            profit_observation: self
+                .target_completion_profit_observation
+                .then_some(profit_observation::ProfitObservationState::default()),
+            volume_atr_trailing: entry.volume_atr_trailing.clone(),
         });
-        self.build_entry_direction_signal(
-            candle_ts,
+        let signal = self.build_entry_direction_signal(
+            candle.ts,
             entry.entry_price,
             entry.stop_loss_price,
             entry.stop_loss_pct,
@@ -1830,7 +1782,25 @@ impl MarketVelocityReplayStrategy {
             entry.direction,
             entry.target_r,
             false,
-        )
+        );
+        if self.check_entry_candle_risk
+            && (entry.stop_loss_source == FILTERED_VOLUME_V3_INVALID_AT_FILL_STOP_SOURCE
+                || hit_stop(candle.l, candle.h, entry.stop_loss_price, entry.direction)
+                || self.strategy_target_hit(
+                    candle.l,
+                    candle.h,
+                    target_price_for(
+                        entry.entry_price,
+                        entry.stop_loss_pct,
+                        entry.target_r,
+                        entry.direction,
+                    ),
+                    entry.direction,
+                ))
+        {
+            self.active_position = None;
+        }
+        signal
     }
     /// 判断按条件build盈利保护信号，给回测策略流程提供布尔结果。
     fn maybe_build_profit_protection_signal(
@@ -1847,16 +1817,7 @@ impl MarketVelocityReplayStrategy {
             active.target_r,
             active.direction,
         );
-        let current_stop_price = if active.profit_protected {
-            target_price_for(
-                active.entry_price,
-                active.stop_loss_pct,
-                self.profit_protect_stop_r,
-                active.direction,
-            )
-        } else {
-            active.stop_loss_price
-        };
+        let current_stop_price = active.stop_loss_price;
         if hit_stop(candle.l, candle.h, current_stop_price, active.direction)
             || hit_target(candle.l, candle.h, target_price, active.direction)
         {
@@ -1891,6 +1852,8 @@ impl MarketVelocityReplayStrategy {
             return None;
         }
         active.profit_protected = true;
+        active.stop_loss_price = protected_stop_price;
+        active.stop_loss_source = "MarketVelocityProfitProtect".to_string();
         let mut signal = self.build_entry_direction_signal(
             candle.ts,
             entry_price,
@@ -1960,18 +1923,13 @@ impl MarketVelocityReplayStrategy {
                 active.target_r,
                 active.direction,
             );
-            let stop_price = if active.profit_protected {
-                target_price_for(
-                    active.entry_price,
-                    active.stop_loss_pct,
-                    self.profit_protect_stop_r,
-                    active.direction,
-                )
-            } else {
-                active.stop_loss_price
-            };
+            let stop_price = active.stop_loss_price;
             hit_stop(candle.l, candle.h, stop_price, active.direction)
-                || hit_target(candle.l, candle.h, target_price, active.direction)
+                || if self.target_completion_profit_observation {
+                    hit_target_strict(candle.l, candle.h, target_price, active.direction)
+                } else {
+                    hit_target(candle.l, candle.h, target_price, active.direction)
+                }
         });
         if should_clear {
             self.active_position = None;
@@ -1983,6 +1941,21 @@ impl MarketVelocityReplayStrategy {
                 .active_position
                 .as_ref()
                 .is_some_and(|active| active.direction == entry.direction)
+    }
+
+    /// v7/v8 对齐框架动态止盈的严格穿越规则；其他版本保留冻结的包含边界语义。
+    fn strategy_target_hit(
+        &self,
+        candle_low: f64,
+        candle_high: f64,
+        target_price: f64,
+        direction: MarketVelocityTradeDirection,
+    ) -> bool {
+        if self.target_completion_profit_observation {
+            hit_target_strict(candle_low, candle_high, target_price, direction)
+        } else {
+            hit_target(candle_low, candle_high, target_price, direction)
+        }
     }
 }
 

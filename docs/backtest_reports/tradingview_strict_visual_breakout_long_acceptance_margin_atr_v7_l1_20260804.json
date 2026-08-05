@@ -1,0 +1,151 @@
+{
+  "schema_version": "strict_visual_acceptance_margin_atr_l1_v1",
+  "research_level": "L1_OUTCOME_BLIND_COVERAGE",
+  "research_version": "volume_strict_visual_consolidation_acceptance_margin_atr_long_15m_research_v7",
+  "baseline_version": "volume_strict_visual_consolidation_weak_departure_one_bar_probation_body_strength_long_15m_research_v6",
+  "generated_date": "2026-08-04",
+  "label_boundary": "NO_ENTRY_NO_EXIT_NO_MFE_NO_MAE_NO_WIN_LOSS_NO_R_NO_PNL_NO_PROFIT_FACTOR",
+  "definition": "(confirmation_close - frozen_range_upper) / frozen_breakout_source_atr",
+  "selection_rule": "among thresholds passing all coverage gates, choose rejected_percent closest to 30; on a tie choose the lower threshold",
+  "source": {
+    "path": "target/research/strict_visual_weak_departure_probation_v6_l1_20260803.json",
+    "sha256": "2e2f77a01cfc121a56fe1b98a8b9ee92a58929c5ebc488769926cca3260d4fe4",
+    "dataset_fingerprint_sha256": "4919b364fb4737b0da7921cd53e401adb97013597ba3049ca79c6e1e9890577f",
+    "universe_version": "top60_v36_direct_kline_20260721_frozen_20260723",
+    "expected_symbols": 60,
+    "included_symbols": 43,
+    "evaluation_start_ms": 1751328000000,
+    "evaluation_end_ms": 1784470500000
+  },
+  "baseline_coverage": {
+    "candidates": 421,
+    "symbols": 43,
+    "shanghai_months": 13,
+    "effective_events_60m": 338
+  },
+  "invalid_margin_candidates": 0,
+  "margin_distribution_atr": {
+    "min": 0.019030286836604935,
+    "p10": 0.15265276154858984,
+    "p25": 0.3049078805106575,
+    "median": 0.5197390503814423,
+    "p75": 0.922873901520475,
+    "p90": 1.2663658720429252,
+    "max": 3.6179292977170667
+  },
+  "coverage_gates": {
+    "rejected_percent_min": 15.0,
+    "rejected_percent_max": 50.0,
+    "retained_candidates_min": 150,
+    "retained_symbols_min": 25,
+    "retained_shanghai_months_min": 8,
+    "retained_effective_events_60m_min": 100,
+    "rejected_candidates_min": 30,
+    "rejected_symbols_min": 10,
+    "rejected_shanghai_months_min": 6,
+    "rejected_effective_events_60m_min": 20
+  },
+  "variants": [
+    {
+      "threshold_atr": 0.05,
+      "retained": {
+        "candidates": 413,
+        "symbols": 43,
+        "shanghai_months": 13,
+        "effective_events_60m": 330
+      },
+      "rejected": {
+        "candidates": 8,
+        "symbols": 8,
+        "shanghai_months": 7,
+        "effective_events_60m": 8,
+        "percent": 1.9002375296912115
+      },
+      "impact_gate_passed": false,
+      "retained_coverage_gate_passed": true,
+      "rejected_coverage_gate_passed": false,
+      "eligible_for_selection": false
+    },
+    {
+      "threshold_atr": 0.1,
+      "retained": {
+        "candidates": 395,
+        "symbols": 43,
+        "shanghai_months": 13,
+        "effective_events_60m": 319
+      },
+      "rejected": {
+        "candidates": 26,
+        "symbols": 17,
+        "shanghai_months": 11,
+        "effective_events_60m": 26,
+        "percent": 6.175771971496437
+      },
+      "impact_gate_passed": false,
+      "retained_coverage_gate_passed": true,
+      "rejected_coverage_gate_passed": false,
+      "eligible_for_selection": false
+    },
+    {
+      "threshold_atr": 0.15,
+      "retained": {
+        "candidates": 379,
+        "symbols": 43,
+        "shanghai_months": 13,
+        "effective_events_60m": 309
+      },
+      "rejected": {
+        "candidates": 42,
+        "symbols": 25,
+        "shanghai_months": 12,
+        "effective_events_60m": 40,
+        "percent": 9.97624703087886
+      },
+      "impact_gate_passed": false,
+      "retained_coverage_gate_passed": true,
+      "rejected_coverage_gate_passed": true,
+      "eligible_for_selection": false
+    },
+    {
+      "threshold_atr": 0.2,
+      "retained": {
+        "candidates": 360,
+        "symbols": 43,
+        "shanghai_months": 13,
+        "effective_events_60m": 292
+      },
+      "rejected": {
+        "candidates": 61,
+        "symbols": 31,
+        "shanghai_months": 13,
+        "effective_events_60m": 58,
+        "percent": 14.489311163895488
+      },
+      "impact_gate_passed": false,
+      "retained_coverage_gate_passed": true,
+      "rejected_coverage_gate_passed": true,
+      "eligible_for_selection": false
+    }
+  ],
+  "selected_threshold_atr": null,
+  "l1_gate_passed": false,
+  "stop_reason": "no preregistered threshold rejects the required 15% to 50% of V6 candidates; the maximum is 14.489311163895488% at 0.20 ATR",
+  "forward_data_audit": {
+    "audit_only_not_used_for_threshold_selection": true,
+    "members": 43,
+    "members_with_forward_data": 43,
+    "members_without_forward_data": 0,
+    "forward_start_ms": 1784471400000,
+    "common_latest_confirmed_ms": 1785202200000,
+    "confirmed_bars_per_member": 813,
+    "shanghai_window": "2026-07-19 22:30 to 2026-07-28 09:30",
+    "formal_oos_sufficient": false,
+    "reason": "only 8.47 days of uniform forward 15m candles are available"
+  },
+  "next_actions": {
+    "implement_v7": false,
+    "run_l2": false,
+    "create_or_modify_pine": false,
+    "connect_runtime_or_production": false
+  }
+}

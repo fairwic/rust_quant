@@ -243,7 +243,8 @@ fn parse_confirmed_one_minute(
             .collect::<Result<Vec<_>>>()?;
         confirmed.push(ConfirmedOneMinuteMessage {
             symbol: symbol.to_string(),
-            candle: CandleOkxRespDto::from_vec(values),
+            candle: CandleOkxRespDto::try_from_vec(values)
+                .map_err(|error| anyhow!("invalid OKX confirmed candle row: {error}"))?,
             received_at,
             received_at_ms,
         });

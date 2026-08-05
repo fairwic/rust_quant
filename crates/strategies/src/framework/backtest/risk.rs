@@ -203,34 +203,35 @@ pub fn compute_initial_stop_price(
     if !position.open_price.is_finite() || position.open_price <= 0.0 {
         return None;
     }
-    let mut effective_max_loss = risk.max_loss_percent;
-    if risk.dynamic_max_loss.unwrap_or(true) {
-        if let (Some(entry_amp), Some(entry_close_pos)) = (
-            position.entry_kline_amplitude,
-            position.entry_kline_close_pos,
-        ) {
-            let threshold = risk.dynamic_entry_amp_threshold.unwrap_or(0.03);
-            let require_mismatch = risk
-                .dynamic_entry_require_direction_mismatch
-                .unwrap_or(true);
-            let direction_mismatch = match position.trade_side {
-                TradeSide::Long => entry_close_pos < 0.5,
-                TradeSide::Short => entry_close_pos > 0.5,
-            };
-            if entry_amp > threshold && (!require_mismatch || direction_mismatch) {
-                effective_max_loss =
-                    effective_max_loss.min(risk.dynamic_entry_loss_percent.unwrap_or(0.03));
+    let mut candidates = Vec::with_capacity(2);
+    if risk.enforce_base_max_loss.unwrap_or(true) {
+        let mut effective_max_loss = risk.max_loss_percent;
+        if risk.dynamic_max_loss.unwrap_or(true) {
+            if let (Some(entry_amp), Some(entry_close_pos)) = (
+                position.entry_kline_amplitude,
+                position.entry_kline_close_pos,
+            ) {
+                let threshold = risk.dynamic_entry_amp_threshold.unwrap_or(0.03);
+                let require_mismatch = risk
+                    .dynamic_entry_require_direction_mismatch
+                    .unwrap_or(true);
+                let direction_mismatch = match position.trade_side {
+                    TradeSide::Long => entry_close_pos < 0.5,
+                    TradeSide::Short => entry_close_pos > 0.5,
+                };
+                if entry_amp > threshold && (!require_mismatch || direction_mismatch) {
+                    effective_max_loss =
+                        effective_max_loss.min(risk.dynamic_entry_loss_percent.unwrap_or(0.03));
+                }
             }
         }
+        if effective_max_loss.is_finite() && effective_max_loss > 0.0 {
+            candidates.push(match position.trade_side {
+                TradeSide::Long => position.open_price * (1.0 - effective_max_loss),
+                TradeSide::Short => position.open_price * (1.0 + effective_max_loss),
+            });
+        }
     }
-    if !effective_max_loss.is_finite() || effective_max_loss <= 0.0 {
-        return None;
-    }
-    let max_loss_stop = match position.trade_side {
-        TradeSide::Long => position.open_price * (1.0 - effective_max_loss),
-        TradeSide::Short => position.open_price * (1.0 + effective_max_loss),
-    };
-    let mut candidates = vec![max_loss_stop];
     if let Some(signal_stop) = position.signal_kline_stop_close_price {
         candidates.push(signal_stop);
     }
@@ -268,15 +269,17 @@ pub fn compute_current_targets(
     risk: &BasicRiskStrategyConfig,
 ) -> ExitTargets {
     let ctx = ExitContext::new(position, candle);
-    let effective_max_loss = compute_effective_max_loss_with_config(
-        position,
-        &ctx,
-        risk.max_loss_percent,
-        risk.dynamic_max_loss.unwrap_or(true),
-        risk,
-    );
-    let max_loss_stop = ctx.stop_loss_price(effective_max_loss);
-    let mut stop_candidates = vec![max_loss_stop];
+    let mut stop_candidates = Vec::with_capacity(3);
+    if risk.enforce_base_max_loss.unwrap_or(true) {
+        let effective_max_loss = compute_effective_max_loss_with_config(
+            position,
+            &ctx,
+            risk.max_loss_percent,
+            risk.dynamic_max_loss.unwrap_or(true),
+            risk,
+        );
+        stop_candidates.push(ctx.stop_loss_price(effective_max_loss));
+    }
     if let Some(px) = position.signal_kline_stop_close_price {
         stop_candidates.push(px);
     }
@@ -323,16 +326,21 @@ fn check_base_protective_stop(
     position: &TradePosition,
     risk_config: &BasicRiskStrategyConfig,
 ) -> ExitResult {
-    let effective_max_loss = compute_effective_max_loss_with_config(
-        position,
-        ctx,
-        risk_config.max_loss_percent,
-        risk_config.dynamic_max_loss.unwrap_or(true),
-        risk_config,
-    );
-    let max_loss_stop = ctx.stop_loss_price(effective_max_loss);
     let signal_stop = position.signal_kline_stop_close_price;
-    let mut candidates = vec![max_loss_stop];
+    let mut candidates = Vec::with_capacity(2);
+    let mut max_loss_stop = None;
+    if risk_config.enforce_base_max_loss.unwrap_or(true) {
+        let effective_max_loss = compute_effective_max_loss_with_config(
+            position,
+            ctx,
+            risk_config.max_loss_percent,
+            risk_config.dynamic_max_loss.unwrap_or(true),
+            risk_config,
+        );
+        let price = ctx.stop_loss_price(effective_max_loss);
+        candidates.push(price);
+        max_loss_stop = Some(price);
+    }
     if let Some(price) = signal_stop {
         candidates.push(price);
     }
@@ -342,7 +350,7 @@ fn check_base_protective_stop(
     if signal_stop.is_some_and(|price| price == selected) {
         return check_signal_kline_stop(ctx, Some(selected));
     }
-    if ctx.is_stop_loss_hit(selected) {
+    if max_loss_stop.is_some_and(|price| price == selected) && ctx.is_stop_loss_hit(selected) {
         ExitResult::Exit {
             price: selected,
             reason: "最大亏损止损",

@@ -1,7 +1,8 @@
 # Vegas 与现有回测主链迁移实战
 
-- 状态：迁移设计，尚未实施
+- 状态：迁移规范；alpha 首个冻结 parity 闭环已实施，完整 W2 尚未完成
 - 日期：2026-07-23
+- 最近修订：2026-08-03
 - 上位文档：[Rust Quant 长期目标架构](target-architecture.md)
 - 核心决策：[ADR-0009：Research Domain、纯 Backtest Kernel 与分级模拟](adr/0009-research-domain-and-tiered-simulation.md)
 - 运行配置：[ADR-0011：分层运行快照与完整决策上下文](adr/0011-layered-runtime-snapshots-and-decision-context.md)
@@ -513,13 +514,13 @@ RecoveryHarness 不自建 OMS Aggregate；它只在 CI ephemeral adapters 上驱
 
 | 当前类型/函数 | 目标代码形态 | 目标位置 |
 | --- | --- | --- |
-| `TradingState` | 拆为 `StrategyEvaluationState`、Research `SimulationLedger` 和逐层 typed output | `domains/strategy/model` + `domains/research/model` |
-| `deal_signal` | 删除；由 Research use case 串联多个 owner 的公开纯 API | `domains/research/use_cases/commands/execute_backtest_run` |
+| `TradingState` | 拆为 `StrategyEvaluationState`、Research `SimulationLedger` 和逐层 typed output | `domains/strategy/evaluation/` + `domains/research/simulation/` |
+| `deal_signal` | 删除；由 Research experiment/simulation capability 串联多个 owner 的公开纯 API | `domains/research/{experiment,simulation}/` |
 | `StopLossCalculator::select` | 自由纯函数；若需要冻结政策则由 Risk Policy 调用 | `domains/risk/policies/final_stop.rs` |
-| `StrategyExecutor` | 纯 `StrategyEvaluator` API + EvaluationState Port + App/Use Case 编排 | `domains/strategy/{api,ports,use_cases}` |
-| 全局可变 `StrategyRegistry` | App 装配并按 release generation 冻结的 `StrategyCatalog` | `domains/strategy/model` + `apps/*/composition` |
-| `Order` | 私有关键字段、显式状态 transition、注入时间的 Aggregate | `domains/execution/model` |
-| `OrderCreationService`/万能 `OrderService` | 按 `CreateOrderIntent`、`PrepareOrderSubmission`、`RequestCancellation` 等 Use Case 拆分 | `domains/execution/use_cases` |
+| `StrategyExecutor` | 纯 `StrategyEvaluator` API + EvaluationState Port + App/Use Case 编排 | `domains/strategy/evaluation/`，稳定入口由 `api` 暴露 |
+| 全局可变 `StrategyRegistry` | App 装配并按 release generation 冻结的 `StrategyCatalog` | `domains/strategy/catalog/` + `apps/*/composition` |
+| `Order` | 私有关键字段、显式状态 transition、注入时间的 Aggregate | `domains/execution/order_lifecycle/` |
+| `OrderCreationService`/万能 `OrderService` | 按 `CreateOrderIntent`、`PrepareOrderSubmission`、`RequestCancellation` 等能力拆分 | `domains/execution/{planning,submission,cancellation}/` |
 | `ExecutionWorker::run_once` | 只处理 lease/message、Contract 映射、调用 Use Case 和 ack/checkpoint | `apps/execution-worker` |
 
 删除门不仅是类型改名或调用方可编译，还必须证明原 owner 职责已由对应 Model/Policy/Use Case 接管，且 parity/recovery 测试覆盖。
@@ -581,17 +582,17 @@ Research 数据库事务至少原子写入：
 
 修改 Execution/Reconciliation 和 RecoveryHarness 测试，不跑大规模 Vegas 参数搜索证明恢复正确。
 
-## 13. Vegas Parent Program 与单 Owner 子 Manifest
+## 13. Vegas 在 W2 的单 Owner capability 组
 
-Vegas 不是一个可由单一 Slice 完成的迁移。编码前必须先在 Migration Registry 建立 parent Program：
+Vegas 不是一个可由单一文件或跨 Owner 大批次完成的迁移。当前执行入口是 W2 的一份 Wave plan，以下 V0 至 V12 只作为语义与依赖编号，不再创建逐项 Manifest 或 Registry child：
 
 ```text
-MP-vegas-research-parity-v1
+W2-strategy-research-quant
 ```
 
-Parent Program 只协调基线、依赖、跨 owner 验收和最终关闭条件；它不拥有业务事实、不直接改代码，也不能代替子 Manifest 的 owner/rollback/delete gate。禁止再建立“拆 `deal_signal`”这类同时由 Strategy、Portfolio、Risk、Execution、Research 和 Quant 共同拥有的 Slice。
+W2 Wave plan 只协调基线、依赖、跨 owner 验收和最终关闭条件；它不拥有业务事实、不直接改代码，也不能代替各 capability 的 owner、rollback 和 delete gate。禁止再建立“拆 `deal_signal`”这类同时由 Strategy、Portfolio、Risk、Execution、Research 和 Quant 共同拥有的实现单元。
 
-| Child Manifest | 唯一 Owner | 迁移内容 | 主要依赖与验收 |
+| Capability 组 | 唯一 Owner | 迁移内容 | 主要依赖与验收 |
 | --- | --- | --- | --- |
 | `V0-market-point-in-time-dataset` | Market | 早期错误登记，混合 point-in-time Market 事实、Research universe selection 与多种独立 stream | 禁止实施；等待按 Owner/能力拆分的 successor |
 | `V1-research-run-governance` | Research | Experiment、BacktestRun、Dataset/Evaluation Manifest、trial ledger、RunSpec、ResearchDecisionContextSnapshot、Checkpoint | RunSpec 在读取结果前冻结；Research 不制造 Web request |
@@ -607,13 +608,13 @@ Parent Program 只协调基线、依赖、跨 owner 验收和最终关闭条件�
 | `V11-reconciliation-recovery-harness` | Reconciliation | 对账差异、崩溃恢复、外部事实收敛和人工处置证据 | CI-only ephemeral；不访问生产 secret/环境 |
 | `V12-strategy-promotion-receipt` | Strategy | candidate -> released artifact 等价链、PromotionReceipt、promote/rollback gate | 必须引用 Completed Evidence + eligible gate + released build parity |
 
-每个子 Manifest 必须单独记录 `owner`、`scope`、`baseline`、`target contract`、`evidence`、`rollback` 和 `delete gate`。如果 Vegas 模式在策略语义、状态 schema、运行入口或交付物上互斥，必须把对应行继续拆成 `Vx-<mode>` 独立 Manifest；不得把多个 mode 藏在同一 Manifest 的可选步骤中，也不得通过一个“共同 Owner”掩盖多 owner 修改。
+每个 capability 组必须在能力总账和 W2 plan 中记录 `owner`、`baseline`、`target contract`、`evidence`、`rollback` 和 `delete gate`。如果 Vegas 模式在策略语义、状态 schema、运行入口或交付物上互斥，应使用独立策略版本或 capability 子职责；不得通过一个“共同 Owner”掩盖多 owner 修改。
 
-Registry 已冻结的 V0 使用空依赖，并把 `selection_algorithm_hash` 放进 Market -> Research Contract；依赖它的 V1 也因此不能继续实施。不得原地修改两者。恢复 Vegas 时先以 Market 子 Manifest 分别发布 MarketBar、instrument lifecycle、InstrumentRules 与所需 supplemental stream 工件，再登记 Market facts bundle successor；Research successor 随后拥有 universe selection/membership、选择算法 hash 和 `DatasetManifest`。
+历史 Registry 中的 V0/V1 登记只读归档，不再阻断或授权当前工作，也不得原地修改。当前恢复 Vegas 时，必须先由 W1 Market capability 发布 MarketBar、instrument lifecycle、InstrumentRules 与所需 supplemental stream 工件；W2 Research 随后拥有 universe selection/membership、选择算法 hash 和 `DatasetManifest`。
 
 ### 13.1 基线冻结责任
 
-Parent Program 定义共同 fixture 目录和比较协议，各 owner 只冻结自己拥有的基线：
+W2 Wave plan 定义共同 fixture 目录和比较协议，各 owner 只冻结自己拥有的基线：
 
 - Market 固定 BTC、ETH、其他币种的多个 point-in-time 行情窗口、instrument lifecycle/rules 与数据 revision；
 - Research 固定历史 universe selection/membership、Run identity、Dataset/Evaluation Manifest、SimulationProfile、初始模拟资金和 Evidence schema；
@@ -639,7 +640,7 @@ V8 + V11 -> V12 -> promote gate
 
 Research 只有在 `V0` point-in-time 数据合同、`V1` RunSpec 与 `V7` artifact/RNG/scheduler contract 可用后，才可发布新的可重放 Evidence。`V8` 的 Completed Evidence 不自动触发 `V12`；只有 frozen EvaluationManifest 得到 `eligible` 且 candidate/released 工件等价链完整，Strategy 才可签发 PromotionReceipt。
 
-HTTP/quant-lab 切换、旧表停写、旧 Runner/Executor/万能 Context/`deal_signal` 删除，也必须由受影响 owner 各自建立 cutover/delete Manifest。Parent Program 只在所有调用方归零、回滚窗口结束、子 Manifest evidence 完整且生产授权门禁另行通过后关闭；不得用一次跨 owner“大切换”替代这些门。
+HTTP/quant-lab 切换、旧表停写、旧 Runner/Executor/万能 Context/`deal_signal` 删除，必须在 W5 由受影响 owner 分别满足 cutover/delete gate。只有所有调用方归零、回滚窗口结束、Wave Evidence 完整且生产授权门禁另行通过后才能关闭；不得用一次跨 owner“大切换”替代这些门。
 
 ## 14. 实战验收矩阵
 
@@ -666,7 +667,7 @@ HTTP/quant-lab 切换、旧表停写、旧 Runner/Executor/万能 Context/`deal_
 | Promotion | PromotionReceipt 固定 Completed + eligible + candidate/released artifact 等价证据 | 重新构建后无等价链直接激活 Release |
 | 生产安全 | 无真实 Exchange mutation、无生产事实写入 | 依赖人工避免误操作 |
 | Legacy | 调用方、配置和表写入归零 | 只改文件名 |
-| Program | 每个 Manifest 只有一个 owner；互斥 mode 继续拆分 | 多 owner Slice 或可选 mode 混装 |
+| Wave | 每个 capability 只有一个 owner；互斥策略语义使用独立版本 | 多 owner 实现单元或可选 mode 混装 |
 | 代码形态 | Aggregate、纯函数、Policy、Use Case 各有明确存在理由 | 把大函数移入 `impl` 或新增零字段 Service |
 | 构建边界 | Research-only 代码不进入生产 App 依赖图/镜像且无生产部署资格；共享 Domain 变化触发生产 parity | 为避免 CI 构建而复制 live 规则到回测 crate |
 
@@ -676,4 +677,4 @@ HTTP/quant-lab 切换、旧表停写、旧 Runner/Executor/万能 Context/`deal_
 
 这比一条“完整但模糊”的线性流水线更复杂一点，却能明确回答：哪里改策略、哪里改资金、哪里改风险、哪里改撮合、哪里验证订单恢复、哪里写研究 SQL，以及哪种测试可以证明哪类结论。
 
-当前仍是目标设计，尚未迁移代码。第一步是建立 `MP-vegas-research-parity-v1`，登记 `V0`～`V12` 的单 owner 子 Manifest，并由各 owner 分别冻结自身基线；在 Program 和目标合同未冻结前，不应一次性重写现有回测。
+当前仍是目标设计，已有局部 Strategy/Research 代码不能代表 W2 完成。第一步是在 W1 闭合后创建 W2 Wave plan，把 `V0`～`V12` 映射到能力总账中的唯一 capability，并由各 owner 分别冻结自身基线；在 W2 语义矩阵和目标合同未冻结前，不应一次性重写现有回测。

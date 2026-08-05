@@ -58,6 +58,7 @@ impl MarketVelocityReplayStrategy {
         target_r: f64,
         profit_protected: bool,
     ) -> SignalResult {
+        let immediate_exit = stop_loss_source == FILTERED_VOLUME_V3_INVALID_AT_FILL_STOP_SOURCE;
         SignalResult {
             should_buy: direction == MarketVelocityTradeDirection::Long,
             should_sell: direction == MarketVelocityTradeDirection::Short,
@@ -92,6 +93,10 @@ impl MarketVelocityReplayStrategy {
                 .to_string(),
             ),
             single_result: Some("market_velocity_framework_replay".to_string()),
+            dynamic_adjustments: immediate_exit
+                .then(|| IMMEDIATE_EXIT_AT_ENTRY_ADJUSTMENT.to_string())
+                .into_iter()
+                .collect(),
             direction: match direction {
                 MarketVelocityTradeDirection::Long => SignalDirection::Long,
                 MarketVelocityTradeDirection::Short => SignalDirection::Short,
@@ -107,7 +112,10 @@ impl IndicatorStrategyBacktest for MarketVelocityReplayStrategy {
     type IndicatorValues = ();
 
     fn min_data_length(&self) -> usize {
-        1
+        // 持仓放量保护需要当前 K、前 10 根基线 K，以及用于逐根标记这 10 根异常量的
+        // 再前 10 根。框架只把这里声明的滑动窗口传给 `generate_signal`，少于 21 根会
+        // 让 V12 的因果过滤量比始终处于 not-ready；旧版本仍只读取窗口最后一根。
+        21
     }
 
     fn init_indicator_combine(&self) -> Self::IndicatorCombine {}
@@ -135,13 +143,19 @@ impl IndicatorStrategyBacktest for MarketVelocityReplayStrategy {
         self.clear_active_position_if_exit_hit(candle);
         if let Some(entry) = entry {
             if !ignore_entry_for_current_candle && !self.should_ignore_entry_update(&entry) {
-                return self.build_entry_signal(candle.ts, &entry);
+                return self.build_entry_signal(candle, &entry);
             }
         }
         if let Some(signal) = self.maybe_build_max_holding_exit_signal(candle) {
             return signal;
         }
         if let Some(signal) = self.maybe_build_early_exit_signal(candle) {
+            return signal;
+        }
+        if let Some(signal) = self.maybe_build_profit_observation_signal(candle) {
+            return signal;
+        }
+        if let Some(signal) = self.maybe_build_volume_atr_trailing_signal(candles) {
             return signal;
         }
         if let Some(signal) = self.maybe_build_profit_protection_signal(candle) {

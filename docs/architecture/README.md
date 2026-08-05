@@ -10,21 +10,23 @@
 
 Research 与 live 的同名术语不得混用：ResearchBar 以 `ResearchDecisionContextSnapshot -> ExecutionPlanningValue(child OrderPlan + ProtectionPlanningValue) -> SimulationLedger` 为边界，不创建生产 OMS 事实；PaperEvent 只能在隔离 simulated store 验证 aggregate 初始化/迁移；只有 live Execution 可以把 aggregate 与 `SubmitPending`、Outbox、permit 持久化为生产事实。权威边界见 [ADR-0009](adr/0009-research-domain-and-tiered-simulation.md)与 [ADR-0011](adr/0011-layered-runtime-snapshots-and-decision-context.md)。
 
-跨 Owner 迁移的依赖是否满足不能由 Markdown 勾选或 Registry 人工布尔值决定，必须由当前 revision 的 Manifest、Evidence 与 `migration-check` 生成的不可变 `verdict.json` 计算。文档中列出的 Contract、Gate 或命令在实现和新鲜 Evidence 出现前都只是未来实施要求。
+活跃迁移以能力总账和 Domain Wave 为唯一进度口径。目录、README、历史 Manifest、Registry 或静态检查都不能单独证明业务迁移完成；每个 Wave 必须同时具备 L2 语义盘点、真实代码、Domain tests、legacy parity、数据与恢复证据。旧 Manifest/Registry 流程只读归档。
 
 ## 正式文档
 
 | 文档 | 状态 | 说明 |
 | --- | --- | --- |
 | [长期目标架构](target-architecture.md) | 已接受 | 五类目录、业务 owner、Research Domain、跨仓库边界和完整交易闭环 |
+| [目标目录与代码放置规则](target-directory-layout.md) | 已接受 | 细化到 Domain capability、子目录、文件职责与新增代码归属决策 |
+| [Legacy 业务能力全量盘点](legacy-business-capability-inventory.md) | 已冻结 L1 | 基于已提交 legacy revision 的完整能力、来源、处置和 Wave 地图 |
 | [生产运行与恢复](production-runtime.md) | 已接受 | 启动、行情、订单状态机、成交反馈、对账、恢复和关闭 |
 | [依赖与代码归属规则](dependency-rules.md) | 已接受 | 允许依赖、禁止依赖、新代码放置和 CI 门禁 |
 | [业务代码与数据访问放置规范](business-code-and-data-access.md) | 已接受 | Rust 对象/函数/Policy/Use Case 选择、CRUD、事务、SQL、Command/Query/Consumer 模板 |
 | [量化通用逻辑归属](common-logic-placement.md) | 已接受 | 通用类型、数学、指标、纯回放内核、分析与 Research 归属边界 |
 | [AI 编码与架构防腐护栏](ai-coding-guardrails.md) | 已接受 | 修改前声明、Golden Template、CI ratchet 与 Review 检查表 |
-| [AI 架构迁移执行协议](ai-migration-execution-protocol.md) | 已接受 | Migration Manifest、基线锁定、迁移模式、风险分级（tier）、Evidence、Verdict 与停止条件 |
-| [Migration Program 注册表](migrations/programs/README.md) | 已接受 | 跨仓库父 Program、Owner 子 Manifest、Contract 与依赖图的机器可读索引 |
-| [架构迁移计划](migration-plan.md) | 计划中 | 现有实现迁入目标架构的阶段、验证和删除条件 |
+| [AI Domain Wave 迁移执行协议](ai-migration-execution-protocol.md) | 已接受 | 能力查询、L2 语义闭合、目录放置、Domain Wave、自动校验和停止条件 |
+| [架构迁移计划](migration-plan.md) | 实施中 | W0 至 W5 的业务闭环、验收、统一切换和删除条件 |
+| [历史 Migration Program 注册表](migrations/programs/README.md) | 只读归档 | 仅解释 2026-07 的 Manifest/Registry 证据，不再登记新迁移 |
 | [Vegas 与现有回测主链迁移实战](vegas-backtest-migration.md) | 迁移设计 | 以真实 Vegas/回测代码验证 Research 编排、三层模拟、逐文件分配与 parity 切换门 |
 | [开源交易系统架构参考](reference-systems.md) | 参考 | NautilusTrader、LEAN、Barter、Hummingbot 与 Tesser 的取舍 |
 
@@ -47,16 +49,17 @@ Research 与 live 的同名术语不得混用：ResearchBar 以 `ResearchDecisio
 | [ADR-0013](adr/0013-user-execution-request-and-public-market-data-credentials.md) | 已接受 | Web 是唯一执行请求 creator；平台固定 API Key 仅用于 Market 公共只读数据 |
 | [ADR-0014](adr/0014-greenfield-target-repository-migration.md) | 已接受 | `rust_quant` 保留 legacy/治理基线，Core 目标实现和当前迁移工件统一进入 `rust_quant_alpha` |
 | [ADR-0015](adr/0015-capability-first-modules-and-api-spi-boundaries.md) | 已接受 | Domain 内 capability-first、API/SPI 双门面、Port 完整性、Outbox 责任与提前文件预算 |
-| [ADR-0016](adr/0016-migration-risk-tiering-and-fast-track.md) | 已接受 | 迁移切片按风险分两档 tier；低风险快车道减负、门禁派生裁决 fail-closed |
+| [ADR-0016](adr/0016-migration-risk-tiering-and-fast-track.md) | 已被取代 | 历史切片风险分级；活跃迁移流程由 ADR-0017 取代 |
+| [ADR-0017](adr/0017-capability-catalog-and-domain-wave-migration.md) | 已接受 | 唯一能力总账、细化目录、Domain Wave、自动门禁与历史 Registry 归档 |
 
 ## 阅读顺序
 
 1. 先阅读[长期目标架构](target-architecture.md)与 [ADR-0013](adr/0013-user-execution-request-and-public-market-data-credentials.md)，确认业务 owner、唯一的用户执行请求路径，以及平台公共数据凭证边界。
 2. 涉及 Worker、订单、成交或故障处理时，阅读[生产运行与恢复](production-runtime.md)。
-3. 新增 crate、App、跨域依赖或 Domain/Adapter 子目录前，先按 [ADR-0010](adr/0010-build-impact-and-artifact-isolation.md)判断 Release Unit，再按 [ADR-0015](adr/0015-capability-first-modules-and-api-spi-boundaries.md)确定 capability 与 API/SPI 可见面，最后检查[依赖与代码归属规则](dependency-rules.md)。
+3. 新增 crate、App、跨域依赖或 Domain/Adapter 子目录前，先查询 `rust_quant_alpha/architecture/business-capability-catalog.toml`，再按[目标目录与代码放置规则](target-directory-layout.md)、[ADR-0010](adr/0010-build-impact-and-artifact-isolation.md)、[ADR-0015](adr/0015-capability-first-modules-and-api-spi-boundaries.md)和[依赖与代码归属规则](dependency-rules.md)确定唯一位置。
 4. 新增业务逻辑、Port、Use Case，决定使用对象还是函数，或编写 CRUD/事务/SQL/Consumer 前，检查[业务代码与数据访问放置规范](business-code-and-data-access.md)。
 5. 使用 AI 修改架构相关代码前，执行[AI 编码与架构防腐护栏](ai-coding-guardrails.md)中的放置声明。
-6. AI 迁移 legacy、crate、事实源或运行入口时，先按 [ADR-0014](adr/0014-greenfield-target-repository-migration.md)确认源仓库与目标仓库，再按 [Migration Program 注册表](migrations/programs/README.md)登记跨仓库依赖，按 [AI 架构迁移执行协议](ai-migration-execution-protocol.md)创建单 Owner Manifest，最后按[架构迁移计划](migration-plan.md)执行。
+6. AI 迁移 legacy、crate、事实源或运行入口时，先读[Legacy 业务能力全量盘点](legacy-business-capability-inventory.md)，按 [ADR-0014](adr/0014-greenfield-target-repository-migration.md)确认源仓库与目标仓库，再按 [AI Domain Wave 迁移执行协议](ai-migration-execution-protocol.md)完成当前 Wave 的 L2 语义闭合、实施和自动校验。
 7. 修改 Vegas、回测或实盘配置时，先按 [ADR-0011](adr/0011-layered-runtime-snapshots-and-decision-context.md)固定完整决策上下文，再按 [ADR-0009](adr/0009-research-domain-and-tiered-simulation.md)确认 Research、Quant 和三种模拟边界，最后按 [Vegas 与现有回测主链迁移实战](vegas-backtest-migration.md)执行逐层 parity。
 8. 如果需求与已接受 ADR 冲突，先新增替代 ADR，不得直接绕过现有决策。
 

@@ -64,6 +64,7 @@ mod tests {
 
     fn candle(ts: i64, volume: f64) -> ComputedCandle {
         ComputedCandle {
+            volume_ccy: None,
             candle: BacktestCandle {
                 ts,
                 open: 100.0,
@@ -74,9 +75,14 @@ mod tests {
             },
             sma: None,
             ema: None,
+            ema12: None,
+            ema144: None,
+            ema169: None,
+            ema696: None,
             previous_volume_avg: None,
             previous_range_avg: None,
             rsi14: None,
+            atr14: None,
             bollinger_middle: None,
             bollinger_upper: None,
             bollinger_lower: None,

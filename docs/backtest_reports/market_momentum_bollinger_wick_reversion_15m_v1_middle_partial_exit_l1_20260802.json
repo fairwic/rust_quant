@@ -1,0 +1,66 @@
+{
+  "schema_version": "momentum_bollinger_middle_partial_exit_l1_v1",
+  "generated_at_utc": "2026-08-02T06:13:04Z",
+  "identity": {
+    "level": "L1_quick_research_no_outcome_labels",
+    "candidate_key": "market_momentum_bollinger_wick_reversion_15m_v1",
+    "rule_version": "l1_first_causal_middle_touch_close_50pct_geometry_v1",
+    "only_variable": "after a real fill, the first causal Bollinger middle touch closes 50 percent of original quantity",
+    "l1_scope": "signal-time planned-limit-to-middle geometry only",
+    "partial_close_fraction_of_original_quantity": 0.5,
+    "remaining_stop_policy": "unchanged_v2_initial_stop",
+    "remaining_target_policy": "unchanged_v2_volume_atr_target",
+    "ema_filter_included": false,
+    "middle_proximity_entry_filter_included": false,
+    "outcome_evaluation_performed": false
+  },
+  "causal_contract_for_l2": {
+    "monitoring_begins": "first complete 15m candle after the fill candle",
+    "middle_band_visibility": "each candle uses the Bollinger(20) middle known from the most recent completed candle at candle open",
+    "same_candle_stop_priority": true,
+    "middle_fill_price_policy": "frozen causal middle price without favorable gap improvement",
+    "partial_can_trigger_more_than_once": false
+  },
+  "source": {
+    "candidate_ledger_path": "docs/backtest_reports/market_momentum_bollinger_wick_reversion_15m_v1_l1_coverage_20260802.json",
+    "candidate_ledger_sha256": "d11dfe783dce14f441007b4575c919c563891ca6dac8e5258dd5069716df2788",
+    "candidate_filter": "touches_directional_outer_band == true",
+    "dataset_fingerprint_sha256": "0c3d1e6ce33187fbc0fd528486d837574fe176b73a748b1f44dedd3c14c328f5",
+    "returned_symbol_count": 60,
+    "eligible_symbol_count": 44,
+    "excluded_symbol_count": 16,
+    "candidate_ledger_reused": true
+  },
+  "summary": {
+    "base_touch_setups": 673,
+    "geometry_ready_setups": 673,
+    "geometry_invalid_setups": 0,
+    "valid_by_direction": {
+      "long": 340,
+      "short": 333
+    },
+    "symbol_count": 44,
+    "month_count": 13,
+    "effective_market_events": 369,
+    "planned_middle_distance_half_band_ratio": {
+      "min": 1.0008986454431383,
+      "max": 5.820034621461799,
+      "mean": 1.5513709318718343
+    },
+    "future_or_outcome_fields_read": false
+  },
+  "decision": {
+    "status": "promote_to_l2_local_diagnostic",
+    "gates": {
+      "geometry_ready_setups_at_least_30": true,
+      "middle_is_strictly_in_profit_direction": true,
+      "effective_events_at_least_15": true,
+      "symbols_at_least_8": true,
+      "months_at_least_6": true,
+      "both_directions_at_least_5": true,
+      "no_future_or_outcome_data_required": true
+    },
+    "reason": "all 673 base setups have valid causal planned-limit-to-middle geometry with broad direction, symbol, month, and event coverage",
+    "outcome_evaluation_performed": false
+  }
+}

@@ -1,19 +1,41 @@
 use super::{BacktestCandle, ComputedCandle};
 use rust_quant_indicators::momentum::macd::MacdSimpleIndicator;
+use rust_quant_indicators::volatility::ATR;
 
 pub(crate) const FAST_MOMENTUM_RSI_PERIOD: usize = 14;
+pub(crate) const FAST_MOMENTUM_ATR_PERIOD: usize = 14;
 pub(crate) const FAST_MOMENTUM_BOLLINGER_PERIOD: usize = 20;
 const FAST_MOMENTUM_MACD_FAST_PERIOD: usize = 12;
 const FAST_MOMENTUM_MACD_SLOW_PERIOD: usize = 26;
 const FAST_MOMENTUM_MACD_SIGNAL_PERIOD: usize = 9;
+pub(crate) const FILTERED_VOLUME_EMA_FAST_PERIOD: usize = 12;
+pub(crate) const FILTERED_VOLUME_EMA_MIDDLE_PERIOD: usize = 144;
+pub(crate) const FILTERED_VOLUME_EMA_SECOND_MIDDLE_PERIOD: usize = 169;
+pub(crate) const FILTERED_VOLUME_EMA_SLOW_PERIOD: usize = 696;
 const FAST_MOMENTUM_BOLLINGER_STDDEV: f64 = 2.0;
+
+/// 由一个完整收盘价窗口冻结的布林带数值；策略只能组合这些数值，不能在指标层产生方向。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct BollingerBandsSnapshot {
+    /// 窗口收盘价的算术平均值。
+    pub(super) middle: f64,
+    /// 中轨加标准差倍数后的上轨。
+    pub(super) upper: f64,
+    /// 中轨减标准差倍数后的下轨。
+    pub(super) lower: f64,
+}
 
 /// 构建 15m/高周期派生 K 线指标，供入场、趋势确认和 paper observation 共用。
 pub fn build_computed_candles(candles: Vec<BacktestCandle>, period: usize) -> Vec<ComputedCandle> {
     let mut computed = Vec::with_capacity(candles.len());
-    let mut ema: Option<f64> = None;
     let mut rsi_average_gain_loss: Option<(f64, f64)> = None;
-    let multiplier = 2.0 / (period as f64 + 1.0);
+    let mut atr = ATR::new(FAST_MOMENTUM_ATR_PERIOD)
+        .expect("FAST_MOMENTUM_ATR_PERIOD is a positive constant");
+    let ema_values = ema_close_series(&candles, period);
+    let ema12_values = ema_close_series(&candles, FILTERED_VOLUME_EMA_FAST_PERIOD);
+    let ema144_values = ema_close_series(&candles, FILTERED_VOLUME_EMA_MIDDLE_PERIOD);
+    let ema169_values = ema_close_series(&candles, FILTERED_VOLUME_EMA_SECOND_MIDDLE_PERIOD);
+    let ema696_values = ema_close_series(&candles, FILTERED_VOLUME_EMA_SLOW_PERIOD);
     let macd_values = MacdSimpleIndicator::calculate_close_series(
         candles.iter().map(|candle| candle.close),
         FAST_MOMENTUM_MACD_FAST_PERIOD,
@@ -31,14 +53,7 @@ pub fn build_computed_candles(candles: Vec<BacktestCandle>, period: usize) -> Ve
         } else {
             None
         };
-        ema = match (i + 1, ema, sma) {
-            (count, _, Some(value)) if count == period => Some(value),
-            (count, Some(previous), _) if count > period && valid_positive(candles[i].close) => {
-                Some((candles[i].close - previous) * multiplier + previous)
-            }
-            (count, previous, _) if count > period => previous.and(None),
-            _ => None,
-        };
+        let ema = ema_values[i];
         let previous_volume_avg = if i >= period {
             simple_average(candles[i - period..i].iter().map(|candle| candle.volume))
         } else {
@@ -52,6 +67,8 @@ pub fn build_computed_candles(candles: Vec<BacktestCandle>, period: usize) -> Ve
         let rsi14 = rsi_average_gain_loss_at(&candles, i, &mut rsi_average_gain_loss).and_then(
             |(average_gain, average_loss)| rsi_from_average_gain_loss(average_gain, average_loss),
         );
+        let atr14 = atr.next(candles[i].high, candles[i].low, candles[i].close);
+        let atr14 = valid_positive(atr14).then_some(atr14);
         let (bollinger_middle, bollinger_upper, bollinger_lower, bollinger_bandwidth_pct) =
             bollinger_bands_at(&candles, i)
                 .map(|bands| (Some(bands.0), Some(bands.1), Some(bands.2), bands.3))
@@ -59,11 +76,17 @@ pub fn build_computed_candles(candles: Vec<BacktestCandle>, period: usize) -> Ve
         let macd = macd_values.get(i).copied().flatten();
         computed.push(ComputedCandle {
             candle: candles[i].clone(),
+            volume_ccy: None,
             sma,
             ema,
+            ema12: ema12_values[i],
+            ema144: ema144_values[i],
+            ema169: ema169_values[i],
+            ema696: ema696_values[i],
             previous_volume_avg,
             previous_range_avg,
             rsi14,
+            atr14,
             bollinger_middle,
             bollinger_upper,
             bollinger_lower,
@@ -74,6 +97,29 @@ pub fn build_computed_candles(candles: Vec<BacktestCandle>, period: usize) -> Ve
         });
     }
     computed
+}
+
+/// 以首个完整窗口的 SMA 为种子计算 EMA，保证不同周期共享一致的预热语义。
+fn ema_close_series(candles: &[BacktestCandle], period: usize) -> Vec<Option<f64>> {
+    let mut values = vec![None; candles.len()];
+    if period == 0 || candles.len() < period {
+        return values;
+    }
+    let seed_idx = period - 1;
+    let Some(mut previous) = simple_average(candles[..period].iter().map(|candle| candle.close))
+    else {
+        return values;
+    };
+    values[seed_idx] = Some(previous);
+    let multiplier = 2.0 / (period as f64 + 1.0);
+    for idx in period..candles.len() {
+        if !valid_positive(candles[idx].close) {
+            break;
+        }
+        previous = (candles[idx].close - previous) * multiplier + previous;
+        values[idx] = Some(previous);
+    }
+    values
 }
 
 /// 按 Wilder RSI 的平滑方式维护 RSI14 的平均涨跌幅，避免每根 K 线重复扫描历史。
@@ -156,20 +202,40 @@ fn bollinger_bands_at(
         .iter()
         .map(|candle| candle.close)
         .collect::<Vec<_>>();
+    let bands = bollinger_bands_from_closes(&closes, FAST_MOMENTUM_BOLLINGER_STDDEV)?;
+    let bandwidth =
+        valid_positive(bands.middle).then_some((bands.upper - bands.lower) / bands.middle * 100.0);
+    Some((bands.middle, bands.upper, bands.lower, bandwidth))
+}
+
+/// 使用总体标准差计算一个完整收盘价窗口，供不同策略参数复用同一布林带口径。
+pub(super) fn bollinger_bands_from_closes(
+    closes: &[f64],
+    standard_deviation_multiplier: f64,
+) -> Option<BollingerBandsSnapshot> {
+    if closes.is_empty()
+        || !standard_deviation_multiplier.is_finite()
+        || standard_deviation_multiplier <= 0.0
+    {
+        return None;
+    }
     let middle = simple_average(closes.iter().copied())?;
     let variance = closes
         .iter()
         .map(|close| (close - middle).powi(2))
         .sum::<f64>()
-        / FAST_MOMENTUM_BOLLINGER_PERIOD as f64;
+        / closes.len() as f64;
     if !variance.is_finite() || variance < 0.0 {
         return None;
     }
-    let deviation = variance.sqrt() * FAST_MOMENTUM_BOLLINGER_STDDEV;
+    let deviation = variance.sqrt() * standard_deviation_multiplier;
     let upper = middle + deviation;
     let lower = middle - deviation;
-    let bandwidth = valid_positive(middle).then_some((upper - lower) / middle * 100.0);
-    Some((middle, upper, lower, bandwidth))
+    (upper.is_finite() && lower.is_finite()).then_some(BollingerBandsSnapshot {
+        middle,
+        upper,
+        lower,
+    })
 }
 
 fn simple_average(values: impl Iterator<Item = f64>) -> Option<f64> {

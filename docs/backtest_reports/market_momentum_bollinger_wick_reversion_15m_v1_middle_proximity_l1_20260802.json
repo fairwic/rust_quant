@@ -1,0 +1,90 @@
+{
+  "schema_version": "momentum_bollinger_middle_proximity_l1_v1",
+  "generated_at_utc": "2026-08-02T06:10:08Z",
+  "identity": {
+    "level": "L1_quick_research_no_outcome_labels",
+    "candidate_key": "market_momentum_bollinger_wick_reversion_15m_v1",
+    "rule_version": "l1_bb20x2p5_reject_close_near_middle_primary_0p25_v1",
+    "only_variable": "reject a base setup when abs(signal_close - bollinger_middle) divided by the directional half-band is at or below the registered threshold",
+    "primary_threshold_half_band_ratio": 0.25,
+    "sensitivity_thresholds_half_band_ratio": [0.1, 0.5],
+    "ema_filter_included": false,
+    "label_boundary": "reads only signal-time candidate fields; no fill, future candle, MFE, MAE, exit, PnL, R, win, loss, or outcome fields"
+  },
+  "source": {
+    "candidate_ledger_path": "docs/backtest_reports/market_momentum_bollinger_wick_reversion_15m_v1_l1_coverage_20260802.json",
+    "candidate_ledger_sha256": "d11dfe783dce14f441007b4575c919c563891ca6dac8e5258dd5069716df2788",
+    "candidate_filter": "touches_directional_outer_band == true",
+    "distance_field": "close_middle_distance_half_band_ratio",
+    "dataset_fingerprint_sha256": "0c3d1e6ce33187fbc0fd528486d837574fe176b73a748b1f44dedd3c14c328f5",
+    "expected_symbol_count": 60,
+    "returned_symbol_count": 60,
+    "eligible_symbol_count": 44,
+    "excluded_symbol_count": 16,
+    "candidate_ledger_reused": true
+  },
+  "summary": {
+    "base_touch_setups": 673,
+    "distance_ready_setups": 673,
+    "distance_not_ready_setups": 0,
+    "variants": [
+      {
+        "name": "strict_0p10",
+        "threshold_half_band_ratio": 0.1,
+        "affected_setups": 3,
+        "impact_pct": 0.44576523031203563,
+        "by_direction": {
+          "long": 1,
+          "short": 2
+        },
+        "symbol_count": 3,
+        "month_count": 3,
+        "effective_market_events": 3
+      },
+      {
+        "name": "primary_0p25",
+        "threshold_half_band_ratio": 0.25,
+        "affected_setups": 8,
+        "impact_pct": 1.188707280832095,
+        "by_direction": {
+          "long": 2,
+          "short": 6
+        },
+        "symbol_count": 8,
+        "month_count": 6,
+        "effective_market_events": 8
+      },
+      {
+        "name": "loose_0p50",
+        "threshold_half_band_ratio": 0.5,
+        "affected_setups": 56,
+        "impact_pct": 8.320950965824665,
+        "by_direction": {
+          "long": 21,
+          "short": 35
+        },
+        "symbol_count": 34,
+        "month_count": 12,
+        "effective_market_events": 47
+      }
+    ],
+    "threshold_hit_counts_monotonic": true
+  },
+  "decision": {
+    "status": "stop",
+    "primary_variant": "primary_0p25",
+    "gates": {
+      "affected_setups_at_least_30": false,
+      "impact_between_5_and_30_pct": false,
+      "effective_events_at_least_15": false,
+      "symbols_at_least_8": true,
+      "months_at_least_6": true,
+      "both_directions_at_least_5": false,
+      "distance_ready_for_all_base_setups": true,
+      "threshold_hit_counts_monotonic": true
+    },
+    "reason": "the preregistered 0.25 primary threshold affects only 8 of 673 setups, including only 2 longs; it cannot enter L2",
+    "sensitivity_policy": "0.10 and 0.50 are no-label coverage observations only and cannot replace the preregistered 0.25 primary after results are visible",
+    "outcome_evaluation_performed": false
+  }
+}

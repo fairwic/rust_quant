@@ -1,7 +1,35 @@
+use super::filtered_volume_rsi_ema_macd::{
+    FILTERED_VOLUME_MIN_RATIO, FILTERED_VOLUME_V9_MIN_RATIO,
+};
+use super::rsi_volume_regime::{
+    RSI_VOLUME_MIN_RATIO, RSI_VOLUME_V3_MIN_RATIO, RSI_VOLUME_V5_MIN_RATIO,
+};
+use super::{
+    is_filtered_volume_weekly_base_version, is_isolated_entry_family_version,
+    uses_filtered_volume_2p5, uses_target_completion_profit_observation,
+    MARKET_FILTERED_VOLUME_RSI_EMA_MACD_V10_PRESET, MARKET_FILTERED_VOLUME_RSI_EMA_MACD_V11_PRESET,
+    MARKET_FILTERED_VOLUME_RSI_EMA_MACD_V12_PRESET, MARKET_FILTERED_VOLUME_RSI_EMA_MACD_V13_PRESET,
+    MARKET_FILTERED_VOLUME_RSI_EMA_MACD_V1_ENTRY_RULE_VERSION,
+    MARKET_FILTERED_VOLUME_RSI_EMA_MACD_V1_PRESET,
+    MARKET_FILTERED_VOLUME_RSI_EMA_MACD_V2_ENTRY_RULE_VERSION,
+    MARKET_FILTERED_VOLUME_RSI_EMA_MACD_V2_PRESET, MARKET_FILTERED_VOLUME_RSI_EMA_MACD_V3_PRESET,
+    MARKET_FILTERED_VOLUME_RSI_EMA_MACD_V4_PRESET, MARKET_FILTERED_VOLUME_RSI_EMA_MACD_V5_PRESET,
+    MARKET_FILTERED_VOLUME_RSI_EMA_MACD_V9_PRESET, MARKET_MOMENTUM_DIRECT_KLINE_V36_PRESET,
+    MARKET_MOMENTUM_EXHAUSTION_REVERSAL_V1_PRESET, MARKET_MOMENTUM_EXHAUSTION_REVERSAL_V2_PRESET,
+    MARKET_MOMENTUM_EXHAUSTION_REVERSAL_V3_PRESET, MARKET_RSI_VOLUME_REGIME_V1_PRESET,
+    MARKET_RSI_VOLUME_REGIME_V2_PRESET, MARKET_RSI_VOLUME_REGIME_V3_ENTRY_RULE_VERSION,
+    MARKET_RSI_VOLUME_REGIME_V3_PRESET, MARKET_RSI_VOLUME_REGIME_V4_ENTRY_RULE_VERSION,
+    MARKET_RSI_VOLUME_REGIME_V4_PRESET, MARKET_RSI_VOLUME_REGIME_V5_ENTRY_RULE_VERSION,
+    MARKET_RSI_VOLUME_REGIME_V5_PRESET, MARKET_VOLUME_ANCHOR_RSI_DIVERGENCE_REVERSAL_V1_PRESET,
+    MARKET_VOLUME_ANCHOR_RSI_DIVERGENCE_REVERSAL_V2_PRESET,
+    MARKET_VOLUME_PLATFORM_BREAK_TREND_V1_PRESET, MARKET_VOLUME_PLATFORM_BREAK_TREND_V2_PRESET,
+};
 use anyhow::{bail, Context, Result};
 pub use rust_quant_services::market::MarketVelocityStopLossMode;
 use std::path::PathBuf;
+mod filtered_volume_rsi_ema_macd_research;
 mod paper_strategy_preset;
+pub use filtered_volume_rsi_ema_macd_research::*;
 use paper_strategy_preset::*;
 const DEFAULT_TARGET_RS: &[f64] = &[1.5, 2.0];
 const DEFAULT_PAPER_OUTCOME_ENTRY_RULE_VERSION: &str = "rank_radar_4h_trend_15m_timing_v1";
@@ -261,6 +289,14 @@ pub struct MarketVelocityEventBacktestArgs {
     pub entry_extreme_volume_contrarian: bool,
     /// 是否把极端量大实体 K 线按历史趋势同向解释；仅限独立延续研究。
     pub entry_extreme_volume_continuation: bool,
+    /// 是否启用 RSI 极值反转与两根中性 RSI 横盘放量突破的独立研究规则。
+    pub entry_rsi_volume_regime: bool,
+    /// 是否启用过滤量比与 RSI/EMA/MACD 三分支合并的独立 15m 研究规则。
+    pub entry_filtered_volume_rsi_ema_macd: bool,
+    /// MACD DIF 零轴缓冲的 ATR14 倍数 Z；为空时 v2 MACD 分支关闭。
+    pub entry_filtered_volume_macd_zero_band_atr_multiplier: Option<f64>,
+    /// 两个枢轴间最小归一化 DIF 改善幅度 D_min；为空时 v2 MACD 分支关闭。
+    pub entry_filtered_volume_macd_min_normalized_dif_improvement: Option<f64>,
     /// 是否用过去十个 UTC 日相同 15m 时点均量替代连续 K 线均量。
     pub entry_relative_volume_at_time_10d: bool,
     /// 入场前回看窗口内要求出现的最小回撤幅度；为空时不启用。
@@ -464,6 +500,10 @@ impl Default for MarketVelocityEventBacktestArgs {
             entry_min_range_expansion_ratio: None,
             entry_extreme_volume_contrarian: false,
             entry_extreme_volume_continuation: false,
+            entry_rsi_volume_regime: false,
+            entry_filtered_volume_rsi_ema_macd: false,
+            entry_filtered_volume_macd_zero_band_atr_multiplier: None,
+            entry_filtered_volume_macd_min_normalized_dif_improvement: None,
             entry_relative_volume_at_time_10d: false,
             entry_min_recent_drawdown_pct: None,
             entry_recent_drawdown_lookback_candles: 12,
@@ -622,6 +662,18 @@ where
             "--entry-extreme-volume-contrarian" => parsed.entry_extreme_volume_contrarian = true,
             "--entry-extreme-volume-continuation" => {
                 parsed.entry_extreme_volume_continuation = true
+            }
+            "--entry-rsi-volume-regime" => parsed.entry_rsi_volume_regime = true,
+            "--entry-filtered-volume-rsi-ema-macd" => {
+                parsed.entry_filtered_volume_rsi_ema_macd = true
+            }
+            "--entry-filtered-volume-macd-zero-band-atr-multiplier" => {
+                parsed.entry_filtered_volume_macd_zero_band_atr_multiplier =
+                    Some(parse_next(&mut args, &arg)?)
+            }
+            "--entry-filtered-volume-macd-min-normalized-dif-improvement" => {
+                parsed.entry_filtered_volume_macd_min_normalized_dif_improvement =
+                    Some(parse_next(&mut args, &arg)?)
             }
             "--entry-relative-volume-at-time-10d" => {
                 parsed.entry_relative_volume_at_time_10d = true
@@ -869,6 +921,61 @@ where
     validate_args(&parsed, paper_outcome_entry_rule_version_explicit)?;
     Ok(parsed)
 }
+
+/// 返回直接 K 线 v36 的冻结研究参数，不允许 paper 入口绕过研究门禁。
+pub fn market_momentum_direct_kline_v36_frozen_args() -> Result<MarketVelocityEventBacktestArgs> {
+    let mut args = Vec::new();
+    append_direct_kline_v36_frozen_args(&mut args);
+    let mut parsed = parse_cli_args_from(args)?;
+    parsed.paper_strategy_preset = MARKET_MOMENTUM_DIRECT_KLINE_V36_PRESET.to_string();
+    Ok(parsed)
+}
+
+/// 返回 RSI 放量/横盘突破 v1 的冻结研究参数，不允许 paper 入口绕过研究门禁。
+pub fn market_rsi_volume_regime_v1_research_args() -> Result<MarketVelocityEventBacktestArgs> {
+    let mut args = Vec::new();
+    append_rsi_volume_regime_v1_research_args(&mut args);
+    let mut parsed = parse_cli_args_from(args)?;
+    parsed.paper_strategy_preset = MARKET_RSI_VOLUME_REGIME_V1_PRESET.to_string();
+    Ok(parsed)
+}
+
+/// 返回 RSI 放量/布林压缩突破/因果背离 v2 的冻结研究参数。
+pub fn market_rsi_volume_regime_v2_research_args() -> Result<MarketVelocityEventBacktestArgs> {
+    let mut args = Vec::new();
+    append_rsi_volume_regime_v2_research_args(&mut args);
+    let mut parsed = parse_cli_args_from(args)?;
+    parsed.paper_strategy_preset = MARKET_RSI_VOLUME_REGIME_V2_PRESET.to_string();
+    Ok(parsed)
+}
+
+/// 返回 RSI 极值背离、压缩突破、96 根净幅与 ATR 风险 v3 的冻结研究参数。
+pub fn market_rsi_volume_regime_v3_research_args() -> Result<MarketVelocityEventBacktestArgs> {
+    let mut args = Vec::new();
+    append_rsi_volume_regime_v3_research_args(&mut args);
+    let mut parsed = parse_cli_args_from(args)?;
+    parsed.paper_strategy_preset = MARKET_RSI_VOLUME_REGIME_V3_PRESET.to_string();
+    Ok(parsed)
+}
+
+/// 返回仅保留 RSI 极值背离和 96 根净幅反转的 v4 冻结研究参数。
+pub fn market_rsi_volume_regime_v4_research_args() -> Result<MarketVelocityEventBacktestArgs> {
+    let mut args = Vec::new();
+    append_rsi_volume_regime_v4_research_args(&mut args);
+    let mut parsed = parse_cli_args_from(args)?;
+    parsed.paper_strategy_preset = MARKET_RSI_VOLUME_REGIME_V4_PRESET.to_string();
+    Ok(parsed)
+}
+
+/// 返回使用十根异常量过滤基线，且其余规则继承 v4 的 v5 冻结研究参数。
+pub fn market_rsi_volume_regime_v5_research_args() -> Result<MarketVelocityEventBacktestArgs> {
+    let mut args = Vec::new();
+    append_rsi_volume_regime_v5_research_args(&mut args);
+    let mut parsed = parse_cli_args_from(args)?;
+    parsed.paper_strategy_preset = MARKET_RSI_VOLUME_REGIME_V5_PRESET.to_string();
+    Ok(parsed)
+}
+
 /// 校验输入和运行前置条件，提前暴露 回测与策略研究 的不可执行原因。
 fn validate_args(
     parsed: &MarketVelocityEventBacktestArgs,
@@ -1170,6 +1277,156 @@ fn validate_args(
     }
     if parsed.entry_extreme_volume_contrarian && parsed.entry_extreme_volume_continuation {
         bail!("extreme-volume contrarian and continuation modes are mutually exclusive");
+    }
+    if parsed.entry_filtered_volume_rsi_ema_macd {
+        let filtered_volume_version = parsed.paper_outcome_entry_rule_version.as_str();
+        if !matches!(
+            filtered_volume_version,
+            MARKET_FILTERED_VOLUME_RSI_EMA_MACD_V1_ENTRY_RULE_VERSION
+                | MARKET_FILTERED_VOLUME_RSI_EMA_MACD_V2_ENTRY_RULE_VERSION
+        ) && !is_filtered_volume_weekly_base_version(filtered_volume_version)
+        {
+            bail!(
+                "--entry-filtered-volume-rsi-ema-macd requires a supported research rule version"
+            );
+        }
+        let macd_parameters = (
+            parsed.entry_filtered_volume_macd_zero_band_atr_multiplier,
+            parsed.entry_filtered_volume_macd_min_normalized_dif_improvement,
+        );
+        if parsed.paper_outcome_entry_rule_version
+            == MARKET_FILTERED_VOLUME_RSI_EMA_MACD_V1_ENTRY_RULE_VERSION
+            && macd_parameters != (None, None)
+        {
+            bail!("filtered-volume MACD Z and D_min parameters are only valid for v2+ entry rules");
+        }
+        if filtered_volume_version == MARKET_FILTERED_VOLUME_RSI_EMA_MACD_V2_ENTRY_RULE_VERSION
+            || is_filtered_volume_weekly_base_version(filtered_volume_version)
+        {
+            match macd_parameters {
+                (None, None) => {}
+                (Some(zero_band_multiplier), Some(min_improvement))
+                    if zero_band_multiplier.is_finite()
+                        && zero_band_multiplier > 0.0
+                        && min_improvement.is_finite()
+                        && min_improvement > 0.0 => {}
+                (Some(_), Some(_)) => {
+                    bail!(
+                        "filtered-volume MACD Z and D_min must both be finite and greater than 0"
+                    );
+                }
+                _ => {
+                    bail!(
+                        "filtered-volume MACD v2+ requires Z and D_min together, or neither to disable the branch"
+                    );
+                }
+            }
+        }
+        if parsed.event_source != MarketVelocityEventSource::Kline15m
+            || parsed.kline_volume_rank_velocity
+        {
+            bail!(
+                "--entry-filtered-volume-rsi-ema-macd requires direct --event-source kline_15m without rank velocity"
+            );
+        }
+        if parsed.trade_direction != MarketVelocityTradeDirection::Both {
+            bail!("--entry-filtered-volume-rsi-ema-macd requires --trade-direction both");
+        }
+        if parsed.stop_loss_mode != MarketVelocityStopLossMode::StructureOrFixed {
+            bail!(
+                "--entry-filtered-volume-rsi-ema-macd requires --stop-loss-mode structure_or_fixed"
+            );
+        }
+        let required_volume_ratio = if uses_filtered_volume_2p5(filtered_volume_version) {
+            FILTERED_VOLUME_V9_MIN_RATIO
+        } else {
+            FILTERED_VOLUME_MIN_RATIO
+        };
+        if (parsed.entry_min_volume_ratio - required_volume_ratio).abs() > f64::EPSILON {
+            bail!(
+                "--entry-filtered-volume-rsi-ema-macd entry rule {filtered_volume_version} requires --entry-min-volume-ratio {required_volume_ratio}"
+            );
+        }
+        if parsed.entry_rsi_volume_regime
+            || parsed.entry_extreme_volume_contrarian
+            || parsed.entry_extreme_volume_continuation
+            || parsed.entry_bollinger_breakout
+            || parsed.entry_min_opposite_net_move_pct.is_some()
+            || parsed.entry_min_opposite_duration_candles.is_some()
+            || parsed.fvg_entry_mode != FvgEntryMode::Off
+            || parsed.trend_timeframe != MarketVelocityTrendTimeframe::Off
+        {
+            bail!(
+                "--entry-filtered-volume-rsi-ema-macd cannot be combined with legacy entry, trend, Bollinger, or FVG modes"
+            );
+        }
+        if !parsed.volume_atr_take_profit
+            && !is_isolated_entry_family_version(filtered_volume_version)
+        {
+            bail!("--entry-filtered-volume-rsi-ema-macd requires tiered ATR take profit");
+        }
+        if uses_target_completion_profit_observation(filtered_volume_version)
+            && (parsed.profit_protect_after_r.is_some()
+                || parsed.runner_target_r.is_some()
+                || parsed.early_exit_no_profit_candles.is_some())
+        {
+            bail!(
+                "target-completion profit observation cannot be combined with legacy exit overlays"
+            );
+        }
+        if parsed.paper_outcome_sink != MarketVelocityPaperOutcomeSink::Off
+            || parsed.paper_strategy_signal_sink != MarketVelocityPaperStrategySignalSink::Off
+        {
+            bail!("--entry-filtered-volume-rsi-ema-macd is research-only");
+        }
+    } else if parsed
+        .entry_filtered_volume_macd_zero_band_atr_multiplier
+        .is_some()
+        || parsed
+            .entry_filtered_volume_macd_min_normalized_dif_improvement
+            .is_some()
+    {
+        bail!("filtered-volume MACD parameters require --entry-filtered-volume-rsi-ema-macd");
+    }
+    if parsed.entry_rsi_volume_regime {
+        if parsed.event_source != MarketVelocityEventSource::Kline15m
+            || parsed.kline_volume_rank_velocity
+        {
+            bail!(
+                "--entry-rsi-volume-regime requires direct --event-source kline_15m without rank velocity"
+            );
+        }
+        if parsed.trade_direction != MarketVelocityTradeDirection::Both {
+            bail!("--entry-rsi-volume-regime requires --trade-direction both");
+        }
+        if parsed.stop_loss_mode != MarketVelocityStopLossMode::StructureOrFixed {
+            bail!("--entry-rsi-volume-regime requires --stop-loss-mode structure_or_fixed");
+        }
+        let required_volume_ratio = match parsed.paper_outcome_entry_rule_version.as_str() {
+            MARKET_RSI_VOLUME_REGIME_V3_ENTRY_RULE_VERSION
+            | MARKET_RSI_VOLUME_REGIME_V4_ENTRY_RULE_VERSION => RSI_VOLUME_V3_MIN_RATIO,
+            MARKET_RSI_VOLUME_REGIME_V5_ENTRY_RULE_VERSION => RSI_VOLUME_V5_MIN_RATIO,
+            _ => RSI_VOLUME_MIN_RATIO,
+        };
+        if (parsed.entry_min_volume_ratio - required_volume_ratio).abs() > f64::EPSILON {
+            bail!(
+                "--entry-rsi-volume-regime requires --entry-min-volume-ratio {required_volume_ratio} for the selected rule version"
+            );
+        }
+        if parsed.entry_extreme_volume_contrarian
+            || parsed.entry_extreme_volume_continuation
+            || parsed.entry_min_rsi.is_some()
+            || parsed.entry_max_rsi.is_some()
+        {
+            bail!(
+                "--entry-rsi-volume-regime cannot be combined with legacy RSI/extreme-volume modes"
+            );
+        }
+        if parsed.paper_outcome_sink != MarketVelocityPaperOutcomeSink::Off
+            || parsed.paper_strategy_signal_sink != MarketVelocityPaperStrategySignalSink::Off
+        {
+            bail!("--entry-rsi-volume-regime is research-only");
+        }
     }
     if parsed.entry_relative_volume_at_time_10d && !parsed.entry_extreme_volume_continuation {
         bail!("--entry-relative-volume-at-time-10d requires --entry-extreme-volume-continuation");
@@ -1544,7 +1801,7 @@ fn normalized_arg_flag(arg: &str) -> &str {
 /// 执行输出市场动量event回测usage步骤，串起回测策略需要的状态推进和错误处理。
 pub fn print_market_velocity_event_backtest_usage() {
     println!(
-        "Usage: market_velocity_event_backtest [--event-source episodes|raw_events|raw_state|kline_15m --kline-current-live-only --kline-volume-rank-velocity --kline-volume-rank-require-turnover-growth --kline-volume-rank-require-consecutive-improvement] [--trade-direction long|short|both] [--sample-limit 20 --sample-seed batch_a | --historical-universe-manifest PATH --event-start-ms MS --event-end-ms MS] [--target-rs 1.5,2.0] [--stop-loss-pct 0.02 --stop-loss-mode fixed_pct|structure_or_fixed|structure_with_cap --structure-stop-min-pct 0.01] [--entry-period 20] [--entry-min-rsi 55 --entry-max-rsi 78 --entry-min-rsi-delta 3 --entry-rsi-delta-lookback-candles 3 --entry-bollinger-breakout --entry-min-bollinger-bandwidth-expansion-pct 12 --entry-min-body-ratio-pct 65 --entry-min-close-position-pct 80 --entry-min-range-expansion-ratio 1.5 --entry-extreme-volume-contrarian --entry-once-per-opposite-trend-state --entry-wait-setup-open-reclaim --entry-extreme-volume-continuation --entry-relative-volume-at-time-10d --entry-once-per-historical-trend-state --entry-opposite-trend-reset-confirm-candles 8 --entry-min-recent-drawdown-pct 3.5 --entry-recent-drawdown-lookback-candles 12 --entry-opposite-move-lookback-candles 192 --entry-min-opposite-net-move-pct 10 --entry-min-opposite-duration-candles 96 --entry-opposite-duration-min-r-squared 0.70 --entry-min-exhaustion-volume-dominance-ratio 1.0 --entry-btc-96-max-abs-net-move-pct 2.0 --entry-btc-384-min-directional-net-move-pct 0 --entry-btc-require-current-directional-candle --volume-atr-take-profit --volume-atr-target-scale 4 --volume-atr-min-target-r 1.8 --volume-atr-max-target-r 3.0 --backtest-fee-bps-per-side 5 --backtest-slippage-bps-per-side 3 --entry-defer-bearish-continuation --entry-defer-bullish-continuation --entry-defer-long-lower-wick-reversal --entry-long-bullish-hammer-reversal --entry-require-two-stage-recovery --entry-require-macd-negative-histogram-improving --entry-require-opposite-reversal-confirmation --entry-require-reversal-average-reclaim --entry-require-bullish-structure-break --entry-defer-max-wait-candles 3 --entry-symbol-cooldown-candles 8] [--entry-max-signal-pullback-pct 3.0] [--entry-max-gap-without-retest-pct 0.8 --entry-retest-tolerance-pct 0.3 --entry-retest-after-signal --entry-retest-max-wait-candles 8 --entry-retest-min-entry-open-gap-pct 0.0 --entry-retest-open-fade-min-volume-ratio 2.0] [--trend-timeframe 4h|1h|off] [--min-delta-rank 15 --max-delta-rank 79] [--min-price-change-pct 5.0] [--event-start-ms 1717200000000 --event-end-ms 1719791999999] [--entry-trigger-allowlist breakout_previous_high,reclaim_ema] [--entry-trigger-blocklist pullback_hold_ema] [--stop-reentry-mode off|breakout_reclaim] [--profit-protect-after-r 1.0 --profit-protect-stop-r 0.0] [--runner-target-r 4.0 --runner-fraction 0.5 --runner-stop-r 0.0] [--early-exit-no-profit-candles 2] [--equity-max-holding-hours 48] [--ignore-entry-signal-updates-while-open] [--fvg-entry-mode off|15m_to_1h|1h_to_4h|15m_self_after_signal|15m_impulse_retrace --fvg-impulse-retrace-fill-pct 20 --fvg-impulse-retrace-min-wait-candles 0] [--equity-report] [--equity-split-report] [--equity-quartile-report] [--equity-trigger-report] [--equity-concentration-report] [--equity-feature-report] [--equity-price-volume-diagnostic-report] [--equity-symbol-window-report] [--equity-trade-report --min-trades 30] [--save-backtest-detail] [--paper-outcome-sink off|jsonl|web]"
+        "Usage: market_velocity_event_backtest [--event-source episodes|raw_events|raw_state|kline_15m --kline-current-live-only --kline-volume-rank-velocity --kline-volume-rank-require-turnover-growth --kline-volume-rank-require-consecutive-improvement] [--trade-direction long|short|both] [--sample-limit 20 --sample-seed batch_a | --historical-universe-manifest PATH --event-start-ms MS --event-end-ms MS] [--target-rs 1.5,2.0] [--stop-loss-pct 0.02 --stop-loss-mode fixed_pct|structure_or_fixed|structure_with_cap --structure-stop-min-pct 0.01] [--entry-period 20] [--entry-min-rsi 55 --entry-max-rsi 78 --entry-min-rsi-delta 3 --entry-rsi-delta-lookback-candles 3 --entry-rsi-volume-regime --entry-filtered-volume-rsi-ema-macd --entry-filtered-volume-macd-zero-band-atr-multiplier Z --entry-filtered-volume-macd-min-normalized-dif-improvement D_MIN --entry-bollinger-breakout --entry-min-bollinger-bandwidth-expansion-pct 12 --entry-min-body-ratio-pct 65 --entry-min-close-position-pct 80 --entry-min-range-expansion-ratio 1.5 --entry-extreme-volume-contrarian --entry-once-per-opposite-trend-state --entry-wait-setup-open-reclaim --entry-extreme-volume-continuation --entry-relative-volume-at-time-10d --entry-once-per-historical-trend-state --entry-opposite-trend-reset-confirm-candles 8 --entry-min-recent-drawdown-pct 3.5 --entry-recent-drawdown-lookback-candles 12 --entry-opposite-move-lookback-candles 192 --entry-min-opposite-net-move-pct 10 --entry-min-opposite-duration-candles 96 --entry-opposite-duration-min-r-squared 0.70 --entry-min-exhaustion-volume-dominance-ratio 1.0 --entry-btc-96-max-abs-net-move-pct 2.0 --entry-btc-384-min-directional-net-move-pct 0 --entry-btc-require-current-directional-candle --volume-atr-take-profit --volume-atr-target-scale 4 --volume-atr-min-target-r 1.8 --volume-atr-max-target-r 3.0 --backtest-fee-bps-per-side 5 --backtest-slippage-bps-per-side 3 --entry-defer-bearish-continuation --entry-defer-bullish-continuation --entry-defer-long-lower-wick-reversal --entry-long-bullish-hammer-reversal --entry-require-two-stage-recovery --entry-require-macd-negative-histogram-improving --entry-require-opposite-reversal-confirmation --entry-require-reversal-average-reclaim --entry-require-bullish-structure-break --entry-defer-max-wait-candles 3 --entry-symbol-cooldown-candles 8] [--entry-max-signal-pullback-pct 3.0] [--entry-max-gap-without-retest-pct 0.8 --entry-retest-tolerance-pct 0.3 --entry-retest-after-signal --entry-retest-max-wait-candles 8 --entry-retest-min-entry-open-gap-pct 0.0 --entry-retest-open-fade-min-volume-ratio 2.0] [--trend-timeframe 4h|1h|off] [--min-delta-rank 15 --max-delta-rank 79] [--min-price-change-pct 5.0] [--event-start-ms 1717200000000 --event-end-ms 1719791999999] [--entry-trigger-allowlist breakout_previous_high,reclaim_ema] [--entry-trigger-blocklist pullback_hold_ema] [--stop-reentry-mode off|breakout_reclaim] [--profit-protect-after-r 1.0 --profit-protect-stop-r 0.0] [--runner-target-r 4.0 --runner-fraction 0.5 --runner-stop-r 0.0] [--early-exit-no-profit-candles 2] [--equity-max-holding-hours 48] [--ignore-entry-signal-updates-while-open] [--fvg-entry-mode off|15m_to_1h|1h_to_4h|15m_self_after_signal|15m_impulse_retrace --fvg-impulse-retrace-fill-pct 20 --fvg-impulse-retrace-min-wait-candles 0] [--equity-report] [--equity-split-report] [--equity-quartile-report] [--equity-trigger-report] [--equity-concentration-report] [--equity-feature-report] [--equity-price-volume-diagnostic-report] [--equity-symbol-window-report] [--equity-trade-report --min-trades 30] [--save-backtest-detail] [--paper-outcome-sink off|jsonl|web]"
     );
 }
 /// 返回 paper observation CLI usage，并让 preset 列表复用解析常量，避免可运行 preset 漏出帮助文本。

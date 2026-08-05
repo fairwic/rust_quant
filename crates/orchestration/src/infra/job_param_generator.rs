@@ -218,6 +218,8 @@ impl ParamMergeBuilder {
     pub fn to_risk_config(&self) -> BasicRiskStrategyConfig {
         BasicRiskStrategyConfig {
             max_loss_percent: self.max_loss_percent,
+            enforce_base_max_loss: None,
+            check_entry_candle_risk: None,
             atr_take_profit_ratio: Some(self.take_profit_ratio),
             fixed_signal_kline_take_profit_ratio: self.fix_signal_kline_take_profit_ratio,
             is_used_signal_k_line_stop_loss: Some(self.is_used_signal_k_line_stop_loss),
@@ -229,6 +231,7 @@ impl ParamMergeBuilder {
             dynamic_range_loss_percent: self.dynamic_range_loss_percent,
             trade_fee_rate: None,
             position_leverage: self.position_leverage,
+            account_risk_fraction_per_trade: None,
             tiered_take_profit_level_1_close_ratio: None,
             tiered_take_profit_level_2_close_ratio: None,
         }

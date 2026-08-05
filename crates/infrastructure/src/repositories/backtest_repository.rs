@@ -68,8 +68,13 @@ impl BacktestLogRepository for SqlxBacktestRepository {
                 ten_bar_after_win_rate,
                 kline_start_time,
                 kline_end_time,
-                kline_nums
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+                kline_nums,
+                sharpe_ratio,
+                annual_return,
+                total_return,
+                max_drawdown,
+                volatility
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
             RETURNING id
             "#,
         )
@@ -91,6 +96,12 @@ impl BacktestLogRepository for SqlxBacktestRepository {
         .bind(log.kline_start_time)
         .bind(log.kline_end_time)
         .bind(log.kline_nums)
+        // 指标已由 ResearchBar 汇总冻结，随主记录一次写入，避免查询时出现“JSON 有值、列为空”。
+        .bind(log.sharpe_ratio)
+        .bind(log.annual_return)
+        .bind(log.total_return)
+        .bind(log.max_drawdown)
+        .bind(log.volatility)
         .fetch_one(self.pool())
         .await?;
         Ok(inserted_id)

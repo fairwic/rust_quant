@@ -145,7 +145,7 @@ Kill Switch 的 scope 与写入 owner 固定如下：
 - 配额准入失败属于可恢复门禁，使用持久 `next_eligible_at`/事件触发重新唤醒，不制造进程内热重试；
 - 单一 App 无法独占或耗尽共享 key 的全部配额而使同类角色饿死；分配策略与优先级由 Gateway 显式声明，不隐藏在调用点。
 
-共享配额不能只靠进程内 `Mutex`、本地 token bucket 或“调用方自觉退避”实现。首个会让同一 key 被多个 App/实例并发使用的切片之前，`exchange-gateway` 必须提供 `ExchangeQuotaAdmissionPort`，并接入跨进程原子协调器：Redis 的脚本化 token bucket/lease，或具有等价原子语义与过期恢复规则的 Postgres 实现。协调记录至少包含 quota key 类型、操作类别、优先级、成本和有效期；进程重启必须复用未过期的协调状态，协调器不可用时不得为 live mutation 发放准入，只能以带 `next_eligible_at` 的 Blocked/Retryable 结果回到 owner 的持久重试流程。该协调状态是 Adapter 技术状态，不把配额政策或账户风险判断塞进 Domain。
+共享配额不能只靠进程内 `Mutex`、本地 token bucket 或“调用方自觉退避”实现。首次真实出现同一 key 被多个 App/实例并发使用前，`exchange-gateway` 必须提供 `ExchangeQuotaAdmissionPort`，并接入跨进程原子协调器：Redis 的脚本化 token bucket/lease，或具有等价原子语义与过期恢复规则的 Postgres 实现。协调记录至少包含 quota key 类型、操作类别、优先级、成本和有效期；进程重启必须复用未过期的协调状态，协调器不可用时不得为 live mutation 发放准入，只能以带 `next_eligible_at` 的 Blocked/Retryable 结果回到 owner 的持久重试流程。该协调状态是 Adapter 技术状态，不把配额政策或账户风险判断塞进 Domain。
 
 ## 4. 目标架构总览与物理目录
 
@@ -277,6 +277,8 @@ flowchart TB
 
 ### 4.2 目标物理目录
 
+下图只表达顶层包和运行单元。Domain capability、子目录、文件职责、新能力归属和禁止命名以[目标目录与代码放置规则](target-directory-layout.md)为权威；机器唯一 target 以 `rust_quant_alpha/architecture/business-capability-catalog.toml` 为准。
+
 ```text
 rust_quant_alpha/
 ├── apps/
@@ -335,10 +337,6 @@ rust_quant_alpha/
 │   ├── parity/
 │   ├── recovery/
 │   └── e2e/
-├── templates/
-│   ├── command-slice/
-│   ├── query-slice/
-│   └── event-consumer/
 ├── docs/architecture/
 └── xtask/                            # cargo xtask arch-check
 ```
@@ -422,7 +420,7 @@ crates/domains/execution/src/
 │   ├── commands/
 │   ├── consumers/
 │   └── ports/
-├── mutation/
+├── dispatch/                       # permit/fence 后的发送状态，不包含 SDK 实现
 ├── protection/
 ├── safety_obligation/
 └── lib.rs                           # 只公开 api 与 spi
@@ -441,15 +439,15 @@ crates/domains/execution/src/
 
 - 其他 Domain、Research 与普通业务调用方只使用 `<domain>::api`；
 - Adapter 只使用所实现 Domain 的 `<domain>::spi`；
-- App 仅在 `wiring`/composition root 使用 `spi`，Handler、Consumer 与 Scheduler loop 只调用 `api`；
+- App 仅在已登记的运行装配入口使用 `spi`，Handler、Consumer 与 Scheduler loop 只调用 `api`；
 - `api` 不重导出 Port，`spi` 不暴露私有 Aggregate/Use Case 实现，crate 根不再平铺重导出全部类型；
 - `api.rs`、`spi.rs`、`lib.rs` 与 `mod.rs` 只负责文档、module 声明和经过审查的稳定重导出，不承载业务分支、SQL 或 SDK 映射。
 
-Port 不能先于业务长期空置。进入 `verified` 前，非测试 Port 必须同时存在真实生产 Use Case 调用方、至少一个生产 Adapter，以及失败、幂等/原子性和恢复 Owner 证据；只有 Fake/Mock 的 Port 只能停在带承接项的 `implementing` Manifest，不能作为已完成能力。一个公开 Use Case 只表达一个业务动词、一个主要结果和一个恢复 Owner；注入四个及以上有副作用 Port 时必须重新审查边界，禁止用 `EverythingPort` 隐藏依赖。
+Port 不能先于业务长期空置。capability 进入 `implemented` 前，非测试 Port 必须同时存在真实生产 Use Case 调用方、至少一个生产 Adapter，以及失败、幂等/原子性和恢复 Owner 证据；只有 Fake/Mock 的 Port 只能停在 `implementing`，不能作为已完成能力。一个公开 Use Case 只表达一个业务动词、一个主要结果和一个恢复 Owner；注入四个及以上有副作用 Port 时必须重新审查边界，禁止用 `EverythingPort` 隐藏依赖。
 
 业务 enum/error 与其状态机或边界共置：Aggregate 状态放 capability model，用例选择放 Input 附近，Port 失败放 Port 附近，Wire/Row/SDK enum 分别留在 Contract/Postgres Adapter/`crypto_exc_all`。禁止 Domain 级 `enums.rs`、`types.rs`、`common.rs` 收纳不相关定义。
 
-目标文件执行 ADR-0015 的生产代码、总文件、façade 与测试预算。触碰 Error 级超限目标文件时，必须先以纯结构 Manifest 按 capability 拆分，不能继续增加业务。
+目标文件执行 ADR-0015 的生产代码、总文件、façade 与测试预算。触碰 Error 级超限目标文件时，必须先在同一 capability 内按职责拆分，不能继续增加业务。
 
 详细 CRUD、事务和代码示例见[业务代码与数据访问放置规范](business-code-and-data-access.md)。
 
@@ -880,7 +878,7 @@ Clock / Seed
 ## 12. AI 与 CI 必须执行的边界
 
 - 新增代码前先写“owner 与放置声明”；
-- 新功能从 command、query 或 event-consumer 三种垂直切片模板开始；
+- 新功能先查询能力总账并确认 Domain Wave，再选择 command、query、event-consumer 或 pure policy；不预建空模板目录；
 - 禁止新增泛型 `Repository<T>`、`BaseService`、`update_by_id`、`save_json` 或跨 owner SQL；
 - 禁止跨仓库直连数据库:Core 不得连接 `quant_web`/`quant_news`,News/Web 不得连接 `quant_core`;跨仓库读写只走 owner internal API + quant-web-client 等 Adapter(§7.2、§8.2);历史跨库直连只能作为标记的待迁移 legacy,不得新增或扩展;
 - 禁止在 Strategy evaluator、Portfolio/Risk/Execution planning 等决策纯逻辑里读取系统当前时间(`SystemTime::now`/`Utc::now`/`Instant::now`)或随机源;`DecisionTime` 必须来自注入 Clock,`WallClock` 只允许出现在运行时时效路径(lease/permit/心跳/stale/调度),不进决策与 parity(§10);
@@ -888,7 +886,7 @@ Clock / Seed
 - 交易/执行/风控热路径禁止 `.unwrap()`/`.expect()`/`panic!` 与金额相关的 `unwrap_or_default()`/`.ok()` 压平(§10.2);金额类型在 Domain 层用 Decimal 定义,禁止 f64 定义金额字段(§10);
 - 默认收敛可见性：Domain/业务 crate 根只公开 `api` 与 `spi`；其他 Domain/Research 只依赖 `api`，Adapter 与 App 组合根只为实现/装配依赖 `spi`。内部 capability module 使用 `pub(crate)` 或私有，禁止 `pub mod` 全敞开、大面积 glob re-export 或从 `api` 泄漏 Port；
 - 目标 Domain/Adapter 文件执行 ADR-0015 的提前预算；触碰 Error 级超限文件先做纯结构拆分；
-- 非测试 Port 进入 `verified` 前必须有真实生产 Use Case 调用方、至少一个生产 Adapter，以及失败/原子性/恢复证据；Fake-only Port、四个以上副作用 Port 的万能 Use Case 和全局 `enums.rs/types.rs/common.rs` 必须被门禁或 Review 阻塞；
+- 非测试 Port 所属 capability 进入 `implemented` 前必须有真实生产 Use Case 调用方、至少一个生产 Adapter，以及失败/原子性/恢复证据；Fake-only Port、四个以上副作用 Port 的万能 Use Case 和全局 `enums.rs/types.rs/common.rs` 必须被门禁或 Review 阻塞；
 - 测试必须确定性且带断言:禁止把参数扫描/研究脚本塞进 `#[test]` 再 `#[ignore]` 沉淀,禁止只 `println!` 无断言的"假测试";依赖真实交易所/网络/生产 DB 的测试归 integration 且不作为默认 CI 门禁;
 - 决策开关必须是带规范 hash 的显式配置输入,禁止在热路径读 `std::env::var`(见 §10 与坏味道防线);交易标的范围、风控阈值等业务规则走配置,不硬编码进逻辑常量;
 - 表结构只由 `migrations/` 定义(禁运行时 DDL 与旁路整库脚本并存),迁移 append-only、可空库重放、新表新列带 COMMENT,一表一 `FromRow` 归属;禁 `SELECT *` 与拼接列值 SQL(§10.3);
@@ -900,7 +898,7 @@ Clock / Seed
 - 跨进程/跨仓库 internal API 显式版本化(`/v1/` 或 apiVersion 字段),可选字段带 `#[serde(default)]` 兼容,版本不混进业务字符串;handoff/Outbox schema 按 §7.3 版本化 N/N-1;
 - 关键路径(下单、成交、对账、lease、readiness)必须有 metrics 埋点、贯穿式 tracing span 与标准 `/health` 端点;错误统一分类 `Retryable`/`Fatal`;重试/退避/幂等去重复用统一封装,不各处手写;
 - 依赖版本纪律:workspace 内统一 `workspace = true`,git 依赖钉 `rev`,不引入不可复现的浮动版本;
-- `cargo xtask arch-check` 只承担静态 ratchet、目录/依赖/Manifest 完整性和必需测试/Evidence 注册检查；完整 gate owner 与执行方式以 AI 护栏中的 gate matrix 为准，不能把跨仓库 Contract、事务、Recovery、运行时 readiness 或显式授权伪装为单一静态命令结果；
+- `cargo xtask arch-check` 只承担能力总账、静态 ratchet、目录、依赖和测试注册检查；`cargo xtask wave-check --wave Wx` 增加 capability 完成状态和冻结 package tests。二者不能把跨仓库 Contract、事务、Recovery、运行时 readiness 或显式授权伪装为已验证；
 - 静态门禁之外，业务不变量由单元测试，SQL/事务由集成测试，跨进程兼容由 contract test，Research safety order/parity 由 deterministic parity test，故障恢复由 recovery test，cutover/live mutation 由显式授权 Evidence 证明；
 - 子目录 `AGENTS.md` 只记录相对本目录的增量规则，并链接本目录权威文档，禁止复制整套规则造成漂移。
 
@@ -928,7 +926,7 @@ Clock / Seed
 - CI 能拒绝新增非法依赖、跨 owner SQL、未版本化 Contract 和 testkit 生产依赖；
 - CI 能拒绝其他 Domain 导入 `spi`、Adapter 绕过 `spi` 访问私有 module、`api` 重导出 Port、目标文件预算超限和未登记的 Fake-only Port；
 - `core-runtime`、`core-maintenance`、`quant-lab` 有独立 Release Unit Manifest；生产镜像只包含六个生产 App binary，Research-only 变更不能获得生产部署资格；
-- golden vertical slice 经 shadow/parity/recovery 验证后再迁移下一切片；
+- 当前 Domain Wave 经 shadow/parity/recovery 验证后再进入下一 Wave；
 - Vegas 在相同 `ResearchRunSpec`、`ResearchDecisionContextSnapshot`、动态 Evidence 与 EvaluationState before 下可逐层确定重放；
 - 多币种回测改变 symbol 输入顺序后，Portfolio/资金结果必须字节一致；
 - ResearchBar、PaperEvent 与 RecoveryHarness 不互相夸大覆盖范围；

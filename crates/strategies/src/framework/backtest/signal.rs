@@ -15,6 +15,8 @@ const LOW_VOLUME_ABOVE_VALUE_AREA_ENTRY_REASON: &str =
 const SHORT_INSIDE_LOW_VOLUME_NODE_ENTRY_REASON: &str =
     "VOLUME_PROFILE_SHORT_INSIDE_LOW_VOLUME_NODE_BLOCK_ENTRY";
 const REBOUND_HAMMER_LONG_PROTECT_REASON: &str = "REBOUND_HAMMER_LONG_PROTECT";
+/// 标准化的“成交后立即退出”标记；用于成交价已经让预注册保护位失效的订单。
+pub const IMMEDIATE_EXIT_AT_ENTRY_ADJUSTMENT: &str = "IMMEDIATE_EXIT_AT_ENTRY";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ReboundShortProtectMode {
     Off,
@@ -75,6 +77,7 @@ pub fn deal_signal(
     _candle_item_list: &[CandleItem],
     _i: usize,
 ) -> TradingState {
+    let open_position_times_before_signal = trading_state.open_position_times;
     //先检查设置了是否预止损价格
     // if signal.ts == 1762747200000 {
     //     println!("signal: {:#?}", signal);
@@ -193,6 +196,31 @@ pub fn deal_signal(
                 candle,
                 block_short_entry,
             );
+        }
+        // 下一根开盘成交的策略需要把该根 K 线开盘后的完整路径纳入保护单检查。
+        // 只在本次信号确实新开仓或反手开仓后执行，避免同方向更新重复结算同一根 K 线。
+        if risk_config.check_entry_candle_risk.unwrap_or(false)
+            && trading_state.open_position_times > open_position_times_before_signal
+        {
+            if signal
+                .dynamic_adjustments
+                .iter()
+                .any(|value| value == IMMEDIATE_EXIT_AT_ENTRY_ADJUSTMENT)
+            {
+                if let Some(mut position) = trading_state.trade_position.clone() {
+                    position.close_price = Some(signal.open_price);
+                    trading_state.trade_position = Some(position);
+                    close_position(
+                        &mut trading_state,
+                        candle,
+                        signal,
+                        "Invalid_Structure_Stop_At_Fill",
+                        0.0,
+                    );
+                }
+                return trading_state;
+            }
+            trading_state = check_risk_config(&risk_config, trading_state, signal, candle);
         }
     } else {
         // 如果没有新信号
@@ -584,5 +612,89 @@ mod tests {
             Some(TradeSide::Long)
         );
         assert_eq!(state.trade_records.len(), 0);
+    }
+
+    #[test]
+    fn next_open_entry_checks_the_same_candle_without_reapplying_the_percentage_cap() {
+        let mut signal = SignalResult {
+            should_buy: true,
+            open_price: 100.0,
+            signal_kline_stop_loss_price: Some(95.0),
+            stop_loss_source: Some("strategy_structure_stop".to_string()),
+            ts: 1,
+            direction: SignalDirection::Long,
+            ..SignalResult::default()
+        };
+        let entry_candle = CandleItem {
+            o: 100.0,
+            h: 101.0,
+            l: 94.0,
+            c: 99.0,
+            v: 1.0,
+            ts: 1,
+            confirm: 1,
+        };
+        let risk = BasicRiskStrategyConfig {
+            max_loss_percent: 0.03,
+            enforce_base_max_loss: Some(false),
+            check_entry_candle_risk: Some(true),
+            dynamic_max_loss: Some(false),
+            trade_fee_rate: Some(0.0),
+            ..BasicRiskStrategyConfig::default()
+        };
+
+        let state = deal_signal(
+            TradingState::default(),
+            &mut signal,
+            &entry_candle,
+            risk,
+            &[],
+            0,
+        );
+
+        assert!(state.trade_position.is_none());
+        assert_eq!(state.open_position_times, 1);
+        let close = state.trade_records.last().expect("same-candle stop close");
+        assert!(close.full_close);
+        assert_eq!(close.close_price, Some(95.0));
+        assert_eq!(close.close_type, "Signal_Kline_Stop_Loss");
+    }
+
+    #[test]
+    fn invalid_structure_stop_round_trips_at_the_fill_and_charges_cost() {
+        let mut signal = SignalResult {
+            should_buy: true,
+            open_price: 100.0,
+            ts: 1,
+            dynamic_adjustments: vec![IMMEDIATE_EXIT_AT_ENTRY_ADJUSTMENT.to_string()],
+            direction: SignalDirection::Long,
+            ..SignalResult::default()
+        };
+        let risk = BasicRiskStrategyConfig {
+            max_loss_percent: 0.03,
+            enforce_base_max_loss: Some(false),
+            check_entry_candle_risk: Some(true),
+            dynamic_max_loss: Some(false),
+            trade_fee_rate: Some(0.0008),
+            ..BasicRiskStrategyConfig::default()
+        };
+
+        let state = deal_signal(
+            TradingState::default(),
+            &mut signal,
+            &candle(100.0, 1),
+            risk,
+            &[],
+            0,
+        );
+
+        assert!(state.trade_position.is_none());
+        assert_eq!(state.open_position_times, 1);
+        let close = state.trade_records.last().expect("immediate close record");
+        assert_eq!(close.close_price, Some(100.0));
+        assert_eq!(close.close_type, "Invalid_Structure_Stop_At_Fill");
+        assert!((close.profit_loss + 0.16).abs() < 1e-12);
+        assert_eq!(close.initial_risk_amount, None);
+        assert_eq!(close.net_profit_r, None);
     }
 }

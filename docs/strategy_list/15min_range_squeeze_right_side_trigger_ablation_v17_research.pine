@@ -1,0 +1,425 @@
+//@version=6
+// 独立 Research：V15 回踩接受资格保持冻结，随后 1～3 根微结构突破才触发入场；不叠加 V16 经济门禁。
+// 信号和撤单只使用已完成 K 线；volume 按研究合同直接使用 vol_ccy。
+strategy("15m Range Squeeze Right-side Trigger Ablation - Research V17", overlay = true,
+     pyramiding = 0, initial_capital = 100000, default_qty_type = strategy.fixed,
+     default_qty_value = 1, process_orders_on_close = false,
+     commission_type = strategy.commission.percent, commission_value = 0.05,
+     slippage = 0, max_labels_count = 300)
+
+const string rangeGroup = "真实箱体"
+const string breakoutGroup = "突破与右侧触发"
+const string riskGroup = "结构风险"
+const string displayGroup = "显示"
+
+rangeLength = input.int(48, "箱体历史 K 线", minval = 24, maxval = 96, group = rangeGroup)
+rangeMaxWidthRatio = input.float(0.03, "最大箱体宽度", minval = 0.005,
+     maxval = 0.10, step = 0.005, group = rangeGroup)
+touchBandRatio = input.float(0.0015, "边界触碰带比例", minval = 0.0001,
+     step = 0.0001, group = rangeGroup)
+touchBandAtr = input.float(0.35, "边界触碰带 ATR", minval = 0.05,
+     step = 0.05, group = rangeGroup)
+containmentMin = input.float(0.80, "最小收盘包含率", minval = 0.50,
+     maxval = 1.0, step = 0.05, group = rangeGroup)
+boundaryDriftMax = input.float(0.003, "前后半段最大边界漂移", minval = 0.0005,
+     step = 0.0005, group = rangeGroup)
+contractionMax = input.float(0.80, "近期/此前真实波幅上限", minval = 0.30,
+     maxval = 1.20, step = 0.05, group = rangeGroup)
+dryVolumeMax = input.float(0.85, "近期/此前均量上限", minval = 0.30,
+     maxval = 1.20, step = 0.05, group = rangeGroup)
+
+breakoutVolumeMultiplier = input.float(1.75, "突破量/箱体中位量", minval = 1.0,
+     step = 0.05, group = breakoutGroup)
+breakoutBodyRatioMin = input.float(0.60, "突破实体占振幅", minval = 0.30,
+     maxval = 1.0, step = 0.05, group = breakoutGroup)
+breakoutBufferAtr = input.float(0.15, "突破缓冲 ATR", minval = 0.0,
+     step = 0.05, group = breakoutGroup)
+breakoutBufferRatio = input.float(0.001, "突破缓冲价格比例", minval = 0.0,
+     step = 0.0001, group = breakoutGroup)
+maxBreakoutDistanceAtr = input.float(0.75, "最大追价距离 ATR", minval = 0.10,
+     step = 0.05, group = breakoutGroup)
+acceptanceWindow = input.int(4, "回踩接受窗口 K 线", minval = 1, maxval = 8,
+     group = breakoutGroup)
+retestBandAtr = input.float(0.20, "回踩带 ATR", minval = 0.0,
+     step = 0.05, group = breakoutGroup)
+triggerWindow = input.int(3, "右侧触发窗口 K 线", minval = 1, maxval = 5,
+     group = breakoutGroup)
+
+stopBufferAtr = input.float(0.15, "结构止损缓冲 ATR", minval = 0.0,
+     step = 0.05, group = riskGroup)
+maxInitialRiskAtr = input.float(1.50, "最大初始风险 ATR", minval = 0.50,
+     step = 0.10, group = riskGroup)
+partialPercent = input.float(33.0, "1R 平仓比例", minval = 1.0,
+     maxval = 80.0, step = 1.0, group = riskGroup)
+costBpsPerSide = input.float(8.0, "预计成本与净保本 bps/边", minval = 0.0,
+     step = 0.5, group = riskGroup)
+trailAtr = input.float(1.0, "2R 后追踪距离 ATR", minval = 0.25,
+     step = 0.25, group = riskGroup)
+
+showCandidateBox = input.bool(true, "显示当前候选箱体", group = displayGroup)
+showFrozenLevels = input.bool(true, "显示冻结触发与保护位", group = displayGroup)
+
+const int recentCompressionLength = 5
+const int minimumTouchGap = 2
+
+f_round_down(price) =>
+    math.floor(price / syminfo.mintick) * syminfo.mintick
+
+f_round_up(price) =>
+    math.ceil(price / syminfo.mintick) * syminfo.mintick
+
+// 最近秩与 Rust 共用 ceil(p * n) - 1；切片只读取当前棒之前的已完成历史。
+f_percentile_slice(source, startOffset, length, percentile) =>
+    samples = array.new_float()
+    for offset = startOffset to startOffset + length - 1
+        array.push(samples, source[offset])
+    array.sort(samples)
+    rank = int(math.max(0, math.min(length - 1, math.ceil(percentile * length) - 1)))
+    array.get(samples, rank)
+
+f_mean_slice(source, startOffset, length) =>
+    total = 0.0
+    for offset = startOffset to startOffset + length - 1
+        total += source[offset]
+    total / length
+
+// 相邻触碰只算一组；再次触碰至少间隔两根 K 线。
+f_touch_groups(source, edge, band, length) =>
+    groups = 0
+    lastTouch = int(na)
+    for offset = 1 to length
+        touches = math.abs(source[offset] - edge) <= band
+        if touches and (na(lastTouch) or offset - lastTouch >= minimumTouchGap)
+            groups += 1
+            lastTouch := offset
+    groups
+
+f_containment(upper, lower, length) =>
+    contained = 0
+    for offset = 1 to length
+        if close[offset] <= upper and close[offset] >= lower
+            contained += 1
+    contained / length
+
+atr14 = ta.atr(14)
+trueRange = ta.tr(true)
+historyReady = bar_index >= rangeLength + 14
+halfLength = int(math.floor(rangeLength / 2))
+olderHalfLength = rangeLength - halfLength
+
+candidateUpperRaw = f_percentile_slice(high, 1, rangeLength, 0.85)
+candidateLowerRaw = f_percentile_slice(low, 1, rangeLength, 0.15)
+candidateUpper = historyReady ? candidateUpperRaw : na
+candidateLower = historyReady ? candidateLowerRaw : na
+candidateMiddle = (candidateUpper + candidateLower) / 2.0
+candidateHeight = candidateUpper - candidateLower
+candidateWidthRatio = candidateHeight / candidateMiddle
+touchBand = math.max(candidateMiddle * touchBandRatio, atr14 * touchBandAtr)
+upperTouchGroupsRaw = f_touch_groups(high, candidateUpper, touchBand, rangeLength)
+lowerTouchGroupsRaw = f_touch_groups(low, candidateLower, touchBand, rangeLength)
+containmentRaw = f_containment(candidateUpper, candidateLower, rangeLength)
+upperTouchGroups = historyReady ? upperTouchGroupsRaw : 0
+lowerTouchGroups = historyReady ? lowerTouchGroupsRaw : 0
+containment = historyReady ? containmentRaw : 0.0
+
+recentUpperRaw = f_percentile_slice(high, 1, halfLength, 0.85)
+olderUpperRaw = f_percentile_slice(high, halfLength + 1, olderHalfLength, 0.85)
+recentLowerRaw = f_percentile_slice(low, 1, halfLength, 0.15)
+olderLowerRaw = f_percentile_slice(low, halfLength + 1, olderHalfLength, 0.15)
+recentUpper = historyReady ? recentUpperRaw : na
+olderUpper = historyReady ? olderUpperRaw : na
+recentLower = historyReady ? recentLowerRaw : na
+olderLower = historyReady ? olderLowerRaw : na
+upperDrift = math.abs(recentUpper - olderUpper) / candidateMiddle
+lowerDrift = math.abs(recentLower - olderLower) / candidateMiddle
+
+priorLength = rangeLength - recentCompressionLength
+recentTrueRangeMeanRaw = f_mean_slice(trueRange, 1, recentCompressionLength)
+olderTrueRangeMeanRaw = f_mean_slice(trueRange, recentCompressionLength + 1, priorLength)
+recentVolumeMeanRaw = f_mean_slice(volume, 1, recentCompressionLength)
+olderVolumeMeanRaw = f_mean_slice(volume, recentCompressionLength + 1, priorLength)
+boxMedianVolumeRaw = f_percentile_slice(volume, 1, rangeLength, 0.50)
+recentTrueRangeMean = historyReady ? recentTrueRangeMeanRaw : na
+olderTrueRangeMean = historyReady ? olderTrueRangeMeanRaw : na
+recentVolumeMean = historyReady ? recentVolumeMeanRaw : na
+olderVolumeMean = historyReady ? olderVolumeMeanRaw : na
+boxMedianVolume = historyReady ? boxMedianVolumeRaw : na
+
+validBox = historyReady and candidateHeight > 0 and
+     candidateWidthRatio <= rangeMaxWidthRatio and upperTouchGroups >= 2 and
+     lowerTouchGroups >= 2 and containment >= containmentMin and
+     upperDrift <= boundaryDriftMax and lowerDrift <= boundaryDriftMax and
+     olderTrueRangeMean > 0 and
+     recentTrueRangeMean / olderTrueRangeMean <= contractionMax and
+     olderVolumeMean > 0 and recentVolumeMean / olderVolumeMean <= dryVolumeMax
+
+candleRange = high - low
+bodyRatio = candleRange > 0 ? math.abs(close - open) / candleRange : 0.0
+breakoutBufferUpper = math.max(math.max(atr14 * breakoutBufferAtr,
+     candidateUpper * breakoutBufferRatio), syminfo.mintick)
+breakoutBufferLower = math.max(math.max(atr14 * breakoutBufferAtr,
+     candidateLower * breakoutBufferRatio), syminfo.mintick)
+volumeBreakout = validBox and boxMedianVolume > 0 and
+     volume >= boxMedianVolume * breakoutVolumeMultiplier
+longBreakout = validBox and close > candidateUpper + breakoutBufferUpper and
+     close > open and bodyRatio >= breakoutBodyRatioMin and volumeBreakout and
+     (close - candidateUpper) / atr14 <= maxBreakoutDistanceAtr
+shortBreakout = validBox and close < candidateLower - breakoutBufferLower and
+     close < open and bodyRatio >= breakoutBodyRatioMin and volumeBreakout and
+     (candidateLower - close) / atr14 <= maxBreakoutDistanceAtr
+
+var int pendingBreakoutDirection = 0
+var int pendingBreakoutIndex = na
+var float frozenUpper = na
+var float frozenLower = na
+var float frozenAtr = na
+var float frozenBreakoutVolumeRatio = na
+
+var int pendingTriggerDirection = 0
+var int pendingTriggerIndex = na
+var float pendingTriggerPrice = na
+var float pendingTriggerStop = na
+var float pendingTriggerTarget = na
+var float pendingTriggerBoundary = na
+
+var float activeBoundary = na
+var float activeInitialStop = na
+var float activeFinalTarget = na
+var float activeEntry = na
+var float activeRisk = na
+var float activeOneR = na
+var float activeTwoR = na
+var float activeStop = na
+var float bestPrice = na
+var bool partialTaken = false
+var bool oneRCloseConfirmed = false
+var bool twoRCloseConfirmed = false
+
+if barstate.isconfirmed and strategy.position_size == 0
+    if pendingTriggerDirection != 0
+        triggerAge = bar_index - pendingTriggerIndex
+        triggerStopTouched = pendingTriggerDirection == 1 ?
+             low <= pendingTriggerStop : high >= pendingTriggerStop
+        triggerCloseReentered = pendingTriggerDirection == 1 ?
+             close <= pendingTriggerBoundary : close >= pendingTriggerBoundary
+        if strategy.closedtrades > strategy.closedtrades[1] or triggerStopTouched or
+             triggerCloseReentered or triggerAge >= triggerWindow
+            strategy.cancel(pendingTriggerDirection == 1 ? "RSB17-L" : "RSB17-S")
+            pendingTriggerDirection := 0
+            pendingTriggerIndex := na
+            pendingTriggerPrice := na
+            pendingTriggerStop := na
+            pendingTriggerTarget := na
+            pendingTriggerBoundary := na
+            activeBoundary := na
+            activeInitialStop := na
+            activeFinalTarget := na
+    else if pendingBreakoutDirection == 0
+        if longBreakout
+            pendingBreakoutDirection := 1
+            pendingBreakoutIndex := bar_index
+            frozenUpper := candidateUpper
+            frozenLower := candidateLower
+            frozenAtr := atr14
+            frozenBreakoutVolumeRatio := volume / boxMedianVolume
+        else if shortBreakout
+            pendingBreakoutDirection := -1
+            pendingBreakoutIndex := bar_index
+            frozenUpper := candidateUpper
+            frozenLower := candidateLower
+            frozenAtr := atr14
+            frozenBreakoutVolumeRatio := volume / boxMedianVolume
+    else if bar_index > pendingBreakoutIndex
+        pendingAge = bar_index - pendingBreakoutIndex
+        expired = pendingAge > acceptanceWindow
+        invalidated = pendingBreakoutDirection == 1 ?
+             close <= frozenUpper : close >= frozenLower
+        if expired or invalidated
+            pendingBreakoutDirection := 0
+            pendingBreakoutIndex := na
+        else
+            retested = pendingBreakoutDirection == 1 ?
+                 low <= frozenUpper + retestBandAtr * frozenAtr :
+                 high >= frozenLower - retestBandAtr * frozenAtr
+            if retested
+                rawStop = pendingBreakoutDirection == 1 ?
+                     math.min(low, frozenUpper) - stopBufferAtr * frozenAtr :
+                     math.max(high, frozenLower) + stopBufferAtr * frozenAtr
+                roundedStop = pendingBreakoutDirection == 1 ?
+                     f_round_down(rawStop) : f_round_up(rawStop)
+                measuredTarget = pendingBreakoutDirection == 1 ?
+                     f_round_down(frozenUpper + frozenUpper - frozenLower) :
+                     f_round_up(frozenLower - (frozenUpper - frozenLower))
+                triggerPrice = pendingBreakoutDirection == 1 ?
+                     f_round_up(high + syminfo.mintick) :
+                     f_round_down(low - syminfo.mintick)
+                acceptanceRisk = math.abs(close - roundedStop)
+                acceptanceReward = pendingBreakoutDirection == 1 ?
+                     measuredTarget - close : close - measuredTarget
+                acceptanceR = acceptanceRisk > 0 ?
+                     acceptanceReward / acceptanceRisk : 0.0
+                expectedRisk = math.abs(triggerPrice - roundedStop)
+                expectedReward = pendingBreakoutDirection == 1 ?
+                     measuredTarget - triggerPrice : triggerPrice - measuredTarget
+                expectedR = expectedRisk > 0 ? expectedReward / expectedRisk : 0.0
+                projectedCost = 2.0 * triggerPrice * costBpsPerSide / 10000.0
+                projectedCostR = expectedRisk > 0 ? projectedCost / expectedRisk : 1000000.0
+                acceptanceValid = acceptanceRisk > 0 and
+                     acceptanceRisk <= maxInitialRiskAtr * frozenAtr and
+                     acceptanceReward > 0 and acceptanceR >= 1.80
+                triggerValid = expectedRisk > 0 and
+                     expectedRisk <= maxInitialRiskAtr * frozenAtr and
+                     expectedReward > 0
+                if acceptanceValid and triggerValid
+                    pendingTriggerDirection := pendingBreakoutDirection
+                    pendingTriggerIndex := bar_index
+                    pendingTriggerPrice := triggerPrice
+                    pendingTriggerStop := roundedStop
+                    pendingTriggerTarget := measuredTarget
+                    pendingTriggerBoundary := pendingBreakoutDirection == 1 ?
+                         frozenUpper : frozenLower
+                    activeBoundary := pendingTriggerBoundary
+                    activeInitialStop := pendingTriggerStop
+                    activeFinalTarget := pendingTriggerTarget
+                    if pendingTriggerDirection == 1
+                        strategy.entry("RSB17-L", strategy.long, stop = pendingTriggerPrice,
+                             comment = "range_squeeze_right_side_trigger_ablation_long_15m_v17")
+                        strategy.exit("RSB17-L-REST", from_entry = "RSB17-L",
+                             stop = pendingTriggerStop, limit = pendingTriggerTarget,
+                             qty_percent = 100, comment_profit = "BOX_TARGET",
+                             comment_loss = "STRUCTURE_SL")
+                        label.new(bar_index, low, "△", yloc = yloc.belowbar,
+                             color = color.new(color.green, 10), textcolor = color.white,
+                             style = label.style_label_up, size = size.small,
+                             tooltip = "多头右侧候选\n触发 " +
+                             str.tostring(pendingTriggerPrice) + "\n止损 " +
+                             str.tostring(pendingTriggerStop) + "\n目标 " +
+                             str.tostring(pendingTriggerTarget) + "\nV15接受 " +
+                             str.tostring(acceptanceR, "#.##") + "R\n触发后 " +
+                             str.tostring(expectedR, "#.##") + "R\n成本诊断 " +
+                             str.tostring(projectedCostR, "#.##") + "R")
+                    else
+                        strategy.entry("RSB17-S", strategy.short, stop = pendingTriggerPrice,
+                             comment = "range_squeeze_right_side_trigger_ablation_short_15m_v17")
+                        strategy.exit("RSB17-S-REST", from_entry = "RSB17-S",
+                             stop = pendingTriggerStop, limit = pendingTriggerTarget,
+                             qty_percent = 100, comment_profit = "BOX_TARGET",
+                             comment_loss = "STRUCTURE_SL")
+                        label.new(bar_index, high, "▽", yloc = yloc.abovebar,
+                             color = color.new(color.red, 10), textcolor = color.white,
+                             style = label.style_label_down, size = size.small,
+                             tooltip = "空头右侧候选\n触发 " +
+                             str.tostring(pendingTriggerPrice) + "\n止损 " +
+                             str.tostring(pendingTriggerStop) + "\n目标 " +
+                             str.tostring(pendingTriggerTarget) + "\nV15接受 " +
+                             str.tostring(acceptanceR, "#.##") + "R\n触发后 " +
+                             str.tostring(expectedR, "#.##") + "R\n成本诊断 " +
+                             str.tostring(projectedCostR, "#.##") + "R")
+                pendingBreakoutDirection := 0
+                pendingBreakoutIndex := na
+
+newPosition = strategy.position_size != 0 and strategy.position_size[1] == 0
+if newPosition
+    pendingTriggerDirection := 0
+    pendingTriggerIndex := na
+    pendingTriggerPrice := na
+    pendingTriggerStop := na
+    pendingTriggerTarget := na
+    pendingTriggerBoundary := na
+    activeEntry := strategy.position_avg_price
+    activeRisk := math.abs(activeEntry - activeInitialStop)
+    activeOneR := strategy.position_size > 0 ?
+         activeEntry + activeRisk : activeEntry - activeRisk
+    activeTwoR := strategy.position_size > 0 ?
+         activeEntry + 2.0 * activeRisk : activeEntry - 2.0 * activeRisk
+    activeStop := activeInitialStop
+    bestPrice := activeEntry
+    partialTaken := false
+    oneRCloseConfirmed := false
+    twoRCloseConfirmed := false
+
+if strategy.position_size != 0 and activeRisk > 0
+    bestPrice := strategy.position_size > 0 ?
+         math.max(bestPrice, high) : math.min(bestPrice, low)
+    partialTaken := partialTaken or math.abs(strategy.position_size) < 0.999
+    oneRCloseConfirmed := oneRCloseConfirmed or
+         (strategy.position_size > 0 ? close >= activeOneR : close <= activeOneR)
+    twoRCloseConfirmed := twoRCloseConfirmed or
+         (strategy.position_size > 0 ? close >= activeTwoR : close <= activeTwoR)
+
+    costRate = costBpsPerSide / 10000.0
+    netBreakEven = strategy.position_size > 0 ?
+         f_round_up(activeEntry * (1.0 + costRate) / (1.0 - costRate)) :
+         f_round_down(activeEntry * (1.0 - costRate) / (1.0 + costRate))
+    if oneRCloseConfirmed
+        activeStop := strategy.position_size > 0 ?
+             math.max(activeStop, netBreakEven) : math.min(activeStop, netBreakEven)
+    if twoRCloseConfirmed
+        trailing = strategy.position_size > 0 ?
+             f_round_down(bestPrice - trailAtr * atr14) :
+             f_round_up(bestPrice + trailAtr * atr14)
+        activeStop := strategy.position_size > 0 ?
+             math.max(activeStop, trailing) : math.min(activeStop, trailing)
+
+    if strategy.position_size > 0
+        if not partialTaken
+            strategy.exit("RSB17-L-1R", from_entry = "RSB17-L", stop = activeStop,
+                 limit = activeOneR, qty_percent = partialPercent,
+                 comment_profit = "1R_PARTIAL")
+        else
+            strategy.cancel("RSB17-L-1R")
+        strategy.exit("RSB17-L-REST", from_entry = "RSB17-L", stop = activeStop,
+             limit = activeFinalTarget, qty_percent = 100,
+             comment_profit = "BOX_TARGET",
+             comment_loss = twoRCloseConfirmed ? "2R_ATR_TRAIL" :
+             oneRCloseConfirmed ? "NET_BE" : "STRUCTURE_SL")
+        if close <= activeBoundary
+            strategy.close("RSB17-L", comment = "BOX_REENTRY")
+    else
+        if not partialTaken
+            strategy.exit("RSB17-S-1R", from_entry = "RSB17-S", stop = activeStop,
+                 limit = activeOneR, qty_percent = partialPercent,
+                 comment_profit = "1R_PARTIAL")
+        else
+            strategy.cancel("RSB17-S-1R")
+        strategy.exit("RSB17-S-REST", from_entry = "RSB17-S", stop = activeStop,
+             limit = activeFinalTarget, qty_percent = 100,
+             comment_profit = "BOX_TARGET",
+             comment_loss = twoRCloseConfirmed ? "2R_ATR_TRAIL" :
+             oneRCloseConfirmed ? "NET_BE" : "STRUCTURE_SL")
+        if close >= activeBoundary
+            strategy.close("RSB17-S", comment = "BOX_REENTRY")
+
+closedPosition = strategy.position_size == 0 and strategy.position_size[1] != 0
+if closedPosition
+    activeBoundary := na
+    activeInitialStop := na
+    activeFinalTarget := na
+    activeEntry := na
+    activeRisk := na
+    activeOneR := na
+    activeTwoR := na
+    activeStop := na
+    bestPrice := na
+    partialTaken := false
+    oneRCloseConfirmed := false
+    twoRCloseConfirmed := false
+
+candidateColor = validBox ? color.new(color.blue, 65) : color.new(color.gray, 90)
+plot(showCandidateBox and validBox and pendingBreakoutDirection == 0 and
+     pendingTriggerDirection == 0 ? candidateUpper : na,
+     "候选箱体上沿", color = candidateColor, linewidth = 1)
+plot(showCandidateBox and validBox and pendingBreakoutDirection == 0 and
+     pendingTriggerDirection == 0 ? candidateLower : na,
+     "候选箱体下沿", color = candidateColor, linewidth = 1)
+plot(showFrozenLevels and pendingTriggerDirection != 0 ? pendingTriggerPrice : na,
+     "右侧触发价", color = color.new(color.blue, 0), linewidth = 2,
+     style = plot.style_linebr)
+plot(showFrozenLevels and
+     (pendingTriggerDirection != 0 or strategy.position_size != 0) ?
+     activeInitialStop : na, "冻结结构止损", color = color.new(color.red, 0),
+     linewidth = 1, style = plot.style_linebr)
+plot(showFrozenLevels and
+     (pendingTriggerDirection != 0 or strategy.position_size != 0) ?
+     activeFinalTarget : na, "冻结量度目标", color = color.new(color.green, 0),
+     linewidth = 1, style = plot.style_linebr)

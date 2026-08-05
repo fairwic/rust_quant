@@ -1,0 +1,113 @@
+//@version=6
+strategy("EMA596 Reclaim Acceptance Reacceleration Long 15m V1", overlay = true,
+     pyramiding = 0, initial_capital = 100000, default_qty_type = strategy.fixed,
+     default_qty_value = 1, process_orders_on_close = false, max_labels_count = 300)
+
+const string strategyVersion = "volume_ema596_reclaim_acceptance_reacceleration_long_15m_v1"
+const int volumeLookback = 672
+const int structureLookback = 4
+const int reclaimMaxAge = 32
+const int acceptanceMinAge = 8
+const int acceptanceMaxAge = 24
+const float previousDistanceAtrMax = 0.50
+const float currentDistanceAtrMin = 1.00
+const float currentDistanceAtrMax = 1.80
+const float initialMedianVolumeRatioMin = 2.50
+const float acceptanceMedianVolumeRatioMin = 2.00
+const float initialBodyRangeMin = 0.60
+const float acceptanceBodyRangeMin = 0.50
+const float slowEmaGapAtrMax = 0.25
+const float structureRiskAtrMax = 2.00
+const float targetRisk = 2.00
+
+ema12 = ta.ema(close, 12)
+ema144 = ta.ema(close, 144)
+ema596 = ta.ema(close, 596)
+atr14 = ta.atr(14)
+weeklyP90 = ta.percentile_nearest_rank(volume[1], volumeLookback, 90)
+medianVolume20 = ta.percentile_nearest_rank(volume[1], 20, 50)
+medianVolumeRatio = not na(medianVolume20) and medianVolume20 > 0 ? volume / medianVolume20 : na
+
+candleValid = high >= math.max(open, close) and low <= math.min(open, close) and
+     high > low and open > 0 and not na(atr14) and atr14 > 0
+bodyRangeRatio = candleValid ? math.abs(close - open) / (high - low) : na
+priorHigh = ta.highest(high[1], structureLookback)
+priorLow = ta.lowest(low[1], structureLookback)
+structureReady = close > priorHigh and high > high[1] and low > low[1]
+structureStop = math.floor((priorLow - syminfo.mintick) / syminfo.mintick) * syminfo.mintick
+structureRisk = close - structureStop
+structureRiskAtr = candleValid ? structureRisk / atr14 : na
+structureTarget = math.floor((close + targetRisk * structureRisk) / syminfo.mintick) * syminfo.mintick
+
+reclaimCrossedUp = ta.crossover(close, ema596)
+reclaimAge = ta.barssince(reclaimCrossedUp)
+reclaimEpisodeBar = not na(reclaimAge) ? bar_index - reclaimAge : na
+bool reclaimHeld = not na(reclaimAge) and reclaimAge <= reclaimMaxAge
+for offset = 0 to reclaimMaxAge
+    if reclaimHeld and offset <= reclaimAge and close[offset] <= ema596[offset]
+        reclaimHeld := false
+var int lastConsumedReclaimBar = na
+reclaimEpisodeAvailable = not na(reclaimEpisodeBar) and
+     (na(lastConsumedReclaimBar) or reclaimEpisodeBar != lastConsumedReclaimBar)
+
+previousDistanceAtr = candleValid and not na(atr14[1]) and atr14[1] > 0 ?
+     (close[1] - ema596[1]) / atr14[1] : na
+currentDistanceAtr = candleValid ? (close - ema596) / atr14 : na
+slowEmaGapAtr = candleValid ? math.abs(ema144 - ema596) / atr14 : na
+fullBearishStack = ema12 < ema144 and ema144 < ema596
+
+// 初次收复只接受“贴线后适度离轨”。距离上限、非完整空头排列和 2 ATR 风险上限共同阻止单棒高潮追涨。
+initialQualityReclaim = barstate.isconfirmed and candleValid and reclaimHeld and reclaimAge == 0 and
+     close[1] <= ema596[1] and previousDistanceAtr >= -previousDistanceAtrMax and
+     currentDistanceAtr >= currentDistanceAtrMin and currentDistanceAtr <= currentDistanceAtrMax and
+     volume >= weeklyP90 and medianVolumeRatio >= initialMedianVolumeRatioMin and
+     structureReady and close > open and bodyRangeRatio >= initialBodyRangeMin and
+     structureRisk > 0 and structureRiskAtr <= structureRiskAtrMax and
+     structureTarget > close and not fullBearishStack
+
+// 二次加速用持续站稳与均线过渡替代周 P90；它研究市场接受后的再启动，不把低量整理误写成首次放量突破。
+acceptanceReacceleration = barstate.isconfirmed and candleValid and reclaimHeld and
+     reclaimAge >= acceptanceMinAge and reclaimAge <= acceptanceMaxAge and
+     previousDistanceAtr >= 0 and previousDistanceAtr <= previousDistanceAtrMax and
+     currentDistanceAtr >= currentDistanceAtrMin and currentDistanceAtr <= currentDistanceAtrMax and
+     ema12 > ema144 and ema12 > ema596 and slowEmaGapAtr <= slowEmaGapAtrMax and
+     ema596 >= ema596[1] and medianVolumeRatio >= acceptanceMedianVolumeRatioMin and
+     structureReady and close > open and bodyRangeRatio >= acceptanceBodyRangeMin and
+     structureRisk > 0 and structureRiskAtr <= structureRiskAtrMax and structureTarget > close
+
+longSetup = reclaimEpisodeAvailable and (initialQualityReclaim or acceptanceReacceleration)
+longEntryOrder = longSetup and strategy.position_size <= 0
+signalMode = initialQualityReclaim ? "初次质量收复" : "接受后二次加速"
+signalTooltip = "买入 · 多单" +
+     "\n模式  " + signalMode +
+     "\n价格  " + str.tostring(close, format.mintick) +
+     "\n收复  " + str.tostring(reclaimAge) + " 根持续站稳" +
+     "\n距离  前棒 " + str.tostring(previousDistanceAtr, "#.##") +
+     " ATR → 当前 " + str.tostring(currentDistanceAtr, "#.##") + " ATR" +
+     "\n量能  前20中位量 " + str.tostring(medianVolumeRatio, "#.##") + "x" +
+     "\n实体  " + str.tostring(bodyRangeRatio * 100, "#.##") + "%" +
+     "\n风险  " + str.tostring(structureRiskAtr, "#.##") + " ATR · 目标 2R" +
+     "\n版本  " + strategyVersion
+
+if longEntryOrder
+    // 同一次收复只允许一个订单归属；即使订单很快退出，也不能在同一接受窗口内重复计算独立机会。
+    lastConsumedReclaimBar := reclaimEpisodeBar
+    markerTip = low - math.max(syminfo.mintick * 4, atr14 * 0.08)
+    label.new(bar_index, markerTip, "", xloc = xloc.bar_index, yloc = yloc.price,
+         style = label.style_triangleup, color = color.green, size = size.small, tooltip = signalTooltip)
+    line.new(bar_index, markerTip - atr14 * 0.70, bar_index, markerTip - atr14 * 0.12,
+         xloc = xloc.bar_index, color = color.green, width = 6)
+    if initialQualityReclaim
+        strategy.entry("Long EMA596-Q", strategy.long, comment = strategyVersion)
+        strategy.exit("EMA596-Q protection", from_entry = "Long EMA596-Q",
+             stop = structureStop, limit = structureTarget, qty_percent = 100,
+             comment_profit = "EMA596_Q_TP", comment_loss = "SL")
+    else
+        strategy.entry("Long EMA596-A", strategy.long, comment = strategyVersion)
+        strategy.exit("EMA596-A protection", from_entry = "Long EMA596-A",
+             stop = structureStop, limit = structureTarget, qty_percent = 100,
+             comment_profit = "EMA596_A_TP", comment_loss = "SL")
+
+plot(ema12, "EMA12", color = color.rgb(38, 166, 154), linewidth = 1)
+plot(ema144, "EMA144", color = color.orange, linewidth = 2)
+plot(ema596, "EMA596", color = color.rgb(171, 71, 188), linewidth = 2)

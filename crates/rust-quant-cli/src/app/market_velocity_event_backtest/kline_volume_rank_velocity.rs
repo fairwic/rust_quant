@@ -28,6 +28,32 @@ struct RankedVolumePoint {
     rank: i32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum VolumeRankPanelPolicy {
+    Complete,
+    StableAvailable95Pct,
+}
+
+impl VolumeRankPanelPolicy {
+    /// 研究面板最多允许 5% 成员因当时可见的数据缺口缺席；生产默认仍要求全员完整。
+    fn accepts(self, available_size: usize, expected_size: usize) -> bool {
+        match self {
+            Self::Complete => available_size == expected_size,
+            Self::StableAvailable95Pct => {
+                available_size.saturating_mul(100) >= expected_size.saturating_mul(95)
+            }
+        }
+    }
+}
+
+/// Research-only 稳定面板事件，同时保留当时实际与预期成员数供候选账本审计。
+#[derive(Debug, Clone)]
+pub(super) struct StablePanelRankEvent {
+    pub event: RadarEvent,
+    pub actual_panel_size: usize,
+    pub expected_panel_size: usize,
+}
+
 /// 从冻结的 15m universe 重建成交额排名加速事件。
 ///
 /// 历史表没有保存交易所原始 quote 成交额，因此用 `vol_ccy * close` 近似；排名只在
@@ -38,6 +64,44 @@ pub(super) async fn load_kline_volume_rank_events(
     args: &MarketVelocityEventBacktestArgs,
     historical_universe: Option<&HistoricalUniverseSchedule>,
 ) -> Result<Vec<RadarEvent>> {
+    Ok(load_kline_volume_rank_events_with_policy(
+        pool,
+        symbols,
+        args,
+        historical_universe,
+        VolumeRankPanelPolicy::Complete,
+    )
+    .await?
+    .into_iter()
+    .map(|ranked| ranked.event)
+    .collect())
+}
+
+/// Research-only 稳定可用面板：覆盖至少 95%，且相邻排名快照成员必须完全一致。
+pub(super) async fn load_kline_volume_rank_events_stable_95pct(
+    pool: &PgPool,
+    symbols: &[String],
+    args: &MarketVelocityEventBacktestArgs,
+    historical_universe: Option<&HistoricalUniverseSchedule>,
+) -> Result<Vec<StablePanelRankEvent>> {
+    load_kline_volume_rank_events_with_policy(
+        pool,
+        symbols,
+        args,
+        historical_universe,
+        VolumeRankPanelPolicy::StableAvailable95Pct,
+    )
+    .await
+}
+
+/// 统一数据库输入，只让显式面板政策改变横截面快照是否可用。
+async fn load_kline_volume_rank_events_with_policy(
+    pool: &PgPool,
+    symbols: &[String],
+    args: &MarketVelocityEventBacktestArgs,
+    historical_universe: Option<&HistoricalUniverseSchedule>,
+    panel_policy: VolumeRankPanelPolicy,
+) -> Result<Vec<StablePanelRankEvent>> {
     let load_start_ms = args.event_start_ms.map(|event_start_ms| {
         event_start_ms.saturating_sub(
             i64::try_from(VOLUME_RANK_LOOKBACK_CANDLES + 1)
@@ -76,19 +140,39 @@ pub(super) async fn load_kline_volume_rank_events(
             .collect::<Result<Vec<_>>>()?;
         candles_by_symbol.insert(symbol.clone(), candles);
     }
-    Ok(build_kline_volume_rank_events(
+    Ok(build_kline_volume_rank_events_with_policy(
         &candles_by_symbol,
         args,
         historical_universe,
+        panel_policy,
     ))
 }
 
 /// 以纯内存方式构造排名事件，确保数据库加载与时序算法可以分别测试。
+#[cfg(test)]
 fn build_kline_volume_rank_events(
     candles_by_symbol: &HashMap<String, Vec<VolumeRankCandle>>,
     args: &MarketVelocityEventBacktestArgs,
     historical_universe: Option<&HistoricalUniverseSchedule>,
 ) -> Vec<RadarEvent> {
+    build_kline_volume_rank_events_with_policy(
+        candles_by_symbol,
+        args,
+        historical_universe,
+        VolumeRankPanelPolicy::Complete,
+    )
+    .into_iter()
+    .map(|ranked| ranked.event)
+    .collect()
+}
+
+/// 相邻快照必须使用完全相同的实际成员，防止缺失成员进出制造伪排名跃升。
+fn build_kline_volume_rank_events_with_policy(
+    candles_by_symbol: &HashMap<String, Vec<VolumeRankCandle>>,
+    args: &MarketVelocityEventBacktestArgs,
+    historical_universe: Option<&HistoricalUniverseSchedule>,
+    panel_policy: VolumeRankPanelPolicy,
+) -> Vec<StablePanelRankEvent> {
     let universe_size = candles_by_symbol.len();
     if universe_size < 2 {
         return Vec::new();
@@ -101,21 +185,31 @@ fn build_kline_volume_rank_events(
     let ranked_by_event_ts = points_by_event_ts
         .into_iter()
         .filter_map(|(event_ts, mut points)| {
-            let (window_index, expected_size) = match historical_universe {
+            let expected_size = match historical_universe {
                 Some(schedule) => {
-                    let (window_index, members) = schedule.members_at(event_ts)?;
+                    let (_, members) = schedule.members_at(event_ts)?;
                     points.retain(|point| members.contains(&point.symbol));
-                    (Some(window_index), members.len())
+                    members.len()
                 }
-                None => (None, universe_size),
+                None => universe_size,
             };
-            (points.len() == expected_size)
-                .then(|| (event_ts, (window_index, rank_volume_points(points))))
+            if !panel_policy.accepts(points.len(), expected_size) {
+                return None;
+            }
+            let mut actual_members = points
+                .iter()
+                .map(|point| point.symbol.clone())
+                .collect::<Vec<_>>();
+            actual_members.sort();
+            Some((
+                event_ts,
+                (actual_members, expected_size, rank_volume_points(points)),
+            ))
         })
         .collect::<BTreeMap<_, _>>();
 
     let mut events = Vec::new();
-    for (event_ts, (current_window, current_points)) in &ranked_by_event_ts {
+    for (event_ts, (current_members, expected_size, current_points)) in &ranked_by_event_ts {
         if args
             .event_start_ms
             .is_some_and(|event_start_ms| *event_ts < event_start_ms)
@@ -125,12 +219,12 @@ fn build_kline_volume_rank_events(
         {
             continue;
         }
-        let Some((previous_window, previous_points)) =
+        let Some((previous_members, _, previous_points)) =
             ranked_by_event_ts.get(&event_ts.saturating_sub(MS_15M))
         else {
             continue;
         };
-        if previous_window != current_window {
+        if previous_members != current_members {
             continue;
         }
         let previous_by_symbol = previous_points
@@ -139,8 +233,8 @@ fn build_kline_volume_rank_events(
             .collect::<HashMap<_, _>>();
         let two_snapshots_ago_by_symbol = ranked_by_event_ts
             .get(&event_ts.saturating_sub(MS_15M.saturating_mul(2)))
-            .filter(|(window, _)| window == current_window)
-            .map(|(_, points)| {
+            .filter(|(members, _, _)| members == current_members)
+            .map(|(_, _, points)| {
                 points
                     .iter()
                     .map(|point| (point.point.symbol.as_str(), point))
@@ -180,27 +274,31 @@ fn build_kline_volume_rank_events(
             {
                 continue;
             }
-            events.push(RadarEvent {
-                id: synthetic_event_id(&current.point.symbol, *event_ts),
-                exchange: "okx".to_string(),
-                symbol: current.point.symbol.clone(),
-                ts: *event_ts,
-                detected_at: Utc
-                    .timestamp_millis_opt(*event_ts)
-                    .single()
-                    .map(|value| value.to_rfc3339_opts(SecondsFormat::Millis, true))
-                    .unwrap_or_else(|| event_ts.to_string()),
-                new_rank: current.rank,
-                delta_rank,
-                current_price: current.point.candle.close,
-                price_change_pct: event_price_change_pct(
-                    raw_price_change_pct,
-                    args.trade_direction,
-                ),
+            events.push(StablePanelRankEvent {
+                event: RadarEvent {
+                    id: synthetic_event_id(&current.point.symbol, *event_ts),
+                    exchange: "okx".to_string(),
+                    symbol: current.point.symbol.clone(),
+                    ts: *event_ts,
+                    detected_at: Utc
+                        .timestamp_millis_opt(*event_ts)
+                        .single()
+                        .map(|value| value.to_rfc3339_opts(SecondsFormat::Millis, true))
+                        .unwrap_or_else(|| event_ts.to_string()),
+                    new_rank: current.rank,
+                    delta_rank,
+                    current_price: current.point.candle.close,
+                    price_change_pct: event_price_change_pct(
+                        raw_price_change_pct,
+                        args.trade_direction,
+                    ),
+                },
+                actual_panel_size: current_members.len(),
+                expected_panel_size: *expected_size,
             });
         }
     }
-    events.sort_by_key(|event| (event.ts, event.id));
+    events.sort_by_key(|ranked| (ranked.event.ts, ranked.event.id));
     events
 }
 
@@ -348,6 +446,14 @@ mod tests {
             min_delta_rank: 3,
             ..MarketVelocityEventBacktestArgs::default()
         }
+    }
+
+    #[test]
+    fn stable_panel_accepts_one_missing_of_44_but_rejects_below_95_percent() {
+        assert!(!VolumeRankPanelPolicy::Complete.accepts(43, 44));
+        assert!(VolumeRankPanelPolicy::StableAvailable95Pct.accepts(43, 44));
+        assert!(VolumeRankPanelPolicy::StableAvailable95Pct.accepts(42, 44));
+        assert!(!VolumeRankPanelPolicy::StableAvailable95Pct.accepts(41, 44));
     }
 
     fn candle(index: usize, quote_turnover: f64) -> VolumeRankCandle {

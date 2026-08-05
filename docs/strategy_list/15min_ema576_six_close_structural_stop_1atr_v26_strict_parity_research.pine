@@ -1,0 +1,483 @@
+//@version=6
+// V26 严格对账版：只用已完成 15m K 线重建信号，并在下一根连续 K 的开盘执行成本门禁。
+// 手工账本显式执行“同棒先止损”、24 小时超时与双边 8bps 成本；不接入提醒、Paper 或 Live。
+strategy("15m EMA576 Six-close Structural Stop - V26 Strict Parity Research", overlay = true,
+     pyramiding = 0, initial_capital = 100000, default_qty_type = strategy.fixed,
+     default_qty_value = 1, process_orders_on_close = false, max_labels_count = 500)
+
+const string RULE_VERSION = "v26_six_close_extreme200_ema576_hold_ema144_stop100_cost050_net2r"
+const int MS_15M = 15 * 60 * 1000
+const int MS_24H = 24 * 60 * 60 * 1000
+const int LOAD_START_MS = 1750526100000  // 2025-06-21 17:15 UTC，评价起点前 891 根。
+const int SCAN_START_MS = 1750680000000  // 2025-06-23 12:00 UTC，评价起点前 720 根。
+const int EVALUATION_START_MS = 1751328000000
+const int EVALUATION_END_MS = 1784470500000
+const int EMA_FAST_LENGTH = 144
+const int EMA_SLOW_LENGTH = 576
+const int ATR_LENGTH = 14
+const int REGIME_BARS = 144
+const int MIN_PRICE_SIDE_BARS = 116  // 144 * 80% 向上取整。
+const int ACCEPTANCE_CLOSES = 6
+const int SIGNAL_CROSS_TIMEOUT_BARS = 96
+const float RETEST_ZONE_ATR = 0.30
+const float ACCEPTANCE_EXTREME_ATR = 2.00
+const float SIGNAL_CLOSE_DISTANCE_ATR = 1.00
+const float STOP_BUFFER_ATR = 1.00
+const float COST_RATE_PER_SIDE = 0.0008
+const float MAX_STOP_COST_R = 0.50
+const float NET_TARGET_R = 2.00
+
+const string displayGroup = "显示"
+showLifecycle = input.bool(false, "显示资格与突破生命周期", group = displayGroup)
+showSignals = input.bool(true, "显示最终候选、入场与退出", group = displayGroup)
+showTradeLevels = input.bool(true, "显示当前止损与目标", group = displayGroup)
+
+// Rust 对正数价格不做 tick 舍入；这里保留完整浮点值，标签统一输出 10 位小数供 MCP 对账。
+f_price(value) =>
+    str.tostring(value, "#.##########")
+
+// 生成机器可解析标签；字段顺序固定，便于和 Rust JSON 逐笔连接。
+f_audit_label(labelTime, labelPrice, labelText, labelStyle, labelColor) =>
+    if showSignals
+        label.new(labelTime, labelPrice, labelText, xloc = xloc.bar_time, yloc = yloc.price,
+             style = labelStyle, color = labelColor, textcolor = color.white, size = size.tiny)
+
+// ---------- 冻结数据窗口与 Rust 同语义指标 ----------
+
+var bool loadStarted = false
+var bool exactLoadStartObserved = false
+var bool sourceContiguous = true
+var int previousSourceTime = na
+var float previousSourceClose = na
+var int sourceCount = 0
+var float ema144SeedSum = 0.0
+var float ema576SeedSum = 0.0
+var float ema144 = na
+var float ema576 = na
+var float atr14SeedSum = 0.0
+var float atr14 = na
+
+if barstate.isconfirmed and time >= LOAD_START_MS and time <= EVALUATION_END_MS + MS_24H
+    if not loadStarted
+        loadStarted := true
+        exactLoadStartObserved := time == LOAD_START_MS
+        previousSourceTime := na
+        previousSourceClose := na
+        sourceCount := 0
+        ema144SeedSum := 0.0
+        ema576SeedSum := 0.0
+        ema144 := na
+        ema576 := na
+        atr14SeedSum := 0.0
+        atr14 := na
+
+    if not na(previousSourceTime) and time != previousSourceTime + MS_15M
+        sourceContiguous := false
+
+    if sourceContiguous
+        sourceCount += 1
+        if sourceCount <= EMA_FAST_LENGTH
+            ema144SeedSum += close
+            if sourceCount == EMA_FAST_LENGTH
+                ema144 := ema144SeedSum / EMA_FAST_LENGTH
+        else
+            ema144 := (close - ema144) * (2.0 / (EMA_FAST_LENGTH + 1.0)) + ema144
+
+        if sourceCount <= EMA_SLOW_LENGTH
+            ema576SeedSum += close
+            if sourceCount == EMA_SLOW_LENGTH
+                ema576 := ema576SeedSum / EMA_SLOW_LENGTH
+        else
+            ema576 := (close - ema576) * (2.0 / (EMA_SLOW_LENGTH + 1.0)) + ema576
+
+        trueRange = na(previousSourceClose) ? high - low :
+             math.max(high - low, math.max(math.abs(high - previousSourceClose),
+             math.abs(low - previousSourceClose)))
+        if sourceCount <= ATR_LENGTH
+            atr14SeedSum += trueRange
+            if sourceCount == ATR_LENGTH
+                atr14 := atr14SeedSum / ATR_LENGTH
+        else
+            atr14 := (trueRange / ATR_LENGTH) + ((ATR_LENGTH - 1.0) / ATR_LENGTH) * atr14
+
+    previousSourceTime := time
+    previousSourceClose := close
+
+indicatorReady = loadStarted and exactLoadStartObserved and sourceContiguous and
+     not na(ema144) and not na(ema576) and not na(atr14) and atr14 > 0
+timeframeReady = timeframe.isminutes and timeframe.multiplier == 15
+strictDataReady = timeframeReady and indicatorReady
+
+plot(ema144, "V26 EMA144", color = color.new(color.teal, 0), linewidth = 2)
+plot(ema576, "V26 EMA576", color = color.new(color.orange, 0), linewidth = 2)
+
+// ---------- 资格、突破 episode 与首次成交状态 ----------
+
+var int relationDirection = 0  // 1：EMA144<EMA576，等待向上转换；-1 完全镜像。
+var int relationAge = 0
+var int priceSideBars = 0
+var priceSideWindow = array.new_int()
+var bool qualified = false
+var int setupTime = na
+var bool setupFilled = false
+
+var bool episodeActive = false
+var int episodeDirection = 0
+var int breakoutTime = na
+var int breakoutIndex = na
+var bool rearmed = false
+var bool acceptanceValid = false
+var int acceptanceEndIndex = na
+var float acceptanceMaxExtremeAtr = na
+
+var bool deadlineActive = false
+var int deadlineFirstSignalIndex = na
+var int deadlineFirstSignalTime = na
+
+// 下一根连续开盘前不能知道成本 R，故先冻结信号字段，再在下一棒完成时回放其开盘。
+var bool pendingEntry = false
+var int pendingDirection = 0
+var int pendingSetupTime = na
+var int pendingBreakoutTime = na
+var int pendingSignalTime = na
+var float pendingSignalClose = na
+var float pendingSignalEma144 = na
+var float pendingSignalEma576 = na
+var float pendingSignalAtr14 = na
+var float pendingMaxExtremeAtr = na
+
+// 手工持仓账本是严格结果；不调用 broker emulator，避免下一开盘成本门禁和同棒优先级漂移。
+var bool tradeActive = false
+var int tradeDirection = 0
+var int tradeSetupTime = na
+var int tradeBreakoutTime = na
+var int tradeSignalTime = na
+var int tradeEntryTime = na
+var float tradeEntryPrice = na
+var float tradeStopPrice = na
+var float tradeTargetPrice = na
+var float tradeInitialRisk = na
+var int lockedUntil = na
+
+var int qualitySignalCount = 0
+var int filledTradeCount = 0
+var int closedTradeCount = 0
+var int stopExitCount = 0
+var int targetExitCount = 0
+var int timeoutExitCount = 0
+var int bothHitStopFirstCount = 0
+var int costBlockedCount = 0
+var int structureBlockedCount = 0
+var int setupFilledBlockedCount = 0
+var int positionBlockedCount = 0
+var float cumulativeNetR = 0.0
+
+// ---------- 下一开盘成交与退出回放 ----------
+
+if barstate.isconfirmed and strictDataReady
+    if pendingEntry
+        contiguousEntry = time == pendingSignalTime + MS_15M
+        if contiguousEntry
+            candidateStop = pendingDirection == 1 ?
+                 pendingSignalEma144 - STOP_BUFFER_ATR * pendingSignalAtr14 :
+                 pendingSignalEma144 + STOP_BUFFER_ATR * pendingSignalAtr14
+            candidateRisk = pendingDirection == 1 ? open - candidateStop : candidateStop - open
+            structurallyValid = candidateStop > 0 and candidateRisk > 0
+            candidateStopCostR = structurallyValid ?
+                 (open + candidateStop) * COST_RATE_PER_SIDE / candidateRisk : na
+            costEligible = structurallyValid and candidateStopCostR <= MAX_STOP_COST_R + 1e-12
+            candidateTarget = structurallyValid ? (pendingDirection == 1 ?
+                 (open * (1.0 + COST_RATE_PER_SIDE) + NET_TARGET_R * candidateRisk) /
+                 (1.0 - COST_RATE_PER_SIDE) :
+                 (open * (1.0 - COST_RATE_PER_SIDE) - NET_TARGET_R * candidateRisk) /
+                 (1.0 + COST_RATE_PER_SIDE)) : na
+            if not structurallyValid or candidateTarget <= 0
+                structureBlockedCount += 1
+            else if not costEligible
+                costBlockedCount += 1
+            else if setupFilled
+                setupFilledBlockedCount += 1
+            else if tradeActive or (not na(lockedUntil) and pendingSignalTime <= lockedUntil)
+                positionBlockedCount += 1
+            else
+                tradeActive := true
+                tradeDirection := pendingDirection
+                tradeSetupTime := pendingSetupTime
+                tradeBreakoutTime := pendingBreakoutTime
+                tradeSignalTime := pendingSignalTime
+                tradeEntryTime := time
+                tradeEntryPrice := open
+                tradeStopPrice := candidateStop
+                tradeTargetPrice := candidateTarget
+                tradeInitialRisk := candidateRisk
+                setupFilled := true
+                filledTradeCount += 1
+                entryText = "V26_ENTRY|symbol=" + syminfo.tickerid + "|dir=" +
+                     (tradeDirection == 1 ? "long" : "short") + "|setup=" +
+                     str.tostring(tradeSetupTime) + "|breakout=" + str.tostring(tradeBreakoutTime) +
+                     "|signal=" + str.tostring(tradeSignalTime) + "|entry=" +
+                     str.tostring(tradeEntryTime) + "|entry_px=" + f_price(tradeEntryPrice) +
+                     "|stop=" + f_price(tradeStopPrice) + "|target=" +
+                     f_price(tradeTargetPrice) + "|risk=" + f_price(tradeInitialRisk) +
+                     "|stop_cost_r=" + f_price(candidateStopCostR)
+                f_audit_label(time, open, entryText,
+                     tradeDirection == 1 ? label.style_label_up : label.style_label_down,
+                     color.new(color.blue, 0))
+        else
+            structureBlockedCount += 1
+        pendingEntry := false
+
+    // 入场 K 同样参与保护判断；同一根同时触及止损与目标时固定先记止损。
+    if tradeActive
+        stopTouched = tradeDirection == 1 ? low <= tradeStopPrice : high >= tradeStopPrice
+        targetTouched = tradeDirection == 1 ? high >= tradeTargetPrice : low <= tradeTargetPrice
+        timedOut = time >= tradeEntryTime + MS_24H
+        shouldExit = stopTouched or targetTouched or timedOut
+        if shouldExit
+            exitReason = stopTouched ? (targetTouched ? "both_hit_stop_first" : "stop_hit") :
+                 targetTouched ? "target_hit" : "timeout_close"
+            exitPrice = stopTouched ? tradeStopPrice : targetTouched ? tradeTargetPrice : close
+            grossR = tradeDirection == 1 ?
+                 (exitPrice - tradeEntryPrice) / tradeInitialRisk :
+                 (tradeEntryPrice - exitPrice) / tradeInitialRisk
+            costR = (tradeEntryPrice + exitPrice) * COST_RATE_PER_SIDE / tradeInitialRisk
+            netR = grossR - costR
+            cumulativeNetR += netR
+            closedTradeCount += 1
+            stopExitCount += stopTouched ? 1 : 0
+            targetExitCount += not stopTouched and targetTouched ? 1 : 0
+            timeoutExitCount += not stopTouched and not targetTouched ? 1 : 0
+            bothHitStopFirstCount += stopTouched and targetTouched ? 1 : 0
+            lockedUntil := time
+            exitText = "V26_EXIT|symbol=" + syminfo.tickerid + "|dir=" +
+                 (tradeDirection == 1 ? "long" : "short") + "|setup=" +
+                 str.tostring(tradeSetupTime) + "|breakout=" + str.tostring(tradeBreakoutTime) +
+                 "|signal=" + str.tostring(tradeSignalTime) + "|entry=" +
+                 str.tostring(tradeEntryTime) + "|exit=" + str.tostring(time) +
+                 "|entry_px=" + f_price(tradeEntryPrice) + "|exit_px=" + f_price(exitPrice) +
+                 "|reason=" + exitReason + "|gross_r=" + f_price(grossR) +
+                 "|cost_r=" + f_price(costR) + "|net_r=" + f_price(netR)
+            f_audit_label(time, exitPrice, exitText,
+                 tradeDirection == 1 ? label.style_label_down : label.style_label_up,
+                 stopTouched ? color.new(color.red, 0) : color.new(color.green, 0))
+            tradeActive := false
+
+// ---------- 严格按已完成 K 线推进信号状态机 ----------
+
+scanBar = barstate.isconfirmed and strictDataReady and
+     time >= SCAN_START_MS and time <= EVALUATION_END_MS
+
+if scanBar
+    currentRelation = ema144 < ema576 ? 1 : ema144 > ema576 ? -1 : 0
+    relationChanged = currentRelation != relationDirection
+    if relationChanged
+        relationDirection := currentRelation
+        relationAge := 0
+        priceSideBars := 0
+        array.clear(priceSideWindow)
+        qualified := false
+        setupTime := na
+        setupFilled := false
+        episodeActive := false
+        episodeDirection := 0
+        breakoutTime := na
+        breakoutIndex := na
+        rearmed := false
+        acceptanceValid := false
+        acceptanceEndIndex := na
+        acceptanceMaxExtremeAtr := na
+        deadlineActive := false
+        deadlineFirstSignalIndex := na
+        deadlineFirstSignalTime := na
+
+    if currentRelation != 0
+        relationAge += 1
+        onOriginalPriceSide = currentRelation == 1 ? close < ema576 : close > ema576
+        sideValue = onOriginalPriceSide ? 1 : 0
+        array.push(priceSideWindow, sideValue)
+        priceSideBars += sideValue
+        if array.size(priceSideWindow) > REGIME_BARS
+            priceSideBars -= array.shift(priceSideWindow)
+        qualifiesNow = not qualified and relationAge >= REGIME_BARS and
+             array.size(priceSideWindow) == REGIME_BARS and priceSideBars >= MIN_PRICE_SIDE_BARS
+        if qualifiesNow
+            qualified := true
+            setupTime := time
+            if showLifecycle
+                label.new(time, currentRelation == 1 ? low : high,
+                     "QUALIFIED|dir=" + (currentRelation == 1 ? "long" : "short") +
+                     "|setup=" + str.tostring(setupTime), xloc = xloc.bar_time,
+                     style = currentRelation == 1 ? label.style_label_up : label.style_label_down,
+                     color = color.new(color.gray, 35), textcolor = color.white, size = size.tiny)
+
+    // V11 的首个基础回踩信号只启动一次 96 根时钟；同向新突破不得续期。
+    lifecycleTimedOut = false
+    if deadlineActive and bar_index >= deadlineFirstSignalIndex + SIGNAL_CROSS_TIMEOUT_BARS
+        lifecycleTimedOut := true
+        relationAge := 0
+        priceSideBars := 0
+        array.clear(priceSideWindow)
+        qualified := false
+        setupTime := na
+        setupFilled := false
+        episodeActive := false
+        rearmed := false
+        acceptanceValid := false
+        deadlineActive := false
+        relationDirection := 0  // 下一根在相同关系中重新从第 1 根累计。
+
+    if not lifecycleTimedOut and currentRelation != 0
+        // 先更新旧 episode 的六根接受窗口；突破确认棒本身不做盘中穿越否决。
+        if episodeActive and bar_index > breakoutIndex and bar_index <= acceptanceEndIndex
+            onBreakoutSide = episodeDirection == 1 ? close > ema576 : close < ema576
+            intrabarHeld = episodeDirection == 1 ? low >= ema576 : high <= ema576
+            acceptanceValid := acceptanceValid and onBreakoutSide and intrabarHeld
+            directionalExtremeAtr = episodeDirection == 1 ?
+                 (high - ema576) / atr14 : (ema576 - low) / atr14
+            acceptanceMaxExtremeAtr := math.max(acceptanceMaxExtremeAtr, directionalExtremeAtr)
+
+        longBreakout = qualified and currentRelation == 1 and bar_index >= 2 and
+             close[2] <= ema576[2] and close[1] > ema576[1] and close > ema576
+        shortBreakout = qualified and currentRelation == -1 and bar_index >= 2 and
+             close[2] >= ema576[2] and close[1] < ema576[1] and close < ema576
+        newBreakoutDirection = longBreakout ? 1 : shortBreakout ? -1 : 0
+
+        if newBreakoutDirection != 0
+            episodeActive := true
+            episodeDirection := newBreakoutDirection
+            breakoutTime := time
+            breakoutIndex := bar_index
+            rearmed := newBreakoutDirection == 1 ?
+                 close > ema144 + RETEST_ZONE_ATR * atr14 :
+                 close < ema144 - RETEST_ZONE_ATR * atr14
+            acceptanceValid := true
+            acceptanceEndIndex := bar_index + ACCEPTANCE_CLOSES - 2
+            firstCrossExtremeAtr = newBreakoutDirection == 1 ?
+                 (high[1] - ema576[1]) / atr14[1] : (ema576[1] - low[1]) / atr14[1]
+            breakoutExtremeAtr = newBreakoutDirection == 1 ?
+                 (high - ema576) / atr14 : (ema576 - low) / atr14
+            acceptanceMaxExtremeAtr := math.max(firstCrossExtremeAtr, breakoutExtremeAtr)
+            if showLifecycle
+                label.new(time, newBreakoutDirection == 1 ? low : high,
+                     "BREAKOUT|dir=" + (newBreakoutDirection == 1 ? "long" : "short") +
+                     "|setup=" + str.tostring(setupTime) + "|breakout=" + str.tostring(time),
+                     xloc = xloc.bar_time,
+                     style = newBreakoutDirection == 1 ? label.style_label_up : label.style_label_down,
+                     color = color.new(color.orange, 25), textcolor = color.white, size = size.tiny)
+        else if episodeActive
+            departed = episodeDirection == 1 ?
+                 close > ema144 + RETEST_ZONE_ATR * atr14 :
+                 close < ema144 - RETEST_ZONE_ATR * atr14
+            if not rearmed
+                if departed
+                    rearmed := true
+            else
+                retestTouched = episodeDirection == 1 ?
+                     low <= ema144 + RETEST_ZONE_ATR * atr14 :
+                     high >= ema144 - RETEST_ZONE_ATR * atr14
+                if retestTouched
+                    closeDirectionalAtr = episodeDirection == 1 ?
+                         (close - ema144) / atr14 : (ema144 - close) / atr14
+                    extremeDirectionalAtr = episodeDirection == 1 ?
+                         (low - ema144) / atr14 : (ema144 - high) / atr14
+                    if closeDirectionalAtr < -RETEST_ZONE_ATR
+                        episodeActive := false
+                        rearmed := false
+                        acceptanceValid := false
+                    else
+                        baseHeldRetest = extremeDirectionalAtr >= -RETEST_ZONE_ATR
+                        if baseHeldRetest
+                            if not deadlineActive
+                                deadlineActive := true
+                                deadlineFirstSignalIndex := bar_index
+                                deadlineFirstSignalTime := time
+
+                            acceptanceComplete = bar_index > acceptanceEndIndex
+                            v14DistancePassed = math.abs(closeDirectionalAtr) <=
+                                 SIGNAL_CLOSE_DISTANCE_ATR + 1e-12
+                            v25QualityPassed = acceptanceComplete and acceptanceValid and
+                                 acceptanceMaxExtremeAtr >= ACCEPTANCE_EXTREME_ATR - 1e-12
+                            finalQualitySignal = v14DistancePassed and v25QualityPassed and
+                                 time >= EVALUATION_START_MS
+                            if finalQualitySignal
+                                qualitySignalCount += 1
+                                signalText = "V26_SIGNAL|symbol=" + syminfo.tickerid + "|dir=" +
+                                     (episodeDirection == 1 ? "long" : "short") + "|setup=" +
+                                     str.tostring(setupTime) + "|breakout=" + str.tostring(breakoutTime) +
+                                     "|signal=" + str.tostring(time) + "|close=" + f_price(close) +
+                                     "|ema144=" + f_price(ema144) + "|ema576=" + f_price(ema576) +
+                                     "|atr14=" + f_price(atr14) + "|max_extreme_atr=" +
+                                     f_price(acceptanceMaxExtremeAtr)
+                                f_audit_label(time, close, signalText,
+                                     episodeDirection == 1 ? label.style_label_up : label.style_label_down,
+                                     color.new(color.purple, 0))
+                                if setupFilled
+                                    setupFilledBlockedCount += 1
+                                else if tradeActive or pendingEntry or
+                                     (not na(lockedUntil) and time <= lockedUntil)
+                                    positionBlockedCount += 1
+                                else
+                                    pendingEntry := true
+                                    pendingDirection := episodeDirection
+                                    pendingSetupTime := setupTime
+                                    pendingBreakoutTime := breakoutTime
+                                    pendingSignalTime := time
+                                    pendingSignalClose := close
+                                    pendingSignalEma144 := ema144
+                                    pendingSignalEma576 := ema576
+                                    pendingSignalAtr14 := atr14
+                                    pendingMaxExtremeAtr := acceptanceMaxExtremeAtr
+                        // 影线越界或成功候选都会消费武装，但不会自动删除 episode。
+                        rearmed := false
+
+activeStopPlot = showTradeLevels and tradeActive ? tradeStopPrice : na
+activeTargetPlot = showTradeLevels and tradeActive ? tradeTargetPrice : na
+plot(activeStopPlot, "V26 Active Stop", color = color.new(color.red, 0), style = plot.style_linebr)
+plot(activeTargetPlot, "V26 Active Target", color = color.new(color.green, 0), style = plot.style_linebr)
+
+// ---------- 图表内审计摘要 ----------
+
+var table audit = table.new(position.top_right, 2, 16,
+     bgcolor = color.new(color.black, 10), border_width = 1)
+if barstate.islastconfirmedhistory
+    table.cell(audit, 0, 0, "V26 严格对账", text_color = color.white,
+         bgcolor = color.new(color.blue, 35))
+    table.cell(audit, 1, 0, RULE_VERSION, text_color = color.white,
+         bgcolor = color.new(color.blue, 35))
+    table.cell(audit, 0, 1, "周期")
+    table.cell(audit, 1, 1, timeframeReady ? "15m" : "错误：仅限15m",
+         text_color = timeframeReady ? color.white : color.red)
+    table.cell(audit, 0, 2, "冻结起点")
+    table.cell(audit, 1, 2, exactLoadStartObserved ? "已精确命中" : "未命中",
+         text_color = exactLoadStartObserved ? color.lime : color.red)
+    table.cell(audit, 0, 3, "K线连续")
+    table.cell(audit, 1, 3, sourceContiguous ? "是" : "否",
+         text_color = sourceContiguous ? color.lime : color.red)
+    table.cell(audit, 0, 4, "严格数据就绪")
+    table.cell(audit, 1, 4, strictDataReady ? "是" : "否",
+         text_color = strictDataReady ? color.lime : color.red)
+    table.cell(audit, 0, 5, "质量候选")
+    table.cell(audit, 1, 5, str.tostring(qualitySignalCount))
+    table.cell(audit, 0, 6, "实际入场")
+    table.cell(audit, 1, 6, str.tostring(filledTradeCount))
+    table.cell(audit, 0, 7, "已退出")
+    table.cell(audit, 1, 7, str.tostring(closedTradeCount))
+    table.cell(audit, 0, 8, "止损 / 目标 / 超时")
+    table.cell(audit, 1, 8, str.tostring(stopExitCount) + " / " +
+         str.tostring(targetExitCount) + " / " + str.tostring(timeoutExitCount))
+    table.cell(audit, 0, 9, "同棒止损优先")
+    table.cell(audit, 1, 9, str.tostring(bothHitStopFirstCount))
+    table.cell(audit, 0, 10, "成本拒绝")
+    table.cell(audit, 1, 10, str.tostring(costBlockedCount))
+    table.cell(audit, 0, 11, "结构/缺口拒绝")
+    table.cell(audit, 1, 11, str.tostring(structureBlockedCount))
+    table.cell(audit, 0, 12, "首笔已用 / 仓位锁")
+    table.cell(audit, 1, 12, str.tostring(setupFilledBlockedCount) + " / " +
+         str.tostring(positionBlockedCount))
+    table.cell(audit, 0, 13, "累计净R")
+    table.cell(audit, 1, 13, f_price(cumulativeNetR),
+         text_color = cumulativeNetR >= 0 ? color.lime : color.red)
+    table.cell(audit, 0, 14, "账本")
+    table.cell(audit, 1, 14, "手工严格回放")
+    table.cell(audit, 0, 15, "运行边界")
+    table.cell(audit, 1, 15, "Research-only", text_color = color.yellow)

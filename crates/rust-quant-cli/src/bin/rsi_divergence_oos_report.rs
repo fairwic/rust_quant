@@ -256,6 +256,8 @@ fn run_and_print_phase(case: OosCase, phase: &str, candles: &[CandleItem]) -> Re
 fn risk_config() -> BasicRiskStrategyConfig {
     BasicRiskStrategyConfig {
         max_loss_percent: 0.02,
+        enforce_base_max_loss: None,
+        check_entry_candle_risk: None,
         is_used_signal_k_line_stop_loss: Some(true),
         atr_take_profit_ratio: Some(0.0),
         fixed_signal_kline_take_profit_ratio: Some(0.0),
@@ -267,6 +269,7 @@ fn risk_config() -> BasicRiskStrategyConfig {
         dynamic_range_loss_percent: None,
         trade_fee_rate: Some(MAKER_FEE_RATE),
         position_leverage: None,
+        account_risk_fraction_per_trade: None,
         tiered_take_profit_level_1_close_ratio: None,
         tiered_take_profit_level_2_close_ratio: None,
     }

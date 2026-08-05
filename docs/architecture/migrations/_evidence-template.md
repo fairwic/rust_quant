@@ -130,7 +130,7 @@
 - 首次差异层：
 - Exact parity / Scenario comparison：
 - 若为 Scenario comparison，不能作为 Exact parity 的缺失输入：
-- B0 test-only evidence provider（若适用）：bundle ref/hash、Market/Account/Instrument input hash、Clock/Seed、确认无网络/DB 写入/runtime wiring：
+- B0 test-only evidence provider（若适用）：bundle ref/hash、Market/Account/Instrument input hash、Clock/Seed、确认无网络/DB 写入/运行时装配：
 
 ## 7. 架构与工件
 

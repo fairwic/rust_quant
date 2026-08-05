@@ -1,7 +1,29 @@
 use anyhow::{bail, Result};
 
+mod filtered_volume_rsi_ema_macd;
 mod market_momentum_reversal;
+mod rsi_volume_regime;
 
+pub(super) use filtered_volume_rsi_ema_macd::{
+    append_filtered_volume_rsi_ema_macd_v10_research_args,
+    append_filtered_volume_rsi_ema_macd_v11_research_args,
+    append_filtered_volume_rsi_ema_macd_v12_research_args,
+    append_filtered_volume_rsi_ema_macd_v13_research_args,
+    append_filtered_volume_rsi_ema_macd_v1_research_args,
+    append_filtered_volume_rsi_ema_macd_v2_research_args,
+    append_filtered_volume_rsi_ema_macd_v3_research_args,
+    append_filtered_volume_rsi_ema_macd_v4_research_args,
+    append_filtered_volume_rsi_ema_macd_v5_research_args,
+    append_filtered_volume_rsi_ema_macd_v9_research_args,
+    append_momentum_exhaustion_reversal_v1_research_args,
+    append_momentum_exhaustion_reversal_v2_research_args,
+    append_momentum_exhaustion_reversal_v3_research_args,
+    append_volume_anchor_rsi_divergence_reversal_v1_research_args,
+    append_volume_anchor_rsi_divergence_reversal_v2_research_args,
+    append_volume_platform_break_trend_v1_research_args,
+    append_volume_platform_break_trend_v2_research_args,
+};
+pub(super) use market_momentum_reversal::append_direct_kline_v36_frozen_args;
 use market_momentum_reversal::append_market_momentum_reversal_args;
 pub(super) use market_momentum_reversal::{
     MARKET_MOMENTUM_OPPOSITE_MOVE_CONFIRMED_REVERSAL_RESEARCH_PRESET,
@@ -11,6 +33,11 @@ pub(super) use market_momentum_reversal::{
     MARKET_MOMENTUM_OPPOSITE_MOVE_MEAN_RECLAIM_RESEARCH_PRESET,
     MARKET_MOMENTUM_OPPOSITE_MOVE_RISK_REWARD_RESEARCH_PRESET,
     MARKET_MOMENTUM_OPPOSITE_MOVE_VOLUME_ATR_RESEARCH_PRESET,
+};
+pub(super) use rsi_volume_regime::{
+    append_rsi_volume_regime_v1_research_args, append_rsi_volume_regime_v2_research_args,
+    append_rsi_volume_regime_v3_research_args, append_rsi_volume_regime_v4_research_args,
+    append_rsi_volume_regime_v5_research_args,
 };
 
 pub(super) const PAPER_STRATEGY_PRESET_FLAG: &str = "--paper-strategy-preset";
@@ -197,6 +224,7 @@ pub(super) const PAPER_STRATEGY_PRESET_LOCKED_FLAGS: &[&str] = &[
     "--entry-period",
     "--entry-max-distance-pct",
     "--entry-min-volume-ratio",
+    "--entry-filtered-volume-rsi-ema-macd",
     "--entry-max-signal-pullback-pct",
     "--entry-max-gap-without-retest-pct",
     "--entry-retest-tolerance-pct",

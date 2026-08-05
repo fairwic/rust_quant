@@ -1,3 +1,4 @@
+use super::computed_candles::FILTERED_VOLUME_EMA_SLOW_PERIOD;
 use super::directional_reversal::{
     BTC_BROAD_DIRECTION_LOOKBACK_CANDLES, EXHAUSTION_CURRENT_CLUSTER_CANDLES,
     EXHAUSTION_VOLUME_LOOKBACK_CANDLES,
@@ -6,9 +7,10 @@ use super::historical_universe::HistoricalUniverseSchedule;
 use super::kline_volume_rank_velocity::load_kline_volume_rank_events;
 use super::one_shot_trend_state::{scan_one_shot_trend_events, OneShotTrendScanStats};
 use super::{
-    build_computed_candles, BacktestCandle, BacktestDataSet, CandlePair, FvgEntryMode,
-    MarketVelocityEventBacktestArgs, MarketVelocityEventSource, MarketVelocityTrendTimeframe,
-    RadarEvent, FAST_MOMENTUM_BOLLINGER_PERIOD, FAST_MOMENTUM_RSI_PERIOD, MS_15M, MS_1H, MS_4H,
+    build_computed_candles, is_filtered_volume_weekly_base_version, BacktestCandle,
+    BacktestDataSet, CandlePair, FvgEntryMode, MarketVelocityEventBacktestArgs,
+    MarketVelocityEventSource, MarketVelocityTrendTimeframe, RadarEvent,
+    FAST_MOMENTUM_BOLLINGER_PERIOD, FAST_MOMENTUM_RSI_PERIOD, MS_15M, MS_1H, MS_4H,
     PAPER_OUTCOME_HORIZONS,
 };
 use anyhow::{bail, Context, Result};
@@ -50,10 +52,15 @@ pub(super) async fn load_backtest_data(
         } else {
             Vec::new()
         };
-        candles_15m_computed.insert(
-            pair.symbol.clone(),
-            build_computed_candles(raw_15m.clone(), args.entry_period),
-        );
+        let mut computed_15m = build_computed_candles(raw_15m.clone(), args.entry_period);
+        if is_filtered_volume_weekly_base_version(&args.paper_outcome_entry_rule_version) {
+            let volume_ccy_by_ts =
+                load_volume_ccy_by_ts(pool, &pair.candles_15m, candle_window).await?;
+            for candle in &mut computed_15m {
+                candle.volume_ccy = volume_ccy_by_ts.get(&candle.candle.ts).copied().flatten();
+            }
+        }
+        candles_15m_computed.insert(pair.symbol.clone(), computed_15m);
         candles_4h_computed.insert(
             pair.symbol.clone(),
             build_computed_candles(raw_4h.clone(), args.entry_period),
@@ -478,6 +485,45 @@ async fn load_candles(
         })
         .collect()
 }
+
+/// 从现有每币 15m 分表读取 `vol_ccy`；缺失或非法值保持为空，由 V3 失败关闭。
+async fn load_volume_ccy_by_ts(
+    pool: &PgPool,
+    table_name: &str,
+    window_ms: Option<(i64, i64)>,
+) -> Result<HashMap<i64, Option<f64>>> {
+    let table_name = quote_identifier(table_name);
+    let rows = match window_ms {
+        Some((start_ms, end_ms)) => {
+            let query = format!(
+                "SELECT ts, vol_ccy FROM {table_name} WHERE confirm = '1' AND ts >= $1 AND ts <= $2 ORDER BY ts"
+            );
+            sqlx::query(&query)
+                .bind(start_ms)
+                .bind(end_ms)
+                .fetch_all(pool)
+                .await
+        }
+        None => {
+            let query = format!(
+                "SELECT ts, vol_ccy FROM {table_name} WHERE confirm = '1' ORDER BY ts"
+            );
+            sqlx::query(&query).fetch_all(pool).await
+        }
+    }
+    .with_context(|| format!("load vol_ccy from {table_name}"))?;
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            let volume_ccy = row
+                .try_get::<String, _>("vol_ccy")
+                .ok()
+                .and_then(|value| value.parse::<f64>().ok())
+                .filter(|value| value.is_finite() && *value >= 0.0);
+            (row.get::<i64, _>("ts"), volume_ccy)
+        })
+        .collect())
+}
 /// 判断当前研究参数是否需要读取 1H K 线，避免纯 15m/4h 方案反复拉取无用数据。
 fn should_load_1h_candles(args: &MarketVelocityEventBacktestArgs) -> bool {
     args.trend_timeframe == MarketVelocityTrendTimeframe::OneHour
@@ -529,6 +575,9 @@ fn entry_warmup_ms(args: &MarketVelocityEventBacktestArgs) -> i64 {
         .entry_period
         .saturating_add(3)
         .max(FAST_15M_CONTEXT_WARMUP_CANDLES);
+    if args.entry_filtered_volume_rsi_ema_macd {
+        warmup_candles = warmup_candles.max(FILTERED_VOLUME_EMA_SLOW_PERIOD.saturating_add(3));
+    }
     if args.entry_min_rsi.is_some()
         || args.entry_max_rsi.is_some()
         || args.entry_min_rsi_delta.is_some()
@@ -800,6 +849,7 @@ async fn load_kline_15m_events(
             .bind(args.trade_direction.label())
             .bind(args.entry_defer_bearish_continuation)
             .bind(args.entry_defer_bullish_continuation)
+            .bind(args.entry_filtered_volume_rsi_ema_macd)
             .fetch_all(pool)
             .await
             .with_context(|| format!("load synthetic 15m kline events from {table_name}"))?;
@@ -842,7 +892,7 @@ fn kline_15m_events_sql(table_name: &str) -> String {
           AND (
             ($5 = 'long' AND (($6 = false AND c::double precision > o::double precision) OR ($6 = true AND c::double precision <> o::double precision)))
             OR ($5 = 'short' AND (($7 = false AND c::double precision < o::double precision) OR ($7 = true AND c::double precision <> o::double precision)))
-            OR ($5 = 'both' AND c::double precision <> o::double precision)
+            OR ($5 = 'both' AND ($8 = true OR c::double precision <> o::double precision))
           )
           AND ($3::double precision IS NULL OR CASE
             WHEN $5 = 'short' AND $7 = true THEN ABS((c::double precision - o::double precision) / o::double precision * 100.0)
@@ -1038,7 +1088,8 @@ mod tests {
         assert!(event_sql.contains("$6 = true AND c::double precision <> o::double precision"));
         assert!(event_sql.contains("$7 = false AND c::double precision < o::double precision"));
         assert!(event_sql.contains("$7 = true AND c::double precision <> o::double precision"));
-        assert!(event_sql.contains("$5 = 'both' AND c::double precision <> o::double precision"));
+        assert!(event_sql
+            .contains("$5 = 'both' AND ($8 = true OR c::double precision <> o::double precision)"));
         assert!(event_sql.contains("$5 = 'long' AND $6 = true THEN ABS"));
         assert!(event_sql.contains("$5 = 'short' AND $7 = true THEN ABS"));
     }
@@ -1219,6 +1270,20 @@ mod tests {
         assert!(start_ms <= first_event_ts - 23 * MS_4H);
         assert!(start_ms <= first_event_ts - 23 * MS_15M);
         assert!(end_ms >= last_event_ts + 48 * 60 * 60 * 1_000 + MS_4H);
+    }
+    #[test]
+    fn filtered_volume_strategy_loads_a_complete_ema696_warmup() {
+        let args = MarketVelocityEventBacktestArgs {
+            event_source: MarketVelocityEventSource::Kline15m,
+            entry_filtered_volume_rsi_ema_macd: true,
+            trend_timeframe: MarketVelocityTrendTimeframe::Off,
+            ..MarketVelocityEventBacktestArgs::default()
+        };
+        let event_ts = 2_000_000_000_000;
+
+        let (start_ms, _) = candle_load_window_ms(&args, &[sample_event(event_ts)]).unwrap();
+
+        assert!(start_ms <= event_ts - 699 * MS_15M);
     }
     #[test]
     fn candle_load_window_covers_opposite_duration_history() {

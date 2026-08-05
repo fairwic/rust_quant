@@ -874,6 +874,7 @@ fn outcome_replay_and_paper_payload_use_the_per_signal_atr_target() {
         trigger: "reclaim_ema".to_string(),
         structure_stop_loss_price: None,
         structure_stop_loss_source: None,
+        entry_signal_evidence: None,
     };
     let args = MarketVelocityEventBacktestArgs {
         stop_loss_pct: 0.02,
@@ -922,12 +923,63 @@ fn new_research_preset_keeps_both_sides_and_ten_percent_net_move() {
         "market_momentum_opposite_move_reversal"
     );
     assert_eq!(manifest.channel, "research");
+    assert_eq!(
+        manifest.manifest_json["execution"]["service_mode"],
+        "research_backtest_only"
+    );
+    assert_eq!(
+        manifest.manifest_json["execution"]["promotion_eligible"],
+        false
+    );
     assert_eq!(manifest.manifest_status, "research");
     assert_eq!(
         manifest.manifest_json["parameters"]["take_profit"]["mode"],
         "volume_atr"
     );
     assert!(market_velocity_paper_observation_usage().contains(preset));
+}
+
+#[test]
+fn direct_kline_v36_is_frozen_under_an_independent_research_identity() {
+    let preset = MARKET_MOMENTUM_DIRECT_KLINE_V36_PRESET;
+    let args = market_momentum_direct_kline_v36_frozen_args()
+        .expect("build direct K-line v36 frozen args");
+
+    assert_eq!(args.event_source, MarketVelocityEventSource::Kline15m);
+    assert!(args.kline_current_live_only);
+    assert!(!args.kline_volume_rank_velocity);
+    assert_eq!(args.trade_direction, MarketVelocityTradeDirection::Long);
+    assert_eq!(args.entry_min_opposite_net_move_pct, Some(8.0));
+    assert_eq!(args.entry_min_opposite_duration_candles, Some(96));
+    assert_eq!(args.entry_opposite_duration_min_r_squared, 0.60);
+    assert_eq!(args.equity_max_holding_hours, Some(48));
+    assert_eq!(
+        market_velocity_strategy_type(&args),
+        MARKET_MOMENTUM_DIRECT_KLINE_V36_STRATEGY_KEY
+    );
+    let strategy_detail = market_velocity_strategy_detail(&args);
+    assert_eq!(
+        strategy_detail["version_status"],
+        "frozen_research_rejected"
+    );
+    assert_eq!(strategy_detail["promotion_eligible"], false);
+
+    let manifest = market_velocity_paper_strategy_preset_manifest(preset)
+        .expect("build direct K-line v36 manifest");
+    assert_eq!(
+        manifest.strategy_key,
+        MARKET_MOMENTUM_DIRECT_KLINE_V36_STRATEGY_KEY
+    );
+    assert_eq!(
+        manifest.product_slug,
+        MARKET_MOMENTUM_DIRECT_KLINE_V36_PRODUCT_SLUG
+    );
+    assert_eq!(manifest.channel, "research");
+    assert_eq!(
+        manifest.manifest_json["parameters"]["kline_volume_rank_velocity"],
+        false
+    );
+    assert!(!market_velocity_paper_observation_usage().contains(preset));
 }
 
 #[test]
@@ -987,6 +1039,7 @@ fn framework_replay_persists_the_per_trade_volume_atr_target() {
         trigger: "opposite_move_momentum_reversal".to_string(),
         structure_stop_loss_price: None,
         structure_stop_loss_source: None,
+        entry_signal_evidence: None,
     };
     let args = MarketVelocityEventBacktestArgs {
         stop_loss_pct: 0.02,
@@ -1052,6 +1105,7 @@ fn framework_equity_horizon_closes_before_a_late_target() {
         trigger: "opposite_move_momentum_reversal".to_string(),
         structure_stop_loss_price: None,
         structure_stop_loss_source: None,
+        entry_signal_evidence: None,
     };
     let args = MarketVelocityEventBacktestArgs {
         stop_loss_pct: 0.03,

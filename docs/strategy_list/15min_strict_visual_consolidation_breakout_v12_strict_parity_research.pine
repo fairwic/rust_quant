@@ -1,0 +1,855 @@
+//@version=6
+// V12 图表审计版：严格视觉横盘、双向强突破、第 1～5 根首次合法回踩与下一开盘结构止损。
+// 只维护手工研究账本，不调用 strategy.entry、alert、Paper 或 Live；L2 已失败，不得据此实盘。
+strategy("15m Strict Visual Consolidation Breakout - V12 Strict Parity Research", overlay = true,
+     pyramiding = 0, initial_capital = 100000, default_qty_type = strategy.fixed,
+     default_qty_value = 1, process_orders_on_close = false, max_bars_back = 300,
+     max_boxes_count = 120, max_lines_count = 240, max_labels_count = 500)
+
+const string RULE_VERSION = "strict_visual_consolidation_symmetric_breakout_candle_extreme_stop_min_1atr_15m_research_v1"
+const int MS_15M = 15 * 60 * 1000
+const int LOAD_START_MS = 1746144000000  // 2025-05-02 00:00 UTC，评价窗口前 60 天。
+const int EVALUATION_START_MS = 1751328000000
+const int EVALUATION_END_MS = 1784470500000
+const int ATR_LENGTH = 14
+const int ACCEPTANCE_WINDOW_BARS = 5
+const float MAXIMUM_WIDTH_RATIO = 0.03
+const float MINIMUM_CONTAINMENT_RATIO = 0.80
+const float MAXIMUM_DIRECTION_EFFICIENCY = 0.35
+const int MINIMUM_EDGE_TRANSITIONS = 3
+const float MAXIMUM_UPPER_DRIFT = 0.25
+const float MAXIMUM_LOWER_DRIFT = 0.35
+const int MINIMUM_TOUCH_GAP = 2
+const float TOUCH_BAND_HEIGHT_RATIO = 0.10
+const float TRANSITION_BAND_HEIGHT_RATIO = 0.20
+const float BREAKOUT_MIN_BODY_RATIO = 0.50
+const float BREAKOUT_MIN_DIRECTIONAL_MOVE_RATIO = 0.0015
+const float RETEST_BAND_PRICE_RATIO = 0.001
+const float RETEST_BAND_ATR_RATIO = 0.25
+const float RETAINED_BREAKOUT_EXCESS_RATIO = 0.25
+const float MINIMUM_STOP_ATR = 1.0
+const float COST_RATE_PER_SIDE = 0.0008
+
+const string displayGroup = "显示"
+showZones = input.bool(true, "显示严格横盘", group = displayGroup)
+showRangeLifecycle = input.bool(false, "显示横盘生命周期", group = displayGroup)
+showTradeMarkers = input.bool(true, "显示开仓与平仓点", group = displayGroup)
+showSignalLifecycle = input.bool(false, "显示突破与确认过程点", group = displayGroup)
+showAuditText = input.bool(false, "标签内联完整审计文本（逐字段比对用）", group = displayGroup)
+showTradeLevels = input.bool(true, "显示当前止损与目标", group = displayGroup)
+labelOffsetAtr = input.float(1.2, "标签离 K 线间距（ATR 倍数）", minval = 0.0, maxval = 6.0,
+     step = 0.1, group = displayGroup)
+maximumVisibleZones = input.int(30, "最多保留区间", minval = 5, maxval = 60, group = displayGroup)
+
+// Rust 与 Pine 均按最近秩定义 P90/P10 等稳健边界，孤立长影线不会单独决定区间。
+f_percentile(source, startOffset, length, percentile) =>
+    samples = array.new_float(0)
+    for sampleIndex = 0 to length - 1
+        array.push(samples, source[startOffset + sampleIndex])
+    array.sort(samples)
+    rank = int(math.max(0, math.min(length - 1, math.ceil(percentile * length) - 1)))
+    array.get(samples, rank)
+
+// 相邻贴边棒属于同一触碰组；间隔至少两根才计入新的独立触碰。
+f_touch_groups(source, edge, band, length, upperEdge) =>
+    groups = 0
+    lastTouchIndex = int(na)
+    for chronologicalIndex = 0 to length - 1
+        offset = length - 1 - chronologicalIndex
+        touches = upperEdge ? source[offset] >= edge - band : source[offset] <= edge + band
+        if touches
+            if na(lastTouchIndex) or chronologicalIndex - lastTouchIndex >= MINIMUM_TOUCH_GAP
+                groups += 1
+            lastTouchIndex := chronologicalIndex
+    groups
+
+// 收盘容纳率允许少数越界影线，但要求绝大多数收盘仍属于同一价格区域。
+f_containment_ratio(upper, lower, band, length) =>
+    contained = 0
+    for offset = 0 to length - 1
+        if close[offset] <= upper + band and close[offset] >= lower - band
+            contained += 1
+    contained / length
+
+// 净收盘位移除以完整收盘路径；单边推进接近 1，反复往返接近 0。
+f_direction_efficiency(length) =>
+    pathLength = 0.0
+    for chronologicalIndex = 1 to length - 1
+        olderOffset = length - chronologicalIndex
+        newerOffset = olderOffset - 1
+        pathLength += math.abs(close[newerOffset] - close[olderOffset])
+    netDisplacement = math.abs(close - close[length - 1])
+    pathLength <= 0 ? 0.0 : netDisplacement / pathLength
+
+// 仅统计能够从 OHLC 确认先后顺序的上下沿交替；同棒双扫不补造盘中路径。
+f_edge_transition_count(upper, lower, length) =>
+    edgeBand = math.max(syminfo.mintick * 2.0, (upper - lower) * TRANSITION_BAND_HEIGHT_RATIO)
+    previousEdge = 0
+    transitions = 0
+    for chronologicalIndex = 0 to length - 1
+        offset = length - 1 - chronologicalIndex
+        touchesUpper = high[offset] >= upper - edgeBand
+        touchesLower = low[offset] <= lower + edgeBand
+        edge = touchesUpper and not touchesLower ? 1 : touchesLower and not touchesUpper ? -1 : 0
+        if edge != 0
+            if previousEdge != 0 and edge != previousEdge
+                transitions += 1
+            previousEdge := edge
+    transitions
+
+// 固定长度候选同时通过宽度、触碰、容纳、漂移、方向效率与交替次数六类门禁。
+f_evaluate_range(length) =>
+    upper = f_percentile(high, 0, length, 0.90)
+    lower = f_percentile(low, 0, length, 0.10)
+    height = upper - lower
+    middle = (upper + lower) * 0.5
+    halfLength = int(math.floor(length * 0.5))
+    recentLength = length - halfLength
+    touchBand = math.max(syminfo.mintick * 2.0, height * TOUCH_BAND_HEIGHT_RATIO)
+    upperTouchGroups = f_touch_groups(high, upper, touchBand, length, true)
+    lowerTouchGroups = f_touch_groups(low, lower, touchBand, length, false)
+    containmentRatio = f_containment_ratio(upper, lower, touchBand, length)
+    recentUpper = f_percentile(high, 0, recentLength, 0.80)
+    earlierUpper = f_percentile(high, recentLength, halfLength, 0.80)
+    recentLower = f_percentile(low, 0, recentLength, 0.20)
+    earlierLower = f_percentile(low, recentLength, halfLength, 0.20)
+    upperDrift = height > 0 ? math.abs(recentUpper - earlierUpper) / height : 1.0
+    lowerDrift = height > 0 ? math.abs(recentLower - earlierLower) / height : 1.0
+    directionEfficiency = f_direction_efficiency(length)
+    edgeTransitions = f_edge_transition_count(upper, lower, length)
+    valid = height > 0 and middle > 0 and height / middle <= MAXIMUM_WIDTH_RATIO and
+         upperTouchGroups >= 2 and lowerTouchGroups >= 2 and
+         containmentRatio >= MINIMUM_CONTAINMENT_RATIO and upperDrift <= MAXIMUM_UPPER_DRIFT and
+         lowerDrift <= MAXIMUM_LOWER_DRIFT and directionEfficiency <= MAXIMUM_DIRECTION_EFFICIENCY and
+         edgeTransitions >= MINIMUM_EDGE_TRANSITIONS
+    [valid, upper, lower, containmentRatio, directionEfficiency, edgeTransitions,
+         upperTouchGroups, lowerTouchGroups, upperDrift, lowerDrift]
+
+// 强突破棒必须同时满足方向、实体占整根比例和方向实体涨跌幅；多空完全镜像。
+f_breakout_strength(direction) =>
+    fullRange = high - low
+    bodyRatio = fullRange > 0 ? math.abs(close - open) / fullRange : 0.0
+    directionalBody = direction == 1 ? close - open : open - close
+    directionalMoveRatio = open > 0 ? directionalBody / open : 0.0
+    [bodyRatio >= BREAKOUT_MIN_BODY_RATIO and
+         directionalMoveRatio >= BREAKOUT_MIN_DIRECTIONAL_MOVE_RATIO,
+         bodyRatio, directionalMoveRatio]
+
+// 价格向下对齐用于多头结构止损与多头目标。
+f_round_down(price) =>
+    math.floor(price / syminfo.mintick) * syminfo.mintick
+
+// 价格向上对齐用于空头结构止损与空头目标。
+f_round_up(price) =>
+    math.ceil(price / syminfo.mintick) * syminfo.mintick
+
+// 单调 OHLC 路径上的区间判定与 Rust broker emulator 保持开区间起点、闭区间终点语义。
+f_between(level, startPrice, endPrice) =>
+    endPrice >= startPrice ? level > startPrice and level <= endPrice :
+         level < startPrice and level >= endPrice
+
+// 返回单段路径最先触及的保护价：1=止损，2=目标，0=未触发。
+f_segment_action(startPrice, endPrice, stopPrice, targetPrice) =>
+    stopIn = f_between(stopPrice, startPrice, endPrice)
+    targetIn = not na(targetPrice) and f_between(targetPrice, startPrice, endPrice)
+    action = 0
+    price = float(na)
+    if stopIn and targetIn
+        price := endPrice >= startPrice ? math.min(stopPrice, targetPrice) :
+             math.max(stopPrice, targetPrice)
+        action := math.abs(price - stopPrice) <= syminfo.mintick * 0.1 ? 1 : 2
+    else if stopIn
+        action := 1
+        price := stopPrice
+    else if targetIn
+        action := 2
+        price := targetPrice
+    [action, price]
+
+// 完整 K 线按 TradingView 默认“离开盘更近的一侧先走”路径返回首个固定保护动作。
+f_protective_action(direction, stopPrice, targetPrice) =>
+    action = 0
+    price = float(na)
+    stopMarketable = direction == 1 ? open <= stopPrice : open >= stopPrice
+    targetMarketable = not na(targetPrice) and (direction == 1 ? open >= targetPrice : open <= targetPrice)
+    if stopMarketable
+        action := 1
+        price := open
+    else if targetMarketable
+        action := 2
+        price := open
+    else
+        highFirst = math.abs(open - high) < math.abs(open - low)
+        path1 = highFirst ? high : low
+        path2 = highFirst ? low : high
+        [firstAction, firstPrice] = f_segment_action(open, path1, stopPrice, targetPrice)
+        if firstAction != 0
+            action := firstAction
+            price := firstPrice
+        else
+            [secondAction, secondPrice] = f_segment_action(path1, path2, stopPrice, targetPrice)
+            if secondAction != 0
+                action := secondAction
+                price := secondPrice
+            else
+                [thirdAction, thirdPrice] = f_segment_action(path2, close, stopPrice, targetPrice)
+                action := thirdAction
+                price := thirdPrice
+    [action, price]
+
+// 把 Unix 毫秒格式化成图表时区的年月日与时分，仅用于 tooltip 展示。
+f_format_time(milliseconds) =>
+    str.format("{0,number,0000}-{1,number,00}-{2,number,00} {3,number,00}:{4,number,00}",
+         year(milliseconds), month(milliseconds), dayofmonth(milliseconds),
+         hour(milliseconds), minute(milliseconds))
+
+// 把 "字段名=13位毫秒" 改写成 "字段名=可读时间"，保持字段名不变以便后续词典映射。
+// 逐字段定位而不是全局扫数字，避免误伤价格、ATR 等非时间字段。
+// Pine 不支持字符串大小比较，故用 | 分隔符切出字段值，再用数量级判定是否为毫秒时间戳。
+f_localize_time_field(source, fieldName) =>
+    result = source
+    keyPosition = str.pos(result, fieldName)
+    if not na(keyPosition)
+        valueStart = keyPosition + str.length(fieldName)
+        tail = str.substring(result, valueStart)
+        separatorOffset = str.pos(tail, "|")
+        valueText = na(separatorOffset) ? tail : str.substring(tail, 0, separatorOffset)
+        numericValue = str.tonumber(valueText)
+        if not na(numericValue) and numericValue >= 1000000000000
+            result := str.substring(result, 0, valueStart) + f_format_time(int(numericValue)) +
+                 (na(separatorOffset) ? "" : str.substring(tail, separatorOffset))
+    result
+
+// 把机器可解析的单行审计串拆成多行中文 tooltip。
+// 审计串本身保持英文原样以便与 Rust 候选账本逐字段比对，只在展示层做词典映射。
+// 替换顺序有硬要求：含子串的长字段必须先替换，否则会被短字段误伤
+// （struct_stop= 先于 stop=、entry_px= 先于 entry=、required_close= 先于 close= 等）。
+f_audit_tooltip(auditText) =>
+    // 先在仍带 | 分隔符时格式化时间：用 "|entry=" 定位可避免误配 "|entry_px="。
+    timed = f_localize_time_field(auditText, "|breakout=")
+    timed := f_localize_time_field(timed, "|signal=")
+    timed := f_localize_time_field(timed, "|entry=")
+    timed := f_localize_time_field(timed, "|exit=")
+    zh = str.replace_all(timed, "|", "\n")
+    zh := str.replace_all(zh, "V12_DIAG_WEAK_DEPARTURE", "弱离场（诊断样本）")
+    zh := str.replace_all(zh, "V12_DIAG_BREAKOUT", "突破（诊断样本）")
+    zh := str.replace_all(zh, "V12_DIAG_SIGNAL", "确认信号（诊断样本）")
+    zh := str.replace_all(zh, "V12_DIAG_ENTRY", "开仓（诊断样本）")
+    zh := str.replace_all(zh, "V12_DIAG_EXIT", "平仓（诊断样本）")
+    zh := str.replace_all(zh, "V12_DIAG_BLOCK", "已阻塞（诊断样本）")
+    zh := str.replace_all(zh, "V12_WEAK_DEPARTURE", "弱离场")
+    zh := str.replace_all(zh, "V12_BREAKOUT", "突破")
+    zh := str.replace_all(zh, "V12_SIGNAL", "确认信号")
+    zh := str.replace_all(zh, "V12_ENTRY", "开仓")
+    zh := str.replace_all(zh, "V12_EXIT", "平仓")
+    zh := str.replace_all(zh, "V12_BLOCK", "已阻塞")
+    // 退出与阻塞原因
+    zh := str.replace_all(zh, "reason=structure_invalid_at_entry", "原因：入场时结构失效")
+    zh := str.replace_all(zh, "reason=reverse_next_open", "原因：反手于下一开盘")
+    zh := str.replace_all(zh, "reason=take_profit", "原因：止盈")
+    zh := str.replace_all(zh, "reason=stop_loss", "原因：止损")
+    // 方向枚举
+    zh := str.replace_all(zh, "dir=long", "方向：多")
+    zh := str.replace_all(zh, "dir=short", "方向：空")
+    zh := str.replace_all(zh, "dir=up", "方向：上")
+    zh := str.replace_all(zh, "dir=down", "方向：下")
+    // 字段名：长字段优先
+    zh := str.replace_all(zh, "range_start=", "横盘起始棒：")
+    zh := str.replace_all(zh, "range_len=", "横盘长度：")
+    zh := str.replace_all(zh, "required_close=", "需达收盘：")
+    zh := str.replace_all(zh, "retest_band=", "回踩带宽：")
+    zh := str.replace_all(zh, "struct_stop=", "结构止损：")
+    zh := str.replace_all(zh, "target_passed=", "目标已越过：")
+    zh := str.replace_all(zh, "body_ratio=", "实体占比：")
+    zh := str.replace_all(zh, "move_ratio=", "方向位移比：")
+    zh := str.replace_all(zh, "entry_px=", "开仓价：")
+    zh := str.replace_all(zh, "exit_px=", "平仓价：")
+    zh := str.replace_all(zh, "gross_r=", "毛 R：")
+    zh := str.replace_all(zh, "cost_r=", "成本 R：")
+    zh := str.replace_all(zh, "net_r=", "净 R：")
+    zh := str.replace_all(zh, "risk_atr=", "风险 ATR 倍数：")
+    zh := str.replace_all(zh, "breakout=", "突破时间：")
+    zh := str.replace_all(zh, "signal=", "信号时间：")
+    zh := str.replace_all(zh, "entry=", "开仓时间：")
+    zh := str.replace_all(zh, "exit=", "平仓时间：")
+    zh := str.replace_all(zh, "upper=", "上边界：")
+    zh := str.replace_all(zh, "lower=", "下边界：")
+    zh := str.replace_all(zh, "target=", "目标：")
+    zh := str.replace_all(zh, "stop=", "止损：")
+    zh := str.replace_all(zh, "close=", "收盘：")
+    zh := str.replace_all(zh, "open=", "开盘：")
+    zh := str.replace_all(zh, "atr14=", "ATR14：")
+    zh := str.replace_all(zh, "age=", "确认间隔棒数：")
+    zh := str.replace_all(zh, "true", "是")
+    zh := str.replace_all(zh, "false", "否")
+    zh
+
+// 用固定格式输出价格，便于 TradingView MCP 与 Rust 候选账本逐字段比对。
+f_price(value) =>
+    str.tostring(value, "#.##########")
+
+// 标签短文本专用的精简数字格式，只保留两位小数，不参与逐字段比对。
+f_r(value) =>
+    str.tostring(value, "#.##")
+
+var array<int> candidateLengths = array.from(8, 12, 16, 24, 32, 48, 64, 96)
+
+// ---------- 冻结数据窗口与确认棒 ATR14 ----------
+
+var bool loadStarted = false
+var bool exactLoadStartObserved = false
+var bool sourceContiguous = true
+var int previousSourceTime = na
+var float previousSourceClose = na
+var int sourceCount = 0
+var float atr14SeedSum = 0.0
+var float atr14 = na
+
+if barstate.isconfirmed and time >= LOAD_START_MS and time <= EVALUATION_END_MS
+    if not loadStarted
+        loadStarted := true
+        exactLoadStartObserved := time == LOAD_START_MS
+        previousSourceTime := na
+        previousSourceClose := na
+        sourceCount := 0
+        atr14SeedSum := 0.0
+        atr14 := na
+    if not na(previousSourceTime) and time != previousSourceTime + MS_15M
+        sourceContiguous := false
+    if sourceContiguous
+        sourceCount += 1
+        trueRange = na(previousSourceClose) ? high - low :
+             math.max(high - low, math.max(math.abs(high - previousSourceClose),
+             math.abs(low - previousSourceClose)))
+        if sourceCount <= ATR_LENGTH
+            atr14SeedSum += trueRange
+            if sourceCount == ATR_LENGTH
+                atr14 := atr14SeedSum / ATR_LENGTH
+        else
+            atr14 := (trueRange + (ATR_LENGTH - 1.0) * atr14) / ATR_LENGTH
+    previousSourceTime := time
+    previousSourceClose := close
+
+timeframeReady = timeframe.isminutes and timeframe.multiplier == 15
+localDataReady = timeframeReady and loadStarted and sourceContiguous and not na(atr14) and atr14 > 0
+strictDataReady = localDataReady and exactLoadStartObserved
+processBar = barstate.isconfirmed and localDataReady and time <= EVALUATION_END_MS
+auditPrefix = strictDataReady ? "V12" : "V12_DIAG"
+
+// 统一输出事件标签：图上只显示短标记文本，完整审计字段进 tooltip。
+// visible 控制该事件是否上图；showAuditText 打开时才把完整串内联（逐字段比对用）。
+// 标签锚点从成交价改为当根 K 线高/低点外侧，按 ATR 留出间距，避免压住蜡烛实体。
+// style_label_down 的气泡位于锚点上方，锚到 high 之上；style_label_up 反之锚到 low 之下。
+// 依赖 atr14，必须定义在冻结数据窗口计算之后。
+f_audit_label(labelTime, labelPrice, shortText, auditText, labelStyle, labelColor, visible) =>
+    if visible
+        offsetDistance = (na(atr14) or atr14 <= 0 ? high - low : atr14) * labelOffsetAtr
+        anchorPrice = labelStyle == label.style_label_down ? high + offsetDistance :
+             low - offsetDistance
+        label.new(labelTime, anchorPrice, showAuditText ? auditText : shortText,
+             xloc = xloc.bar_time, yloc = yloc.price, style = labelStyle, color = labelColor,
+             textcolor = color.white, size = size.tiny,
+             tooltip = f_audit_tooltip(auditText))
+
+// ---------- 每根完成棒的最长有效父区间 ----------
+
+selectedAnyValid = false
+selectedAnyLength = 0
+selectedAnyUpper = float(na)
+selectedAnyLower = float(na)
+selectedAnyContainment = float(na)
+selectedAnyEfficiency = float(na)
+selectedAnyTransitions = 0
+selectedAnyUpperTouches = 0
+selectedAnyLowerTouches = 0
+selectedAnyUpperDrift = float(na)
+selectedAnyLowerDrift = float(na)
+
+selectedFreshValid = false
+selectedFreshLength = 0
+selectedFreshUpper = float(na)
+selectedFreshLower = float(na)
+selectedFreshContainment = float(na)
+selectedFreshEfficiency = float(na)
+selectedFreshTransitions = 0
+selectedFreshUpperTouches = 0
+selectedFreshLowerTouches = 0
+selectedFreshUpperDrift = float(na)
+selectedFreshLowerDrift = float(na)
+
+var int lastClosedIndex = na
+
+// 八个冻结长度在每次计算都求值，避免 Pine 因条件调用历史函数而产生不一致序列。
+for candidateIndex = 0 to array.size(candidateLengths) - 1
+    candidateLength = array.get(candidateLengths, candidateIndex)
+    [candidateValid, candidateUpper, candidateLower, candidateContainment,
+         candidateEfficiency, candidateTransitions, candidateUpperTouches,
+         candidateLowerTouches, candidateUpperDrift, candidateLowerDrift] =
+         f_evaluate_range(candidateLength)
+    if processBar and sourceCount >= candidateLength
+        if candidateValid
+            selectedAnyValid := true
+            selectedAnyLength := candidateLength
+            selectedAnyUpper := candidateUpper
+            selectedAnyLower := candidateLower
+            selectedAnyContainment := candidateContainment
+            selectedAnyEfficiency := candidateEfficiency
+            selectedAnyTransitions := candidateTransitions
+            selectedAnyUpperTouches := candidateUpperTouches
+            selectedAnyLowerTouches := candidateLowerTouches
+            selectedAnyUpperDrift := candidateUpperDrift
+            selectedAnyLowerDrift := candidateLowerDrift
+            candidateStart = bar_index - candidateLength + 1
+            if na(lastClosedIndex) or candidateStart >= lastClosedIndex + 1
+                selectedFreshValid := true
+                selectedFreshLength := candidateLength
+                selectedFreshUpper := candidateUpper
+                selectedFreshLower := candidateLower
+                selectedFreshContainment := candidateContainment
+                selectedFreshEfficiency := candidateEfficiency
+                selectedFreshTransitions := candidateTransitions
+                selectedFreshUpperTouches := candidateUpperTouches
+                selectedFreshLowerTouches := candidateLowerTouches
+                selectedFreshUpperDrift := candidateUpperDrift
+                selectedFreshLowerDrift := candidateLowerDrift
+
+// ---------- 严格横盘、弱离区与五棒接受状态 ----------
+
+var bool activeRange = false
+var int activeStartIndex = na
+var int activeLength = na
+var float activeUpper = na
+var float activeLower = na
+var box activeBox = na
+var line activeUpperLine = na
+var line activeLowerLine = na
+var label activeConfirmationLabel = na
+
+var bool weakDeparturePending = false
+var int weakDepartureIndex = na
+
+var bool acceptancePending = false
+var int pendingDirection = 0
+var int pendingRangeStartIndex = na
+var int pendingRangeLength = na
+var float pendingRangeUpper = na
+var float pendingRangeLower = na
+var int pendingBreakoutIndex = na
+var int pendingBreakoutTime = na
+var float pendingRetestBand = na
+var float pendingRequiredClose = na
+var float pendingStructuralStop = na
+var float pendingMeasuredTarget = na
+
+var array<box> storedBoxes = array.new_box(0)
+var array<line> storedUpperLines = array.new_line(0)
+var array<line> storedLowerLines = array.new_line(0)
+var array<label> storedRangeLabels = array.new_label(0)
+
+var int rangeConfirmedCount = 0
+var int rangeUpgradedCount = 0
+var int weakReturnedCount = 0
+var int weakConsumedCount = 0
+var int strongBreakoutCount = 0
+var int armedCount = 0
+var int acceptanceConfirmedCount = 0
+var int acceptanceInvalidatedCount = 0
+var int acceptanceExpiredCount = 0
+
+// 冻结旧区间图形；离区棒本身不计入横盘右边界。
+f_close_active_range(finalIndex) =>
+    if not na(activeBox)
+        finalRight = math.max(activeStartIndex, finalIndex)
+        box.set_right(activeBox, finalRight)
+        line.set_x2(activeUpperLine, finalRight)
+        line.set_x2(activeLowerLine, finalRight)
+
+// ---------- 下一开盘手工账本 ----------
+
+var bool entryPending = false
+var int entryDirection = 0
+var int entryRangeStartIndex = na
+var int entryRangeLength = na
+var int entryBreakoutTime = na
+var int entrySignalTime = na
+var float entrySignalAtr = na
+var float entryStructuralStop = na
+var float entryFrozenTarget = na
+
+var bool tradeActive = false
+var int tradeDirection = 0
+var int tradeBreakoutTime = na
+var int tradeSignalTime = na
+var int tradeEntryTime = na
+var float tradeEntryPrice = na
+var float tradeStopPrice = na
+var float tradeTargetPrice = na
+var float tradeInitialRisk = na
+
+var int signalCount = 0
+var int filledTradeCount = 0
+var int closedTradeCount = 0
+var int stopExitCount = 0
+var int targetExitCount = 0
+var int reverseExitCount = 0
+var int invalidStructureCount = 0
+var int targetPassedAtEntryCount = 0
+var float cumulativeGrossR = 0.0
+var float cumulativeNetR = 0.0
+
+// 以入场时冻结的初始风险为 R，成本按实际入场与退出名义金额双边扣除。
+f_trade_result(exitPrice) =>
+    grossR = tradeDirection == 1 ? (exitPrice - tradeEntryPrice) / tradeInitialRisk :
+         (tradeEntryPrice - exitPrice) / tradeInitialRisk
+    costR = (tradeEntryPrice + exitPrice) * COST_RATE_PER_SIDE / tradeInitialRisk
+    [grossR, costR, grossR - costR]
+
+if processBar
+    // Rust 在确认后的下一根实际开盘先处理待成交意图，再处理该根完整 OHLC 的保护单。
+    if entryPending and time > entrySignalTime and time <= EVALUATION_END_MS
+        structureValid = entryDirection == 1 ? entryStructuralStop < open : entryStructuralStop > open
+        if not structureValid
+            invalidStructureCount += 1
+            f_audit_label(time, open, "已阻塞",
+                 auditPrefix + "_BLOCK|reason=structure_invalid_at_entry|dir=" +
+                 (entryDirection == 1 ? "long" : "short") + "|signal=" +
+                 str.tostring(entrySignalTime) + "|open=" + f_price(open) + "|struct_stop=" +
+                 f_price(entryStructuralStop), entryDirection == 1 ? label.style_label_down :
+                 label.style_label_up, color.new(color.red, 0), showSignalLifecycle)
+        else
+            if tradeActive
+                [reverseGrossR, reverseCostR, reverseNetR] = f_trade_result(open)
+                cumulativeGrossR += reverseGrossR
+                cumulativeNetR += reverseNetR
+                closedTradeCount += 1
+                reverseExitCount += 1
+                f_audit_label(time, open, "反手平 " + f_r(reverseNetR) + "R",
+                     auditPrefix + "_EXIT|reason=reverse_next_open|dir=" +
+                     (tradeDirection == 1 ? "long" : "short") + "|entry=" +
+                     str.tostring(tradeEntryTime) + "|exit=" + str.tostring(time) +
+                     "|exit_px=" + f_price(open) + "|gross_r=" + f_price(reverseGrossR) +
+                     "|cost_r=" + f_price(reverseCostR) + "|net_r=" + f_price(reverseNetR),
+                     tradeDirection == 1 ? label.style_label_down : label.style_label_up,
+                     color.new(color.orange, 0), showTradeMarkers)
+            minimumRiskTicks = int(math.max(1.0,
+                 math.ceil(MINIMUM_STOP_ATR * entrySignalAtr / syminfo.mintick)))
+            atrFloorStop = entryDirection == 1 ? open - minimumRiskTicks * syminfo.mintick :
+                 open + minimumRiskTicks * syminfo.mintick
+            finalStop = entryDirection == 1 ? math.min(entryStructuralStop, atrFloorStop) :
+                 math.max(entryStructuralStop, atrFloorStop)
+            finalTarget = entryDirection == 1 ? f_round_down(entryFrozenTarget) :
+                 f_round_up(entryFrozenTarget)
+            tradeActive := true
+            tradeDirection := entryDirection
+            tradeBreakoutTime := entryBreakoutTime
+            tradeSignalTime := entrySignalTime
+            tradeEntryTime := time
+            tradeEntryPrice := open
+            tradeStopPrice := finalStop
+            tradeTargetPrice := finalTarget
+            tradeInitialRisk := math.abs(open - finalStop)
+            filledTradeCount += 1
+            targetAlreadyPassed = entryDirection == 1 ? open >= finalTarget : open <= finalTarget
+            targetPassedAtEntryCount += targetAlreadyPassed ? 1 : 0
+            f_audit_label(time, open,
+                 (entryDirection == 1 ? "▲ 多" : "▼ 空") + " " + f_r(open),
+                 auditPrefix + "_ENTRY|dir=" +
+                 (entryDirection == 1 ? "long" : "short") + "|range_start=" +
+                 str.tostring(entryRangeStartIndex) + "|range_len=" + str.tostring(entryRangeLength) +
+                 "|breakout=" + str.tostring(entryBreakoutTime) + "|signal=" +
+                 str.tostring(entrySignalTime) + "|entry=" + str.tostring(time) +
+                 "|entry_px=" + f_price(open) + "|struct_stop=" + f_price(entryStructuralStop) +
+                 "|stop=" + f_price(finalStop) + "|target=" + f_price(finalTarget) +
+                 "|atr14=" + f_price(entrySignalAtr) + "|risk_atr=" +
+                 f_price(tradeInitialRisk / entrySignalAtr) + "|target_passed=" +
+                 (targetAlreadyPassed ? "true" : "false"),
+                 entryDirection == 1 ? label.style_label_up : label.style_label_down,
+                 color.new(color.blue, 0), showTradeMarkers)
+        entryPending := false
+
+    if tradeActive
+        [protectiveAction, protectivePrice] =
+             f_protective_action(tradeDirection, tradeStopPrice, tradeTargetPrice)
+        if protectiveAction != 0
+            [exitGrossR, exitCostR, exitNetR] = f_trade_result(protectivePrice)
+            cumulativeGrossR += exitGrossR
+            cumulativeNetR += exitNetR
+            closedTradeCount += 1
+            stopExitCount += protectiveAction == 1 ? 1 : 0
+            targetExitCount += protectiveAction == 2 ? 1 : 0
+            exitReason = protectiveAction == 1 ? "stop_loss" : "take_profit"
+            f_audit_label(time, protectivePrice,
+                 (protectiveAction == 1 ? "✕ 止损 " : "✓ 止盈 ") + f_r(exitNetR) + "R",
+                 auditPrefix + "_EXIT|reason=" + exitReason +
+                 "|dir=" + (tradeDirection == 1 ? "long" : "short") + "|entry=" +
+                 str.tostring(tradeEntryTime) + "|exit=" + str.tostring(time) +
+                 "|exit_px=" + f_price(protectivePrice) + "|gross_r=" + f_price(exitGrossR) +
+                 "|cost_r=" + f_price(exitCostR) + "|net_r=" + f_price(exitNetR),
+                 tradeDirection == 1 ? label.style_label_down : label.style_label_up,
+                 protectiveAction == 1 ? color.new(color.red, 0) : color.new(color.green, 0),
+                 showTradeMarkers)
+            tradeActive := false
+
+    // 有待确认突破时，本棒只处理旧来源；不得同时修改或重建横盘状态。
+    handledByAcceptance = false
+    if acceptancePending
+        handledByAcceptance := true
+        age = bar_index - pendingBreakoutIndex
+        invalidated = pendingDirection == 1 ? close <= pendingRangeUpper : close >= pendingRangeLower
+        touchedBoundary = pendingDirection == 1 ?
+             low <= pendingRangeUpper + pendingRetestBand :
+             high >= pendingRangeLower - pendingRetestBand
+        retainedBreakout = pendingDirection == 1 ?
+             close >= pendingRequiredClose : close <= pendingRequiredClose
+        accepted = age >= 1 and age <= ACCEPTANCE_WINDOW_BARS and
+             not invalidated and touchedBoundary and retainedBreakout
+        if accepted
+            acceptancePending := false
+            acceptanceConfirmedCount += 1
+            if time >= EVALUATION_START_MS and time <= EVALUATION_END_MS
+                signalCount += 1
+                f_audit_label(time, close, "信号",
+                     auditPrefix + "_SIGNAL|dir=" +
+                     (pendingDirection == 1 ? "long" : "short") + "|range_start=" +
+                     str.tostring(pendingRangeStartIndex) + "|range_len=" +
+                     str.tostring(pendingRangeLength) + "|upper=" + f_price(pendingRangeUpper) +
+                     "|lower=" + f_price(pendingRangeLower) + "|breakout=" +
+                     str.tostring(pendingBreakoutTime) + "|signal=" + str.tostring(time) +
+                     "|age=" + str.tostring(age) + "|close=" + f_price(close) +
+                     "|required_close=" + f_price(pendingRequiredClose) + "|atr14=" +
+                     f_price(atr14) + "|struct_stop=" + f_price(pendingStructuralStop) +
+                     "|target=" + f_price(pendingMeasuredTarget),
+                     pendingDirection == 1 ? label.style_label_up : label.style_label_down,
+                     color.new(color.purple, 0), showSignalLifecycle)
+                entryPending := true
+                entryDirection := pendingDirection
+                entryRangeStartIndex := pendingRangeStartIndex
+                entryRangeLength := pendingRangeLength
+                entryBreakoutTime := pendingBreakoutTime
+                entrySignalTime := time
+                entrySignalAtr := atr14
+                entryStructuralStop := pendingStructuralStop
+                entryFrozenTarget := pendingMeasuredTarget
+        else if invalidated
+            acceptancePending := false
+            acceptanceInvalidatedCount += 1
+        else if age >= ACCEPTANCE_WINDOW_BARS
+            acceptancePending := false
+            acceptanceExpiredCount += 1
+
+    if not handledByAcceptance
+        // 弱离区只由紧邻下一根完成棒决定恢复或消费；该确认棒不再补算新锚点。
+        handledByWeakDeparture = false
+        if weakDeparturePending
+            handledByWeakDeparture := true
+            returnedInside = close >= activeLower and close <= activeUpper
+            if returnedInside
+                weakReturnedCount += 1
+                weakDeparturePending := false
+                if not na(activeBox)
+                    box.set_right(activeBox, bar_index)
+                    line.set_x2(activeUpperLine, bar_index)
+                    line.set_x2(activeLowerLine, bar_index)
+            else
+                weakConsumedCount += 1
+                f_close_active_range(weakDepartureIndex - 1)
+                lastClosedIndex := weakDepartureIndex
+                activeRange := false
+                weakDeparturePending := false
+                activeStartIndex := na
+                activeLength := na
+                activeUpper := na
+                activeLower := na
+                activeBox := na
+                activeUpperLine := na
+                activeLowerLine := na
+                activeConfirmationLabel := na
+
+        if not handledByWeakDeparture
+            if activeRange
+                closedAbove = close > activeUpper
+                closedBelow = close < activeLower
+                if closedAbove or closedBelow
+                    breakDirection = closedAbove ? 1 : -1
+                    [strongBreak, bodyRatio, directionalMoveRatio] =
+                         f_breakout_strength(breakDirection)
+                    if not strongBreak
+                        weakDeparturePending := true
+                        weakDepartureIndex := bar_index
+                        f_audit_label(time, breakDirection == 1 ? high : low, "弱离场",
+                             auditPrefix + "_WEAK_DEPARTURE|dir=" +
+                             (breakDirection == 1 ? "up" : "down") + "|body_ratio=" +
+                             f_price(bodyRatio) + "|move_ratio=" + f_price(directionalMoveRatio),
+                             breakDirection == 1 ? label.style_label_down :
+                             label.style_label_up, color.new(color.gray, 20), showRangeLifecycle)
+                    else
+                        strongBreakoutCount += 1
+                        f_close_active_range(bar_index - 1)
+                        frozenStart = activeStartIndex
+                        frozenLength = activeLength
+                        frozenUpper = activeUpper
+                        frozenLower = activeLower
+                        activeRange := false
+                        lastClosedIndex := bar_index
+                        activeStartIndex := na
+                        activeLength := na
+                        activeUpper := na
+                        activeLower := na
+                        activeBox := na
+                        activeUpperLine := na
+                        activeLowerLine := na
+                        activeConfirmationLabel := na
+                        if atr14 > 0
+                            boundary = breakDirection == 1 ? frozenUpper : frozenLower
+                            breakoutExcess = breakDirection == 1 ? close - boundary : boundary - close
+                            retainedExcess = math.max(syminfo.mintick,
+                                 breakoutExcess * RETAINED_BREAKOUT_EXCESS_RATIO)
+                            acceptancePending := true
+                            pendingDirection := breakDirection
+                            pendingRangeStartIndex := frozenStart
+                            pendingRangeLength := frozenLength
+                            pendingRangeUpper := frozenUpper
+                            pendingRangeLower := frozenLower
+                            pendingBreakoutIndex := bar_index
+                            pendingBreakoutTime := time
+                            pendingRetestBand := math.max(math.abs(boundary) * RETEST_BAND_PRICE_RATIO,
+                                 atr14 * RETEST_BAND_ATR_RATIO)
+                            pendingRequiredClose := breakDirection == 1 ?
+                                 boundary + retainedExcess : boundary - retainedExcess
+                            pendingStructuralStop := breakDirection == 1 ?
+                                 f_round_down(low - syminfo.mintick) :
+                                 f_round_up(high + syminfo.mintick)
+                            rangeHeight = frozenUpper - frozenLower
+                            pendingMeasuredTarget := breakDirection == 1 ?
+                                 frozenUpper + rangeHeight : frozenLower - rangeHeight
+                            armedCount += 1
+                            f_audit_label(time, breakDirection == 1 ? high : low, "突破",
+                                 auditPrefix + "_BREAKOUT|dir=" +
+                                 (breakDirection == 1 ? "long" : "short") + "|range_start=" +
+                                 str.tostring(frozenStart) + "|range_len=" + str.tostring(frozenLength) +
+                                 "|upper=" + f_price(frozenUpper) + "|lower=" + f_price(frozenLower) +
+                                 "|breakout=" + str.tostring(time) + "|close=" + f_price(close) +
+                                 "|body_ratio=" + f_price(bodyRatio) + "|move_ratio=" +
+                                 f_price(directionalMoveRatio) + "|required_close=" +
+                                 f_price(pendingRequiredClose) + "|retest_band=" +
+                                 f_price(pendingRetestBand) + "|struct_stop=" +
+                                 f_price(pendingStructuralStop) + "|target=" +
+                                 f_price(pendingMeasuredTarget),
+                                 breakDirection == 1 ? label.style_label_down : label.style_label_up,
+                                 color.new(color.orange, 0), showSignalLifecycle)
+                else
+                    candidateStart = selectedAnyValid ? bar_index - selectedAnyLength + 1 : bar_index
+                    overlapsActive = selectedAnyValid and selectedAnyUpper >= activeLower and
+                         selectedAnyLower <= activeUpper
+                    upgradesParent = overlapsActive and candidateStart < activeStartIndex
+                    if upgradesParent
+                        activeStartIndex := candidateStart
+                        activeLength := selectedAnyLength
+                        activeUpper := selectedAnyUpper
+                        activeLower := selectedAnyLower
+                        rangeUpgradedCount += 1
+                        if not na(activeConfirmationLabel)
+                            label.set_text(activeConfirmationLabel,
+                                 "横盘确认\n" + str.tostring(activeLength) + "根父区间")
+                    if not na(activeBox)
+                        box.set_lefttop(activeBox, activeStartIndex, activeUpper)
+                        box.set_rightbottom(activeBox, bar_index, activeLower)
+                        line.set_xy1(activeUpperLine, activeStartIndex, activeUpper)
+                        line.set_xy2(activeUpperLine, bar_index, activeUpper)
+                        line.set_xy1(activeLowerLine, activeStartIndex, activeLower)
+                        line.set_xy2(activeLowerLine, bar_index, activeLower)
+            else if selectedFreshValid
+                activeRange := true
+                activeStartIndex := bar_index - selectedFreshLength + 1
+                activeLength := selectedFreshLength
+                activeUpper := selectedFreshUpper
+                activeLower := selectedFreshLower
+                rangeConfirmedCount += 1
+                if showZones
+                    activeBox := box.new(activeStartIndex, activeUpper, bar_index, activeLower,
+                         xloc = xloc.bar_index, border_color = color.new(color.blue, 100),
+                         bgcolor = color.new(color.blue, 84))
+                    activeUpperLine := line.new(activeStartIndex, activeUpper, bar_index, activeUpper,
+                         xloc = xloc.bar_index, color = color.new(color.red, 5),
+                         style = line.style_dashed)
+                    activeLowerLine := line.new(activeStartIndex, activeLower, bar_index, activeLower,
+                         xloc = xloc.bar_index, color = color.new(color.lime, 5),
+                         style = line.style_dashed)
+                    activeConfirmationLabel := showRangeLifecycle ?
+                         label.new(bar_index, activeUpper,
+                              "横盘确认\n" + str.tostring(activeLength) + "根",
+                              yloc = yloc.price, style = label.style_label_down,
+                              color = color.new(color.blue, 15), textcolor = color.white,
+                              size = size.tiny,
+                              tooltip = "首次确认只在本棒收盘后可见\n触碰组 " +
+                                   str.tostring(selectedFreshUpperTouches) + "/" +
+                                   str.tostring(selectedFreshLowerTouches) + "\n交替 " +
+                                   str.tostring(selectedFreshTransitions) + "\n容纳率 " +
+                                   str.tostring(selectedFreshContainment * 100.0, "#.0") + "%\n方向效率 " +
+                                   f_price(selectedFreshEfficiency) + "\n漂移 " +
+                                   f_price(selectedFreshUpperDrift) + "/" +
+                                   f_price(selectedFreshLowerDrift)) : na
+                    array.push(storedBoxes, activeBox)
+                    array.push(storedUpperLines, activeUpperLine)
+                    array.push(storedLowerLines, activeLowerLine)
+                    array.push(storedRangeLabels, activeConfirmationLabel)
+                    if array.size(storedBoxes) > maximumVisibleZones
+                        box.delete(array.shift(storedBoxes))
+                        line.delete(array.shift(storedUpperLines))
+                        line.delete(array.shift(storedLowerLines))
+                        expiredRangeLabel = array.shift(storedRangeLabels)
+                        if not na(expiredRangeLabel)
+                            label.delete(expiredRangeLabel)
+
+activeStopPlot = showTradeLevels and tradeActive ? tradeStopPrice : na
+activeTargetPlot = showTradeLevels and tradeActive ? tradeTargetPrice : na
+plot(activeStopPlot, "V12 Active Stop", color = color.new(color.red, 0), style = plot.style_linebr)
+plot(activeTargetPlot, "V12 Active Target", color = color.new(color.green, 0), style = plot.style_linebr)
+
+// ---------- 图表内审计摘要 ----------
+
+var table audit = table.new(position.bottom_right, 2, 12,
+     bgcolor = color.new(color.black, 10), border_width = 1)
+if barstate.islastconfirmedhistory
+    modeText = strictDataReady ? "严格全历史" : localDataReady ? "本地诊断，非严格" : "数据未就绪"
+    table.cell(audit, 0, 0, "V12 横盘突破", text_color = color.white,
+         bgcolor = color.new(color.blue, 35), text_size = size.tiny)
+    table.cell(audit, 1, 0, "Research-only", text_color = color.yellow,
+         bgcolor = color.new(color.blue, 35), text_size = size.tiny)
+    table.cell(audit, 0, 1, "模式 / 周期", text_size = size.tiny)
+    table.cell(audit, 1, 1, modeText + " / " + (timeframeReady ? "15m" : "周期错误"),
+         text_color = strictDataReady ? color.lime : color.yellow, text_size = size.tiny)
+    table.cell(audit, 0, 2, "横盘确认 / 升级", text_size = size.tiny)
+    table.cell(audit, 1, 2, str.tostring(rangeConfirmedCount) + " / " +
+         str.tostring(rangeUpgradedCount), text_size = size.tiny)
+    table.cell(audit, 0, 3, "弱离区回区 / 消费", text_size = size.tiny)
+    table.cell(audit, 1, 3, str.tostring(weakReturnedCount) + " / " +
+         str.tostring(weakConsumedCount), text_size = size.tiny)
+    table.cell(audit, 0, 4, "强突破 / 武装", text_size = size.tiny)
+    table.cell(audit, 1, 4, str.tostring(strongBreakoutCount) + " / " +
+         str.tostring(armedCount), text_size = size.tiny)
+    table.cell(audit, 0, 5, "确认 / 失效 / 过期", text_size = size.tiny)
+    table.cell(audit, 1, 5, str.tostring(acceptanceConfirmedCount) + " / " +
+         str.tostring(acceptanceInvalidatedCount) + " / " +
+         str.tostring(acceptanceExpiredCount), text_size = size.tiny)
+    table.cell(audit, 0, 6, "信号 / 入场 / 退出", text_size = size.tiny)
+    table.cell(audit, 1, 6, str.tostring(signalCount) + " / " +
+         str.tostring(filledTradeCount) + " / " + str.tostring(closedTradeCount),
+         text_size = size.tiny)
+    table.cell(audit, 0, 7, "止损 / 目标 / 反手", text_size = size.tiny)
+    table.cell(audit, 1, 7, str.tostring(stopExitCount) + " / " +
+         str.tostring(targetExitCount) + " / " + str.tostring(reverseExitCount),
+         text_size = size.tiny)
+    table.cell(audit, 0, 8, "结构阻塞 / 目标已过", text_size = size.tiny)
+    table.cell(audit, 1, 8, str.tostring(invalidStructureCount) + " / " +
+         str.tostring(targetPassedAtEntryCount),
+         text_color = targetPassedAtEntryCount > 0 ? color.yellow : color.white,
+         text_size = size.tiny)
+    table.cell(audit, 0, 9, "Gross R / Net R", text_size = size.tiny)
+    table.cell(audit, 1, 9, f_price(cumulativeGrossR) + " / " + f_price(cumulativeNetR),
+         text_color = cumulativeNetR >= 0 ? color.lime : color.red, text_size = size.tiny)
+    table.cell(audit, 0, 10, "成本", text_size = size.tiny)
+    table.cell(audit, 1, 10, "每边 8bps", text_size = size.tiny)
+    table.cell(audit, 0, 11, "版本", text_size = size.tiny)
+    table.cell(audit, 1, 11, "V12 min1ATR", text_size = size.tiny,
+         tooltip = RULE_VERSION)

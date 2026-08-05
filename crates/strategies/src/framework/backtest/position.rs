@@ -1,6 +1,7 @@
 use super::super::types::TradeSide;
 use super::recording::{record_trade_entry, record_trade_exit_with_full_close};
 use super::risk::compute_initial_stop_price;
+use super::signal::IMMEDIATE_EXIT_AT_ENTRY_ADJUSTMENT;
 use super::types::{BasicRiskStrategyConfig, SignalResult, TradePosition, TradingState};
 use crate::CandleItem;
 use rust_quant_domain::enums::PositionSide;
@@ -15,6 +16,45 @@ fn position_size_multiplier(risk_config: &BasicRiskStrategyConfig) -> f64 {
         .position_leverage
         .filter(|value| value.is_finite() && *value > 0.0)
         .unwrap_or(1.0)
+}
+
+/// 根据冻结的初始保护距离计算仓位；未启用风险定仓时完整保留历史名义仓位算法。
+fn initial_position_quantity(
+    funds: f64,
+    signal: &SignalResult,
+    position: &TradePosition,
+    risk_config: &BasicRiskStrategyConfig,
+) -> Option<f64> {
+    if !funds.is_finite()
+        || funds <= 0.0
+        || !signal.open_price.is_finite()
+        || signal.open_price <= 0.0
+    {
+        return None;
+    }
+    let Some(risk_fraction) = risk_config.account_risk_fraction_per_trade else {
+        return Some((funds / signal.open_price) * position_size_multiplier(risk_config));
+    };
+    if !risk_fraction.is_finite() || !(0.0..=1.0).contains(&risk_fraction) || risk_fraction == 0.0 {
+        return None;
+    }
+
+    // 结构止损在下一根开盘跳到亏损侧之外时仍要落一笔成本退出；这种记录只借用原始
+    // 结构价确定成本仓位，不把无效保护价写成可计算 R 的 initial_stop_price。
+    let sizing_stop = position.initial_stop_price.or_else(|| {
+        signal
+            .dynamic_adjustments
+            .iter()
+            .any(|value| value == IMMEDIATE_EXIT_AT_ENTRY_ADJUSTMENT)
+            .then_some(signal.signal_kline_stop_loss_price)
+            .flatten()
+    })?;
+    let stop_distance = (signal.open_price - sizing_stop).abs();
+    if !stop_distance.is_finite() || stop_distance <= 0.0 {
+        return None;
+    }
+    let quantity = funds * risk_fraction / stop_distance;
+    (quantity.is_finite() && quantity > 0.0).then_some(quantity)
 }
 
 /// 最终平仓处理
@@ -76,9 +116,8 @@ pub fn open_long_position(
     if state.last_signal_result.is_some() {
         return;
     }
-    let leverage = position_size_multiplier(&risk_config);
     let mut temp_trade_position = TradePosition {
-        position_nums: (state.funds / signal.open_price) * leverage,
+        position_nums: 0.0,
         open_price: signal.open_price,
         open_position_time: rust_quant_common::utils::time::mill_time_to_datetime(candle.ts)
             .unwrap_or_default(),
@@ -99,6 +138,13 @@ pub fn open_long_position(
     set_long_stop_close_price(risk_config, signal, &mut temp_trade_position);
     temp_trade_position.initial_stop_price =
         compute_initial_stop_price(&temp_trade_position, &risk_config);
+    let Some(quantity) =
+        initial_position_quantity(state.funds, signal, &temp_trade_position, &risk_config)
+    else {
+        debug!("skip long entry: invalid risk-sized position quantity");
+        return;
+    };
+    temp_trade_position.position_nums = quantity;
     apply_first_retest_take_profit(signal, &mut temp_trade_position);
     if signal.signal_kline_stop_loss_price.is_none()
         && signal.stop_loss_source.as_deref() == Some("RepairLong_NoSignalKline")
@@ -121,6 +167,15 @@ fn is_protective_signal_stop(trade_side: TradeSide, reference_price: f64, stop_p
             TradeSide::Long => stop_price < reference_price,
             TradeSide::Short => stop_price > reference_price,
         }
+}
+
+/// 从策略信号中提取仅属于本次止损更新的结构化证据，普通信号保持为空。
+fn stop_loss_update_evidence(signal: &SignalResult) -> Option<serde_json::Value> {
+    signal
+        .single_value
+        .as_deref()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+        .and_then(|value| value.get("stop_loss_update_evidence").cloned())
 }
 
 /// 设置止盈止损价格的公共逻辑（Long/Short共用）
@@ -152,7 +207,8 @@ fn set_stop_close_price_common(
                     source.clone(),
                     old_price,
                     new_price,
-                );
+                )
+                .with_evidence(stop_loss_update_evidence(signal));
                 position.stop_loss_updates.push(update);
             } else {
                 // 首次设置
@@ -161,7 +217,8 @@ fn set_stop_close_price_common(
                     signal.ts,
                     source.clone(),
                     new_price,
-                );
+                )
+                .with_evidence(stop_loss_update_evidence(signal));
                 position.stop_loss_updates.push(update);
             }
             position.signal_kline_stop_close_price = Some(new_price);
@@ -224,9 +281,8 @@ pub fn open_short_position(
     if state.last_signal_result.is_some() {
         return;
     }
-    let leverage = position_size_multiplier(&risk_config);
     let mut temp_trade_position = TradePosition {
-        position_nums: (state.funds / signal.open_price) * leverage,
+        position_nums: 0.0,
         open_price: signal.open_price,
         open_position_time: rust_quant_common::utils::time::mill_time_to_datetime(candle.ts)
             .unwrap_or_default(),
@@ -247,6 +303,13 @@ pub fn open_short_position(
     set_short_stop_close_price(risk_config, signal, &mut temp_trade_position);
     temp_trade_position.initial_stop_price =
         compute_initial_stop_price(&temp_trade_position, &risk_config);
+    let Some(quantity) =
+        initial_position_quantity(state.funds, signal, &temp_trade_position, &risk_config)
+    else {
+        debug!("skip short entry: invalid risk-sized position quantity");
+        return;
+    };
+    temp_trade_position.position_nums = quantity;
     apply_first_retest_take_profit(signal, &mut temp_trade_position);
     apply_short_profit_protection(signal, &mut temp_trade_position);
     state.trade_position = Some(temp_trade_position);
@@ -595,6 +658,42 @@ mod tests {
     }
 
     #[test]
+    fn signal_stop_update_persists_structured_strategy_evidence() {
+        let mut state = TradingState::default();
+        let risk = BasicRiskStrategyConfig {
+            is_used_signal_k_line_stop_loss: Some(true),
+            ..Default::default()
+        };
+        let mut entry = signal(1, 100.0, SignalDirection::Long);
+        entry.signal_kline_stop_loss_price = Some(97.0);
+        entry.stop_loss_source = Some("InitialAtr".to_string());
+        open_long_position(risk, &mut state, &candle(1, 100.0), &entry, None);
+
+        let mut update = signal(2, 102.0, SignalDirection::Long);
+        update.signal_kline_stop_loss_price = Some(100.16);
+        update.stop_loss_source = Some("MarketVelocityVolumeAtrTrailingBreakEven".to_string());
+        update.single_value = Some(
+            serde_json::json!({
+                "stop_loss_update_evidence": {
+                    "accepted_level": 1,
+                    "filtered_volume_ratio": 2.75
+                }
+            })
+            .to_string(),
+        );
+        let position = state.trade_position.as_mut().expect("position should open");
+        set_long_stop_close_price(risk, &update, position);
+
+        let persisted = position
+            .stop_loss_updates
+            .last()
+            .and_then(|item| item.evidence.as_ref())
+            .expect("structured evidence should be persisted");
+        assert_eq!(persisted["accepted_level"], 1);
+        assert_eq!(persisted["filtered_volume_ratio"], 2.75);
+    }
+
+    #[test]
     fn open_short_position_allows_fractional_position_leverage() {
         let mut state = TradingState::default();
         let risk = BasicRiskStrategyConfig {
@@ -612,6 +711,42 @@ mod tests {
 
         let position = state.trade_position.expect("position should open");
         assert!((position.position_nums - 0.6).abs() < 1e-9);
+    }
+
+    #[test]
+    fn long_position_risks_one_percent_of_entry_equity_at_initial_stop() {
+        let mut state = TradingState::default();
+        let risk = BasicRiskStrategyConfig {
+            enforce_base_max_loss: Some(false),
+            account_risk_fraction_per_trade: Some(0.01),
+            ..Default::default()
+        };
+        let mut entry = signal(1, 100.0, SignalDirection::Long);
+        entry.signal_kline_stop_loss_price = Some(95.0);
+
+        open_long_position(risk, &mut state, &candle(1, 100.0), &entry, None);
+
+        let position = state.trade_position.expect("long position should open");
+        assert!((position.position_nums - 0.2).abs() < 1e-9);
+        assert!(((position.open_price - 95.0) * position.position_nums - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn short_position_risks_one_percent_of_entry_equity_at_initial_stop() {
+        let mut state = TradingState::default();
+        let risk = BasicRiskStrategyConfig {
+            enforce_base_max_loss: Some(false),
+            account_risk_fraction_per_trade: Some(0.01),
+            ..Default::default()
+        };
+        let mut entry = signal(1, 100.0, SignalDirection::Short);
+        entry.signal_kline_stop_loss_price = Some(105.0);
+
+        open_short_position(risk, &mut state, &candle(1, 100.0), &entry, None);
+
+        let position = state.trade_position.expect("short position should open");
+        assert!((position.position_nums - 0.2).abs() < 1e-9);
+        assert!(((105.0 - position.open_price) * position.position_nums - 1.0).abs() < 1e-9);
     }
 
     #[test]

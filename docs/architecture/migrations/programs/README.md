@@ -1,5 +1,7 @@
 # Migration Program Registry
 
+> 状态：只读历史归档。ADR-0017 已以能力总账和 Domain Wave 取代本流程。不得为新的迁移新增 Program、child、Manifest hash 或 Verdict；本目录只用于解释 2026-07 已登记证据。
+
 `registry.toml` 是跨仓库父 Migration Program 的机器可读索引；它只编排 Owner 子 Manifest 和 Contract，不拥有代码、表或跨 Owner 事务。
 
 每个 `[[program]]` 必须提供：

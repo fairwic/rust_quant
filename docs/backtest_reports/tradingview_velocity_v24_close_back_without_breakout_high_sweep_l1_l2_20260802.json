@@ -1,0 +1,609 @@
+{
+  "schema_version": "tradingview_velocity_v24_l1_l2_diagnostic_v1",
+  "research_levels": [
+    "L1",
+    "L2"
+  ],
+  "variant_axis": "require_confirmation_high_above_breakout_high",
+  "baseline_strategy_version": "volume_recent_horizontal_first_break_upthrust_failed_acceptance_short_15m_research_v23",
+  "candidate_strategy_version": "volume_recent_horizontal_first_break_close_back_short_15m_research_v24",
+  "label_boundary": "L1 read only candidate identity, time-visible features, frozen risk, symbol, month, and event cluster. Outcomes were opened only after L1 passed and only for the frozen V24 L2 diagnostic.",
+  "data_identity": {
+    "data_source": "quant_core per-symbol confirmed OKX 15m tables",
+    "volume_field": "vol_ccy",
+    "dataset_fingerprint_sha256": "eda87a30667f040cd74048e659def7453a5d49f6c81e062d012bebcb1c2ad5c4",
+    "universe_version": "top60_v36_direct_kline_20260721_frozen_20260723",
+    "universe_manifest_sha256": "3fd267ca5cf1ecee8199232729da0e6db917803f6e7a1b363fa84e0ba75d5a4f",
+    "evaluation_start_ms": 1751328000000,
+    "evaluation_end_ms": 1784470500000,
+    "expected_symbols": 60,
+    "included_symbols": 43,
+    "report_scope": "partial_data_diagnostic"
+  },
+  "cost_model": {
+    "fee_bps_per_side": 5.0,
+    "slippage_bps_per_side": 3.0,
+    "semantics": "Post-hoc stress on each side; fills and protective levels are unchanged."
+  },
+  "l1_coverage": {
+    "v23": {
+      "candidates": 7,
+      "unique_symbols": 7,
+      "unique_months_utc": 5,
+      "unique_event_clusters": 7
+    },
+    "v24": {
+      "candidates": 14,
+      "unique_symbols": 12,
+      "unique_months_utc": 7,
+      "unique_event_clusters": 14
+    },
+    "retained_v23_identities": 7,
+    "added_v24_identities": 7,
+    "removed_v23_identities": 0,
+    "target_regression": {
+      "symbol": "SHIB-USDT-SWAP",
+      "timeframe": "15m",
+      "baseline_v20_candidate": true,
+      "v23_candidate": false,
+      "v24_candidate": false,
+      "reason": "The 06:15 volume bar was not the first completed close above the old horizontal range."
+    },
+    "decision": "pass_to_l2"
+  },
+  "l2_diagnostic": {
+    "v23": {
+      "candidates": 7,
+      "trades": 7,
+      "wins": 2,
+      "losses": 5,
+      "cost_adjusted_net_r": -3.9236951821525863,
+      "average_cost_adjusted_r": -0.5605278831646552,
+      "cost_adjusted_pf_r": 0.3986009620790993,
+      "zero_cost_net_r": -1.9145299145299857,
+      "unique_symbols": 7,
+      "unique_months_utc": 5,
+      "unique_events": 7
+    },
+    "v24": {
+      "candidates": 14,
+      "trades": 14,
+      "wins": 4,
+      "losses": 10,
+      "cost_adjusted_net_r": -8.133298250456697,
+      "average_cost_adjusted_r": -0.5809498750326212,
+      "cost_adjusted_pf_r": 0.4155879834801436,
+      "zero_cost_net_r": -3.1140020110608804,
+      "unique_symbols": 12,
+      "unique_months_utc": 7,
+      "unique_events": 14
+    },
+    "marginal_added_v24": {
+      "candidates": 7,
+      "trades": 7,
+      "wins": 2,
+      "losses": 5,
+      "cost_adjusted_net_r": -4.2096030683041095,
+      "average_cost_adjusted_r": -0.6013718669005871,
+      "cost_adjusted_pf_r": 0.43057937049552536,
+      "zero_cost_net_r": -1.199472096530895,
+      "unique_symbols": 7,
+      "unique_months_utc": 6,
+      "unique_events": 7
+    },
+    "concentration": {
+      "v24_symbols": 12,
+      "v24_event_clusters": 14,
+      "marginal_symbols": 7,
+      "marginal_event_clusters": 7
+    },
+    "decision": "stop_at_l2_keep_research_only",
+    "reason": "V24 and its seven marginal trades are negative before and after costs; the single-variable relaxation does not provide positive cost-adjusted edge."
+  },
+  "candidate_ledger": [
+    {
+      "relation_to_v23": "added",
+      "symbol": "1INCH-USDT-SWAP",
+      "direction": "short",
+      "setup_time_ms": null,
+      "signal_time_ms": 1754143200000,
+      "event_cluster_id": "short-1754143200000",
+      "time_visible_features": {
+        "anchor_upthrust_target_consumption_ratio": null,
+        "breakout_line": null,
+        "counter_trend": false,
+        "counter_trend_ema_age_bars_capped_600": null,
+        "rsi": 52.90086119073856,
+        "signal_atr": 0.0017947157423619054,
+        "signal_close": 0.2428,
+        "volume_ratio": 3.2442887553493236
+      },
+      "frozen_risk": {
+        "activation_ticks": null,
+        "exit_policy": "Fixed",
+        "stop_price": 0.24511000000000002,
+        "stop_ticks": null,
+        "target_price": 0.23800000000000002,
+        "target_ticks": null
+      },
+      "outcome": {
+        "status": "closed_trade",
+        "blocked_reason": null,
+        "entry_time_ms": 1754144100000,
+        "exit_time_ms": 1754149500000,
+        "exit_reason": "take_profit",
+        "zero_cost_net_r": 2.2171945701357236,
+        "cost_adjusted_net_r": 2.043113122171924
+      }
+    },
+    {
+      "relation_to_v23": "retained",
+      "symbol": "ZRO-USDT-SWAP",
+      "direction": "short",
+      "setup_time_ms": null,
+      "signal_time_ms": 1754787600000,
+      "event_cluster_id": "short-1754787600000",
+      "time_visible_features": {
+        "anchor_upthrust_target_consumption_ratio": null,
+        "breakout_line": null,
+        "counter_trend": true,
+        "counter_trend_ema_age_bars_capped_600": null,
+        "rsi": 59.33581482578094,
+        "signal_atr": 0.01227169227978318,
+        "signal_close": 1.973,
+        "volume_ratio": 5.4747884781043865
+      },
+      "frozen_risk": {
+        "activation_ticks": null,
+        "exit_policy": "Fixed",
+        "stop_price": 1.99,
+        "stop_ticks": null,
+        "target_price": 1.944,
+        "target_ticks": null
+      },
+      "outcome": {
+        "status": "closed_trade",
+        "blocked_reason": null,
+        "entry_time_ms": 1754788500000,
+        "exit_time_ms": 1754788500000,
+        "exit_reason": "stop_loss",
+        "zero_cost_net_r": -1.0,
+        "cost_adjusted_net_r": -1.1760888888888887
+      }
+    },
+    {
+      "relation_to_v23": "added",
+      "symbol": "IOST-USDT-SWAP",
+      "direction": "short",
+      "setup_time_ms": null,
+      "signal_time_ms": 1757372400000,
+      "event_cluster_id": "short-1757372400000",
+      "time_visible_features": {
+        "anchor_upthrust_target_consumption_ratio": null,
+        "breakout_line": null,
+        "counter_trend": true,
+        "counter_trend_ema_age_bars_capped_600": null,
+        "rsi": 59.1348586827291,
+        "signal_atr": 0.000010832506775175542,
+        "signal_close": 0.003334,
+        "volume_ratio": 3.871712367095691
+      },
+      "frozen_risk": {
+        "activation_ticks": null,
+        "exit_policy": "Fixed",
+        "stop_price": 0.003346,
+        "stop_ticks": null,
+        "target_price": 0.003315,
+        "target_ticks": null
+      },
+      "outcome": {
+        "status": "closed_trade",
+        "blocked_reason": null,
+        "entry_time_ms": 1757373300000,
+        "exit_time_ms": 1757377800000,
+        "exit_reason": "take_profit",
+        "zero_cost_net_r": 1.5833333333333814,
+        "cost_adjusted_net_r": 1.1400666666667094
+      }
+    },
+    {
+      "relation_to_v23": "retained",
+      "symbol": "XRP-USDT-SWAP",
+      "direction": "short",
+      "setup_time_ms": null,
+      "signal_time_ms": 1759324500000,
+      "event_cluster_id": "short-1759324500000",
+      "time_visible_features": {
+        "anchor_upthrust_target_consumption_ratio": null,
+        "breakout_line": null,
+        "counter_trend": true,
+        "counter_trend_ema_age_bars_capped_600": null,
+        "rsi": 67.9085510624717,
+        "signal_atr": 0.012551853724141837,
+        "signal_close": 2.9443,
+        "volume_ratio": 3.89904550171662
+      },
+      "frozen_risk": {
+        "activation_ticks": null,
+        "exit_policy": "Fixed",
+        "stop_price": 2.956,
+        "stop_ticks": null,
+        "target_price": 2.927,
+        "target_ticks": null
+      },
+      "outcome": {
+        "status": "closed_trade",
+        "blocked_reason": null,
+        "entry_time_ms": 1759325400000,
+        "exit_time_ms": 1759329000000,
+        "exit_reason": "stop_loss",
+        "zero_cost_net_r": -1.0,
+        "cost_adjusted_net_r": -1.4069241379310327
+      }
+    },
+    {
+      "relation_to_v23": "retained",
+      "symbol": "BIGTIME-USDT-SWAP",
+      "direction": "short",
+      "setup_time_ms": null,
+      "signal_time_ms": 1759386600000,
+      "event_cluster_id": "short-1759384800000",
+      "time_visible_features": {
+        "anchor_upthrust_target_consumption_ratio": null,
+        "breakout_line": null,
+        "counter_trend": true,
+        "counter_trend_ema_age_bars_capped_600": null,
+        "rsi": 60.01328796770868,
+        "signal_atr": 0.00023537617893373938,
+        "signal_close": 0.05018,
+        "volume_ratio": 3.7399748163814537
+      },
+      "frozen_risk": {
+        "activation_ticks": null,
+        "exit_policy": "Fixed",
+        "stop_price": 0.050460000000000005,
+        "stop_ticks": null,
+        "target_price": 0.049710000000000004,
+        "target_ticks": null
+      },
+      "outcome": {
+        "status": "closed_trade",
+        "blocked_reason": null,
+        "entry_time_ms": 1759387500000,
+        "exit_time_ms": 1759400100000,
+        "exit_reason": "take_profit",
+        "zero_cost_net_r": 1.777777777777715,
+        "cost_adjusted_net_r": 1.4817777777777217
+      }
+    },
+    {
+      "relation_to_v23": "added",
+      "symbol": "ZRO-USDT-SWAP",
+      "direction": "short",
+      "setup_time_ms": null,
+      "signal_time_ms": 1761884100000,
+      "event_cluster_id": "short-1761884100000",
+      "time_visible_features": {
+        "anchor_upthrust_target_consumption_ratio": null,
+        "breakout_line": null,
+        "counter_trend": false,
+        "counter_trend_ema_age_bars_capped_600": null,
+        "rsi": 61.517307861438596,
+        "signal_atr": 0.010746118431437385,
+        "signal_close": 1.56,
+        "volume_ratio": 3.76127065017307
+      },
+      "frozen_risk": {
+        "activation_ticks": null,
+        "exit_policy": "Fixed",
+        "stop_price": 1.568,
+        "stop_ticks": null,
+        "target_price": 1.546,
+        "target_ticks": null
+      },
+      "outcome": {
+        "status": "closed_trade",
+        "blocked_reason": null,
+        "entry_time_ms": 1761885000000,
+        "exit_time_ms": 1761885900000,
+        "exit_reason": "stop_loss",
+        "zero_cost_net_r": -1.0,
+        "cost_adjusted_net_r": -1.3127999999999997
+      }
+    },
+    {
+      "relation_to_v23": "retained",
+      "symbol": "NMR-USDT-SWAP",
+      "direction": "short",
+      "setup_time_ms": null,
+      "signal_time_ms": 1771983000000,
+      "event_cluster_id": "short-1771983000000",
+      "time_visible_features": {
+        "anchor_upthrust_target_consumption_ratio": null,
+        "breakout_line": null,
+        "counter_trend": false,
+        "counter_trend_ema_age_bars_capped_600": null,
+        "rsi": 63.79585559072321,
+        "signal_atr": 0.04663391529322127,
+        "signal_close": 7.722,
+        "volume_ratio": 15.142068965517241
+      },
+      "frozen_risk": {
+        "activation_ticks": null,
+        "exit_policy": "Fixed",
+        "stop_price": 7.781000000000001,
+        "stop_ticks": null,
+        "target_price": 7.631,
+        "target_ticks": null
+      },
+      "outcome": {
+        "status": "closed_trade",
+        "blocked_reason": null,
+        "entry_time_ms": 1771983900000,
+        "exit_time_ms": 1771992000000,
+        "exit_reason": "take_profit",
+        "zero_cost_net_r": 1.3076923076922993,
+        "cost_adjusted_net_r": 1.1188061538461467
+      }
+    },
+    {
+      "relation_to_v23": "added",
+      "symbol": "BNB-USDT-SWAP",
+      "direction": "short",
+      "setup_time_ms": null,
+      "signal_time_ms": 1777793400000,
+      "event_cluster_id": "short-1777793400000",
+      "time_visible_features": {
+        "anchor_upthrust_target_consumption_ratio": null,
+        "breakout_line": null,
+        "counter_trend": false,
+        "counter_trend_ema_age_bars_capped_600": null,
+        "rsi": 55.12515516008077,
+        "signal_atr": 0.7977079259925555,
+        "signal_close": 617.0,
+        "volume_ratio": 5.752559918982784
+      },
+      "frozen_risk": {
+        "activation_ticks": null,
+        "exit_policy": "Fixed",
+        "stop_price": 617.9000000000001,
+        "stop_ticks": null,
+        "target_price": 615.1,
+        "target_ticks": null
+      },
+      "outcome": {
+        "status": "closed_trade",
+        "blocked_reason": null,
+        "entry_time_ms": 1777794300000,
+        "exit_time_ms": 1777798800000,
+        "exit_reason": "stop_loss",
+        "zero_cost_net_r": -1.0,
+        "cost_adjusted_net_r": -2.2349999999998946
+      }
+    },
+    {
+      "relation_to_v23": "retained",
+      "symbol": "IOST-USDT-SWAP",
+      "direction": "short",
+      "setup_time_ms": null,
+      "signal_time_ms": 1777904100000,
+      "event_cluster_id": "short-1777904100000",
+      "time_visible_features": {
+        "anchor_upthrust_target_consumption_ratio": null,
+        "breakout_line": null,
+        "counter_trend": false,
+        "counter_trend_ema_age_bars_capped_600": null,
+        "rsi": 47.00869855953413,
+        "signal_atr": 0.0000033311049653583414,
+        "signal_close": 0.001062,
+        "volume_ratio": 4.67918337586584
+      },
+      "frozen_risk": {
+        "activation_ticks": null,
+        "exit_policy": "Fixed",
+        "stop_price": 0.0010659999999999999,
+        "stop_ticks": null,
+        "target_price": 0.001057,
+        "target_ticks": null
+      },
+      "outcome": {
+        "status": "closed_trade",
+        "blocked_reason": null,
+        "entry_time_ms": 1777905000000,
+        "exit_time_ms": 1777905900000,
+        "exit_reason": "stop_loss",
+        "zero_cost_net_r": -1.0,
+        "cost_adjusted_net_r": -1.4256000000000126
+      }
+    },
+    {
+      "relation_to_v23": "retained",
+      "symbol": "BLUR-USDT-SWAP",
+      "direction": "short",
+      "setup_time_ms": null,
+      "signal_time_ms": 1778489100000,
+      "event_cluster_id": "short-1778489100000",
+      "time_visible_features": {
+        "anchor_upthrust_target_consumption_ratio": null,
+        "breakout_line": null,
+        "counter_trend": true,
+        "counter_trend_ema_age_bars_capped_600": null,
+        "rsi": 68.2374454088401,
+        "signal_atr": 0.00022328990263314685,
+        "signal_close": 0.02815,
+        "volume_ratio": 3.0212954263025487
+      },
+      "frozen_risk": {
+        "activation_ticks": null,
+        "exit_policy": "Fixed",
+        "stop_price": 0.028380000000000002,
+        "stop_ticks": null,
+        "target_price": 0.027760000000000003,
+        "target_ticks": null
+      },
+      "outcome": {
+        "status": "closed_trade",
+        "blocked_reason": null,
+        "entry_time_ms": 1778490000000,
+        "exit_time_ms": 1778492700000,
+        "exit_reason": "stop_loss",
+        "zero_cost_net_r": -1.0,
+        "cost_adjusted_net_r": -1.1966260869565208
+      }
+    },
+    {
+      "relation_to_v23": "added",
+      "symbol": "ADA-USDT-SWAP",
+      "direction": "short",
+      "setup_time_ms": null,
+      "signal_time_ms": 1779979500000,
+      "event_cluster_id": "short-1779975900000",
+      "time_visible_features": {
+        "anchor_upthrust_target_consumption_ratio": null,
+        "breakout_line": null,
+        "counter_trend": false,
+        "counter_trend_ema_age_bars_capped_600": null,
+        "rsi": 57.060022945949086,
+        "signal_atr": 0.001333470811790791,
+        "signal_close": 0.2321,
+        "volume_ratio": 4.296292118123035
+      },
+      "frozen_risk": {
+        "activation_ticks": null,
+        "exit_policy": "Fixed",
+        "stop_price": 0.2341,
+        "stop_ticks": null,
+        "target_price": 0.22890000000000002,
+        "target_ticks": null
+      },
+      "outcome": {
+        "status": "closed_trade",
+        "blocked_reason": null,
+        "entry_time_ms": 1779980400000,
+        "exit_time_ms": 1779984900000,
+        "exit_reason": "stop_loss",
+        "zero_cost_net_r": -1.0,
+        "cost_adjusted_net_r": -1.1864799999999998
+      }
+    },
+    {
+      "relation_to_v23": "retained",
+      "symbol": "SSV-USDT-SWAP",
+      "direction": "short",
+      "setup_time_ms": null,
+      "signal_time_ms": 1782690300000,
+      "event_cluster_id": "short-1782690300000",
+      "time_visible_features": {
+        "anchor_upthrust_target_consumption_ratio": null,
+        "breakout_line": null,
+        "counter_trend": false,
+        "counter_trend_ema_age_bars_capped_600": null,
+        "rsi": 52.907978630922926,
+        "signal_atr": 0.012738713053753195,
+        "signal_close": 1.99,
+        "volume_ratio": 3.9079915549614603
+      },
+      "frozen_risk": {
+        "activation_ticks": null,
+        "exit_policy": "Fixed",
+        "stop_price": 1.999,
+        "stop_ticks": null,
+        "target_price": 1.951,
+        "target_ticks": null
+      },
+      "outcome": {
+        "status": "closed_trade",
+        "blocked_reason": null,
+        "entry_time_ms": 1782691200000,
+        "exit_time_ms": 1782693900000,
+        "exit_reason": "stop_loss",
+        "zero_cost_net_r": -1.0,
+        "cost_adjusted_net_r": -1.3190399999999998
+      }
+    },
+    {
+      "relation_to_v23": "added",
+      "symbol": "ICP-USDT-SWAP",
+      "direction": "short",
+      "setup_time_ms": null,
+      "signal_time_ms": 1782694800000,
+      "event_cluster_id": "short-1782694800000",
+      "time_visible_features": {
+        "anchor_upthrust_target_consumption_ratio": null,
+        "breakout_line": null,
+        "counter_trend": false,
+        "counter_trend_ema_age_bars_capped_600": null,
+        "rsi": 53.06208977190095,
+        "signal_atr": 0.015205919677545527,
+        "signal_close": 2.148,
+        "volume_ratio": 4.0797840785263215
+      },
+      "frozen_risk": {
+        "activation_ticks": null,
+        "exit_policy": "Fixed",
+        "stop_price": 2.1670000000000003,
+        "stop_ticks": null,
+        "target_price": 2.107,
+        "target_ticks": null
+      },
+      "outcome": {
+        "status": "closed_trade",
+        "blocked_reason": null,
+        "entry_time_ms": 1782695700000,
+        "exit_time_ms": 1782697500000,
+        "exit_reason": "stop_loss",
+        "zero_cost_net_r": -1.0,
+        "cost_adjusted_net_r": -1.172559999999996
+      }
+    },
+    {
+      "relation_to_v23": "added",
+      "symbol": "ALGO-USDT-SWAP",
+      "direction": "short",
+      "setup_time_ms": null,
+      "signal_time_ms": 1784095200000,
+      "event_cluster_id": "short-1784095200000",
+      "time_visible_features": {
+        "anchor_upthrust_target_consumption_ratio": null,
+        "breakout_line": null,
+        "counter_trend": false,
+        "counter_trend_ema_age_bars_capped_600": null,
+        "rsi": 57.535960709143524,
+        "signal_atr": 0.0002419563105252999,
+        "signal_close": 0.0849,
+        "volume_ratio": 4.682679757107996
+      },
+      "frozen_risk": {
+        "activation_ticks": null,
+        "exit_policy": "Fixed",
+        "stop_price": 0.08518,
+        "stop_ticks": null,
+        "target_price": 0.08438000000000001,
+        "target_ticks": null
+      },
+      "outcome": {
+        "status": "closed_trade",
+        "blocked_reason": null,
+        "entry_time_ms": 1784096100000,
+        "exit_time_ms": 1784097000000,
+        "exit_reason": "stop_loss",
+        "zero_cost_net_r": -1.0,
+        "cost_adjusted_net_r": -1.4859428571428528
+      }
+    }
+  ],
+  "runtime": {
+    "shared_phase_timings": {
+      "analysis_ms": 0,
+      "candidate_ledger_ms": 0,
+      "data_load_ms": 3642,
+      "dataset_fingerprint_ms": 382,
+      "eligibility_ms": 5,
+      "pine_source_verification_ms": 1,
+      "replay_ms": 0,
+      "serialization_ms": 0
+    },
+    "v23_replay_ms": 77115,
+    "v24_replay_ms": 72947
+  }
+}

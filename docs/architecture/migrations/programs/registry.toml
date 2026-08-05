@@ -1120,6 +1120,27 @@ depends_on = [
   "MIG-MKT-F4B-INSTRUMENT-LIFECYCLE-FACTS-V1",
 ]
 
+# 窄版 R1 主体（错误 V1 的 Research-facts successor）：新建 research-domain，引用 V0A
+# bundle 组合 universe selection 为 ResearchDatasetManifest，建立确定性 BacktestRun 与
+# strategy-parity Evidence。错误 V1 保持 not_created 不动。
+[[program.children]]
+child_id = "MIG-VEGAS-V1A-RESEARCH-DATASET-BACKTEST-V1"
+short_name = "research-dataset-backtest"
+owner = "Research"
+owner_repository = "rust_quant_alpha"
+manifest_status = "created"
+manifest_kind = "owner_child"
+manifest_path = "rust_quant_alpha:docs/architecture/migrations/MIG-VEGAS-V1A-RESEARCH-DATASET-BACKTEST-V1/manifest.toml"
+evidence_path = "rust_quant_alpha:docs/architecture/migrations/MIG-VEGAS-V1A-RESEARCH-DATASET-BACKTEST-V1/evidence.md"
+verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-VEGAS-V1A-RESEARCH-DATASET-BACKTEST-V1/verdict.json"
+manifest_revision = "V1A_MANIFEST_REVISION_PLACEHOLDER"
+evidence_revision = "V1A_EVIDENCE_REVISION_PLACEHOLDER"
+verdict_revision = "not_created"
+depends_on = [
+  "MIG-VEGAS-V0A-MARKET-DATASET-FACTS-BUNDLE-V1",
+  "MIG-STG-S1-STRATEGY-FOUNDATION-V1",
+]
+
 [[program.children]]
 child_id = "MIG-VEGAS-V7-QUANT-BACKTEST-KERNEL-V1"
 short_name = "V7-quant-backtest-kernel"

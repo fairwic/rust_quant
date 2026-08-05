@@ -1,4 +1,5 @@
 use super::PaperStrategyPreset;
+use crate::app::market_velocity_event_backtest::MARKET_MOMENTUM_DIRECT_KLINE_V36_ENTRY_RULE_VERSION;
 
 pub(in super::super) const MARKET_MOMENTUM_OPPOSITE_MOVE_VOLUME_ATR_RESEARCH_PRESET: &str =
     "research_market_momentum_opposite_move10_n192_volume_atr_both_15m_v1";
@@ -26,6 +27,69 @@ pub(in super::super) const MARKET_MOMENTUM_OPPOSITE_MOVE_MEAN_RECLAIM_RESEARCH_P
     "research_market_momentum_opposite_move_reversal_mean_reclaim_both_defer3_volatr_r18_30_15m_v7";
 const MARKET_MOMENTUM_OPPOSITE_MOVE_MEAN_RECLAIM_RESEARCH_ENTRY_RULE_VERSION: &str =
     "kline15m_market_momentum_opposite_reversal_mean_reclaim_both_v7";
+
+/// 追加直接 K 线 v36 的冻结参数；该版本只供回测研究，不进入 paper preset。
+pub(in super::super) fn append_direct_kline_v36_frozen_args(args: &mut Vec<String>) {
+    args.extend(
+        [
+            "--paper-outcome-entry-rule-version",
+            MARKET_MOMENTUM_DIRECT_KLINE_V36_ENTRY_RULE_VERSION,
+            "--event-source",
+            "kline_15m",
+            "--kline-current-live-only",
+            "--trade-direction",
+            "long",
+            "--stop-loss-pct",
+            "0.03",
+            "--target-rs",
+            "1.0",
+            "--entry-period",
+            "20",
+            "--entry-max-distance-pct",
+            "14.0",
+            "--entry-min-volume-ratio",
+            "1.5",
+            "--entry-opposite-move-lookback-candles",
+            "192",
+            "--entry-min-opposite-net-move-pct",
+            "8.0",
+            "--entry-min-opposite-duration-candles",
+            "96",
+            "--entry-opposite-duration-min-r-squared",
+            "0.60",
+            "--entry-btc-96-max-abs-net-move-pct",
+            "2.0",
+            "--volume-atr-take-profit",
+            "--volume-atr-target-scale",
+            "4.0",
+            "--volume-atr-min-target-r",
+            "1.8",
+            "--volume-atr-max-target-r",
+            "3.0",
+            "--backtest-fee-bps-per-side",
+            "5.0",
+            "--backtest-slippage-bps-per-side",
+            "3.0",
+            "--entry-require-two-stage-recovery",
+            "--entry-require-opposite-reversal-confirmation",
+            "--entry-require-reversal-average-reclaim",
+            "--trend-timeframe",
+            "off",
+            "--trend-min-average-distance-pct",
+            "0.0",
+            "--min-delta-rank",
+            "0",
+            "--max-price-change-pct",
+            "8.0",
+            "--entry-trigger-allowlist",
+            "all",
+            "--equity-max-holding-hours",
+            "48",
+            "--ignore-entry-signal-updates-while-open",
+        ]
+        .map(str::to_string),
+    );
+}
 
 /// 追加 Market Momentum Opposite Move v1-v6 的冻结参数。
 ///

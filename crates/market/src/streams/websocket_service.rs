@@ -161,11 +161,23 @@ pub async fn run_socket_with_strategy_trigger(
                     &period,
                     Utc::now().timestamp_millis(),
                 );
-                let candle_data: Vec<CandleOkxRespDto> = candle
+                let candle_data = candle
                     .data
                     .into_iter()
-                    .map(CandleOkxRespDto::from_vec)
-                    .collect();
+                    .map(CandleOkxRespDto::try_from_vec)
+                    .collect::<std::result::Result<Vec<_>, _>>();
+                // SDK 已把固定位置数组解析改为 fallible；任一坏行都跳过整批，
+                // 避免把字段错位的行情继续写入缓存和持久化队列。
+                let candle_data = match candle_data {
+                    Ok(candles) => candles,
+                    Err(error) => {
+                        error!(
+                            "解析 business K 线失败: inst_id={}, period={}, error={}",
+                            candle.arg.inst_id, period, error
+                        );
+                        continue;
+                    }
+                };
                 if let Err(error) = candle_service_for_receiver
                     .update_candles_batch(candle_data, &candle.arg.inst_id, &period)
                     .await

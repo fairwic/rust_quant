@@ -21,7 +21,7 @@ async fn inserts_backtest_log_numeric_columns_into_quant_core_postgres() -> Resu
         .await
         .context("connect quant_core Postgres")?;
     let repository = SqlxBacktestRepository::new(pool.clone());
-    let log = BacktestLog::new(
+    let mut log = BacktestLog::new(
         "vegas".to_string(),
         "ETH-USDT-SWAP".to_string(),
         "4H".to_string(),
@@ -35,9 +35,14 @@ async fn inserts_backtest_log_numeric_columns_into_quant_core_postgres() -> Resu
         1_748_736_000_000,
         42,
     );
+    log.sharpe_ratio = Some(1.23);
+    log.annual_return = Some(0.45);
+    log.total_return = Some(0.34);
+    log.max_drawdown = Some(0.12);
+    log.volatility = Some(0.56);
     let inserted_id = repository.insert_log(&log).await?;
-    let row = sqlx::query_as::<_, (f64, f64)>(
-        "SELECT final_fund, profit FROM back_test_log WHERE id = $1",
+    let row = sqlx::query_as::<_, (f64, f64, Option<f64>, Option<f64>, Option<f64>, Option<f64>, Option<f64>)>(
+        "SELECT final_fund, profit, sharpe_ratio, annual_return, total_return, max_drawdown, volatility FROM back_test_log WHERE id = $1",
     )
     .bind(inserted_id)
     .fetch_one(&pool)
@@ -45,6 +50,11 @@ async fn inserts_backtest_log_numeric_columns_into_quant_core_postgres() -> Resu
     .context("load inserted back_test_log row")?;
     assert_eq!(row.0, 123.45);
     assert_eq!(row.1, 23.45);
+    assert_eq!(row.2, Some(1.23));
+    assert_eq!(row.3, Some(0.45));
+    assert_eq!(row.4, Some(0.34));
+    assert_eq!(row.5, Some(0.12));
+    assert_eq!(row.6, Some(0.56));
     cleanup(&pool, inserted_id).await?;
     Ok(())
 }
@@ -126,10 +136,23 @@ async fn inserts_backtest_detail_timestamp_columns_into_quant_core_postgres() ->
         "{}".to_string(),
         None,
         None,
+        Some(3100.5),
+        Some(10.0),
+        Some(5.0),
     );
     repository.insert_details(&[detail]).await?;
-    let row = sqlx::query_as::<_, (NaiveDateTime, Option<NaiveDateTime>, NaiveDateTime)>(
-        "SELECT open_position_time, signal_open_position_time, close_position_time FROM back_test_detail WHERE back_test_id = $1",
+    let row = sqlx::query_as::<
+        _,
+        (
+            NaiveDateTime,
+            Option<NaiveDateTime>,
+            NaiveDateTime,
+            Option<f64>,
+            Option<f64>,
+            Option<f64>,
+        ),
+    >(
+        "SELECT open_position_time, signal_open_position_time, close_position_time, initial_stop_price, initial_risk_amount, net_profit_r FROM back_test_detail WHERE back_test_id = $1",
     )
     .bind(back_test_id)
     .fetch_one(&pool)
@@ -150,6 +173,9 @@ async fn inserts_backtest_detail_timestamp_columns_into_quant_core_postgres() ->
         row.2,
         NaiveDateTime::parse_from_str("2026-05-11 19:00:00", "%Y-%m-%d %H:%M:%S")?
     );
+    assert_eq!(row.3, Some(3100.5));
+    assert_eq!(row.4, Some(10.0));
+    assert_eq!(row.5, Some(5.0));
     cleanup_details(&pool, back_test_id).await?;
     cleanup(&pool, back_test_id).await?;
     Ok(())

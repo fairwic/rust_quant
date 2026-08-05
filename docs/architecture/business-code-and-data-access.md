@@ -2,6 +2,7 @@
 
 - 状态：已接受
 - 日期：2026-07-23
+- 最近修订：2026-08-03
 - 上位文档：[Rust Quant 长期目标架构](target-architecture.md)
 - 依赖规则：[Rust Quant 依赖与代码归属规则](dependency-rules.md)
 
@@ -17,7 +18,7 @@
 
 ## 2. 一条固定调用链
 
-所有新增入口必须落入以下三种垂直切片之一。
+所有新增入口必须落入以下三种代码职责形态之一。它们只描述单个 capability 内的调用链，不是迁移批次；迁移批次统一由 Domain Wave 管理。
 
 ### 2.1 Command：改变状态
 
@@ -266,7 +267,7 @@ crates/adapters/postgres/src/execution/
 
 apps/execution-worker/src/
 ├── config.rs
-├── wiring.rs
+├── composition_root.rs
 ├── consumer.rs
 └── main.rs
 ```
@@ -279,19 +280,19 @@ apps/execution-worker/src/
 - `port` 用业务语言表达必须持久化的原子结果；
 - Postgres Adapter 使用 SQLx 实现 SQL、锁与事务；
 - App 把 Contract 转成 Input 并注入具体 Adapter；
-- 其他 Domain/Handler/Consumer 只调用 `api`；Postgres Adapter 只实现 `spi`；App 只有 `wiring.rs` 可以看到 `spi`；
+- 其他 Domain/Handler/Consumer 只调用 `api`；Postgres Adapter 只实现 `spi`；App 只有已登记的 `composition_root.rs` 可以看到 `spi`；
 - 不建立 Owner 级全局 `model/`、`ports/`、`enums.rs` 或 provider 级大文件来容纳所有 capability。
 
 ### 4.1 Port 与 Use Case 的完成门
 
-Port 是完整垂直切片中的 I/O 边界，不是先占位的目录资产。非测试 Port 进入 `verified` 前必须同时存在：
+Port 是完整业务闭环中的 I/O 边界，不是先占位的目录资产。非测试 Port 所属 capability 进入 `implemented` 前必须同时存在：
 
 1. 调用它的生产 Use Case；
 2. 至少一个生产 Adapter；
 3. 业务命名的 Input/Output；
 4. 失败、幂等/原子性、超时和恢复 Owner 测试。
 
-Fake/Mock 只用于测试，不算生产实现。只有 Fake 的 Port 必须停在带后续承接的 `implementing` Manifest；不能被 re-export 成已经稳定的业务能力。纯 Policy、单一算法或“以后可能替换”的代码使用函数/对象，不创建 Trait。
+Fake/Mock 只用于测试，不算生产实现。只有 Fake 的 Port 必须在能力总账中保持 `implementing`，并由当前 Wave 记录后续承接；不能被 re-export 成已经稳定的业务能力。纯 Policy、单一算法或“以后可能替换”的代码使用函数/对象，不创建 Trait。
 
 一个公开 Use Case 只处理一个业务动词、一个主要业务结果和一个恢复 Owner。出现第二次事务提交、等待外部 receipt、第二个可独立补偿结果时，拆为同 Owner 的后续 Command/Consumer 或 durable process manager；App 不接管这段业务状态机。四个及以上有副作用 Port 是强制 Review 信号，禁止用万能 `Services`/`EverythingPort` 隐藏。
 
@@ -625,7 +626,7 @@ AI 在新增或移动代码前，必须先给出以下简表；不能唯一填�
 ```text
 变更：
 Owner：
-切片类型：Command / Query / Event Consumer / Pure Policy
+职责类型：Command / Query / Event Consumer / Pure Policy
 代码形态：Entity / Value Object / Pure Function / Policy / Use Case / Port / Adapter
 入口：
 Use Case：
@@ -687,9 +688,11 @@ Risk                        超过未保护窗口后发 Reduce/Close 与 Kill Sw
 禁止：Adapter -> 策略/组合/风险决策
 禁止：Repository<T> / BaseService / update_by_id / save_json
 禁止：零字段 Service/Manager/Calculator 仅作为函数命名空间
-禁止：只有 Fake/Mock、没有生产 Use Case + Adapter 的 Port 被标为 verified
+禁止：只有 Fake/Mock、没有生产 Use Case + Adapter 的 Port 所属 capability 被标为 implemented
 禁止：万能 Services/EverythingPort 隐藏大 Use Case 的副作用依赖
 禁止：Domain 级 enums.rs/types.rs/common.rs/shared.rs 混装无关语义
+禁止：生产代码用 support、helpers、*_support、*_helpers 隐藏业务归属或文件超限
+禁止：为 module-boundary-policy.toml 已登记的 canonical 类型、指标、公式或 Engine 新增同义实现
 禁止：把跨 owner 大函数移动进 impl 后冒充 Aggregate
 禁止：Aggregate 公开可绕过状态机的可变字段
 禁止：Model/Policy 读取系统时间、环境变量或全局业务缓存
@@ -699,6 +702,7 @@ Risk                        超过未保护窗口后发 Reduce/Close 与 Kill Sw
 禁止：Query 隐藏写入
 禁止：Reconciliation 直接修表
 禁止：把数据库 Row 当 Domain 或 API DTO
+禁止：provider/advisory lock 或数据库事务内执行外部 SDK/HTTP I/O；正常 snapshot 提交逐行 SQL await
 禁止：没有 Outbox 的跨进程“先写库再发消息”
 禁止：Outbox Publisher/App callback 自行决定业务重试或补偿
 ```

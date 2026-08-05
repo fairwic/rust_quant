@@ -114,5 +114,5 @@ Research 是终端离线 Domain，负责实验编排与证据；`quant/backtest`
 
 - 现有 crate 暂时保留，新增能力优先进入目标目录；
 - 小型 legacy bugfix 可以原地修改，但不能扩大旧依赖；
-- 使用 Golden Vertical Slice 和 CI ratchet 逐步迁移；
+- 按 Domain Wave 成批迁移；每个 capability 内保持可验收的纵向业务闭环，并由自动架构门禁逐步收紧；
 - 旧入口只有在调用方、Contract、release、恢复和生产证据全部迁移后才能删除。

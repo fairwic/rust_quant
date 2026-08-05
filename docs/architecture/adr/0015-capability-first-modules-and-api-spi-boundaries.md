@@ -4,6 +4,7 @@
 - 日期：2026-07-29
 - 决策者：Rust Quant Core
 - 上位文档：[长期目标架构](../target-architecture.md)、[依赖与代码归属规则](../dependency-rules.md)、[AI 架构迁移执行协议](../ai-migration-execution-protocol.md)
+- 当前解释：capability-first、API/SPI、Port 完整性和文件预算继续有效；逐切片 Manifest/Verdict 流程由 [ADR-0017](0017-capability-catalog-and-domain-wave-migration.md) 取代
 
 ## 背景
 
@@ -58,15 +59,15 @@ crates/domains/<owner>/src/
 - `spi` 是 Adapter 与 App 组合根可见的实现门面，只暴露消费方定义的 Port、Adapter 构造所需的强类型输入和必要装配入口；
 - 其他 Domain、Research 和普通业务调用方只能导入 `<domain>::api`，不得导入 `<domain>::spi` 或私有 capability module；
 - Adapter 只能导入其实现对象所属 Domain 的 `<domain>::spi`；不得导入该 Domain 私有 `model`、`use_cases` 或 sibling capability；
-- App 只允许在 `wiring`/composition-root 代码中导入 `spi` 完成装配，Handler、Consumer、Scheduler loop 只能调用 `api`；
+- App 只允许在已登记的运行装配入口中导入 `spi` 完成装配，Handler、Consumer、Scheduler loop 只能调用 `api`；
 - `lib.rs` 只公开 `api` 与 `spi`，不从 crate 根重导出 Model、Port、Adapter 或 Wire DTO；
 - 接收 Port 的构造函数属于 `spi`/装配边界。稳定 `api` 的函数签名不得泄漏 Port Trait、数据库类型、SDK 类型或 Adapter 配置。
 
 `api.rs`、`spi.rs`、`lib.rs` 和 `mod.rs` 是门面/导航文件，不是业务实现文件。
 
-### 3. Port 必须由完整垂直切片证明
+### 3. Port 必须由完整业务闭环证明
 
-非测试 Port 只有同时具备以下证据才可进入 `verified`：
+非测试 Port 只有同时具备以下证据时，所属 capability 才可进入 `implemented`：
 
 1. 有一个明确 Owner 的生产 Use Case 实际调用它；
 2. 方法名表达业务动作或业务查询，而不是技术 CRUD；
@@ -74,7 +75,7 @@ crates/domains/<owner>/src/
 4. 失败分类、幂等/原子性、超时和恢复 Owner 已写入用例测试或 Adapter/恢复测试；
 5. Port 只包含当前调用方需要的方法。
 
-Fake、Mock 或测试替身只能证明可测试性，不能证明生产边界存在。只有测试实现的 Port 可以在活跃 `implementing` Manifest 中短暂存在，但必须记录缺失 Adapter、承接 Manifest 和删除/完成条件；该状态不得生成 `pass` Verdict，不得进入 `verified` 或被其他切片当作已完成能力。
+Fake、Mock 或测试替身只能证明可测试性，不能证明生产边界存在。只有测试实现的 Port 可以在 capability 为 `implementing` 时短暂存在，但必须记录同一 Wave 缺失的 Adapter 和完成条件；该状态不得进入 `implemented` 或被其他能力当作已完成依赖。
 
 纯 Policy、单一确定性算法或“以后可能替换”的实现不创建 Port/Trait。只有真实生产多实现、进程边界适配或外部副作用隔离需要 Trait；测试替身本身不是创建 Trait 的理由。
 
@@ -149,11 +150,11 @@ crates/adapters/exchange-gateway/src/
 
 生产代码行不计 `#[cfg(test)]` 测试模块；总行数仍包含测试。生成代码只能通过 role map 中精确登记的生成路径豁免，禁止用宽 glob 排除业务源码。门面文件只允许模块声明、文档、稳定 re-export 和极薄装配类型；出现业务分支、SQL、SDK 映射或大段测试即使未超行数也属于违规。
 
-触碰已超过 Error 的目标文件时，必须先用 `structure_only` Manifest 按 capability 拆分并固定行为，再增加新业务。不能通过把单个大文件拆成多个无业务边界的 `part1.rs`/`helpers.rs`，也不能把测试全部移出以掩盖生产大文件。
+触碰已超过 Error 的目标文件时，必须先在同一 capability 内按真实职责拆分并固定行为，再增加新业务。不能通过把单个大文件拆成多个无业务边界的 `part1.rs`/`helpers.rs`，也不能把测试全部移出以掩盖生产大文件。
 
 ## 迁移顺序
 
-本决策不能通过一个跨 Owner 的“P0.1 大 Manifest”同时修改治理工具、Market、Strategy 和 Adapter：
+本决策不能通过一个跨 Owner 的大批次同时修改治理工具、Market、Strategy 和 Adapter：
 
 1. 先提交本 ADR 与规范性文档，形成新的 `rust_quant` governance baseline；
 2. Strategy 的 `MIG-MVE-A1R-REMOVE-FAKE-ONLY-PORT-V1` 先以调用点闭包证明没有生产 Adapter/入口，再从生产编译面移除当前 Fake-only signal-handoff Port/Use Case；blocked A1 的 Contract/边界发现记录保留给未来 successor；
@@ -161,7 +162,7 @@ crates/adapters/exchange-gateway/src/
 4. Market 的 `MIG-MKT-F2R-CAPABILITY-API-SPI-V1` 拆分 canonical bar、public Kline API/SPI 与 exchange-gateway public-market/OKX，保持输出、错误、Decimal、时间和请求语义不变；
 5. 上述结构门闭合后再进入 Market storage F3A，避免在已知大文件和过宽门面上继续叠加数据库职责。
 
-任何步骤都不得把未提交规范当成 Manifest 基线，也不得因 CI 延后把 `implementing` 写成 `verified`。
+任何步骤都不得把未提交工作树当成 legacy 基线，也不得因 CI 延后把 `implementing` 写成 `implemented`。
 
 ## 后果
 
@@ -169,7 +170,7 @@ crates/adapters/exchange-gateway/src/
 
 - 维护者可以沿 capability 阅读完整业务链路；
 - 其他 Domain、Adapter 和 App 的可见面被物理分开；
-- Port、Use Case、Outbox 和恢复责任能被逐切片验收；
+- Port、Use Case、Outbox 和恢复责任能被逐 capability 和 Domain Wave 验收；
 - provider/枚举/错误不再自然汇聚成单文件；
 - 大文件在 600 行生产代码前触发拆分，而不是等到仓库 2000 行硬上限。
 
@@ -178,7 +179,7 @@ crates/adapters/exchange-gateway/src/
 - Rust re-export 和装配入口需要更明确；
 - 初次拆分会产生纯结构迁移和路径调整；
 - 部分当前只有测试 Fake 的 Port 会被明确标记为未完成，而不能继续冒充已落地能力；
-- 静态门禁只能证明结构和依赖，Port 的业务完整性仍需 Manifest、调用点和测试共同证明。
+- 静态门禁只能证明结构和依赖，Port 的业务完整性仍需调用点、生产 Adapter、测试和 Wave Evidence 共同证明。
 
 ## 验收条件
 
@@ -186,5 +187,5 @@ crates/adapters/exchange-gateway/src/
 2. `arch-check` 有注入式失败测试覆盖文件预算、API/SPI 越界、空 Port/Fake-only Port 登记和 façade 规则；
 3. Market 与 public-market/OKX 的纯结构拆分有同输入同输出 characterization；
 4. 其他 Domain 只能依赖目标 Domain `api`，Adapter 只能依赖目标 Domain `spi`，App 的 `spi` 依赖只出现在组合根；
-5. 新增 Port 在进入 `verified` 前具备真实 Use Case 消费方、生产 Adapter 和失败/恢复证据；
+5. 新增 Port 所属 capability 在进入 `implemented` 前具备真实 Use Case 消费方、生产 Adapter 和失败/恢复证据；
 6. F3 不在已知超限文件、过宽 crate 根 API 或未完成 Port 之上继续实施。

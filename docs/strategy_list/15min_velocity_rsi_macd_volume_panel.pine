@@ -1,0 +1,80 @@
+//@version=6
+indicator("15m Velocity - RSI MACD Volume Panel", shorttitle = "RMV-15m", overlay = false, precision = 2)
+
+const string panelIndicatorGroup = "副图指标参数"
+const string panelVolumeGroup = "副图成交量显示参数"
+panelSource = input.source(close, "统一价格源", group = panelIndicatorGroup, tooltip = "要与主策略完全一致，请把主策略和副图的价格源、RSI与MACD周期设置成相同值。")
+rsiLength = input.int(14, "RSI周期", minval = 2, group = panelIndicatorGroup)
+macdFastLength = input.int(12, "MACD快速周期", minval = 1, group = panelIndicatorGroup)
+macdSlowLength = input.int(26, "MACD慢速周期", minval = 2, group = panelIndicatorGroup)
+macdSignalLength = input.int(9, "MACD信号周期", minval = 1, group = panelIndicatorGroup)
+atrLength = input.int(14, "MACD显示缩放ATR周期", minval = 1, group = panelIndicatorGroup)
+volumeNormalizationLookback = input.int(100, "成交量归一化窗口", minval = 2, group = panelVolumeGroup)
+volumeAverageLength = input.int(20, "成交量均线周期", minval = 1, group = panelVolumeGroup)
+
+// RSI 必须保留真实0~100数值；MACD与成交量移到负值显示区，
+// 避免旧版把72.84映射成86.42后让十字光标和数据窗口显示失真。
+const float volumeBandBottom = -100.0
+const float volumeBandTop = -70.0
+const float macdBandBottom = -60.0
+const float macdBandCenter = -40.0
+const float macdBandTop = -20.0
+const float rsiBandBottom = 0.0
+const float rsiBandTop = 100.0
+
+f_clamp(value, lower, upper) =>
+    math.max(lower, math.min(upper, value))
+
+// volume 按研究约定直接等于 vol_ccy；仅用最近峰值压缩柱高，不乘 close。
+volumePeak = ta.highest(volume, volumeNormalizationLookback)
+volumeAverage = ta.sma(volume, volumeAverageLength)
+volumePanel = volumePeak > 0 ? volumeBandBottom + f_clamp(volume / volumePeak, 0.0, 1.0) * (volumeBandTop - volumeBandBottom) : na
+volumeAveragePanel = volumePeak > 0 ? volumeBandBottom + f_clamp(volumeAverage / volumePeak, 0.0, 1.0) * (volumeBandTop - volumeBandBottom) : na
+volumeColor = close >= open ? color.new(color.teal, 20) : color.new(color.red, 20)
+
+[macdLine, macdSignal, macdHistogram] = ta.macd(panelSource, macdFastLength, macdSlowLength, macdSignalLength)
+atr14 = ta.atr(atrLength)
+macdScale = not na(atr14) and atr14 > 0 ? atr14 : syminfo.mintick
+
+// MACD 除以 ATR 只为跨币种显示时保持可读；零轴、正负方向和交叉关系保持不变。
+macdLinePanel = macdBandCenter + f_clamp(macdLine / macdScale, -1.0, 1.0) * (macdBandTop - macdBandCenter)
+macdSignalPanel = macdBandCenter + f_clamp(macdSignal / macdScale, -1.0, 1.0) * (macdBandTop - macdBandCenter)
+macdHistogramPanel = macdBandCenter + f_clamp(macdHistogram / macdScale, -1.0, 1.0) * (macdBandTop - macdBandCenter)
+macdHistogramColor = macdHistogram >= 0 ? color.new(color.green, 25) : color.new(color.red, 25)
+
+rsi14 = ta.rsi(panelSource, rsiLength)
+rsiPanel = rsi14
+rsiOversoldPanel = 30.0
+rsiMiddlePanel = 50.0
+rsiOverboughtPanel = 70.0
+
+plot(volumePanel, "VOL normalized", color = volumeColor, style = plot.style_columns, histbase = volumeBandBottom)
+plot(volumeAveragePanel, "VOL SMA (input)", color = color.orange, linewidth = 1)
+
+plot(macdHistogramPanel, "MACD histogram normalized", color = macdHistogramColor, style = plot.style_columns, histbase = macdBandCenter)
+plot(macdLinePanel, "MACD normalized", color = color.aqua, linewidth = 2)
+plot(macdSignalPanel, "MACD signal normalized", color = color.orange, linewidth = 1)
+
+plot(rsiPanel, "RSI raw", color = color.purple, linewidth = 2)
+
+hline(volumeBandBottom, "VOL base", color = color.new(color.gray, 80))
+hline(volumeBandTop, "VOL top", color = color.new(color.gray, 55))
+hline(macdBandBottom, "MACD bottom", color = color.new(color.gray, 80))
+hline(macdBandCenter, "MACD zero", color = color.new(color.gray, 35), linestyle = hline.style_dotted)
+hline(macdBandTop, "MACD top", color = color.new(color.gray, 55))
+hline(rsiBandBottom, "RSI bottom", color = color.new(color.gray, 80))
+hline(rsiOversoldPanel, "RSI 30", color = color.new(color.green, 35), linestyle = hline.style_dashed)
+hline(rsiMiddlePanel, "RSI 50", color = color.new(color.rgb(33, 150, 243), 10), linestyle = hline.style_solid, linewidth = 2)
+hline(rsiOverboughtPanel, "RSI 70", color = color.new(color.red, 35), linestyle = hline.style_dashed)
+hline(rsiBandTop, "RSI top", color = color.new(color.gray, 55))
+
+var table metrics = table.new(position.top_right, 2, 4, bgcolor = color.new(color.black, 80), frame_color = color.new(color.gray, 60), frame_width = 1)
+if barstate.islast
+    table.cell(metrics, 0, 0, "RSI " + str.tostring(rsiLength), text_color = color.white)
+    table.cell(metrics, 1, 0, na(rsi14) ? "—" : str.tostring(rsi14, "#.##"), text_color = color.purple)
+    table.cell(metrics, 0, 1, "MACD / Signal", text_color = color.white)
+    table.cell(metrics, 1, 1, na(macdLine) ? "—" : str.tostring(macdLine, "#.#####") + " / " + str.tostring(macdSignal, "#.#####"), text_color = color.aqua)
+    table.cell(metrics, 0, 2, "VOL / vol_ccy", text_color = color.white)
+    table.cell(metrics, 1, 2, na(volume) ? "—" : str.tostring(volume, "#.##"), text_color = color.teal)
+    table.cell(metrics, 0, 3, "周期", text_color = color.white)
+    table.cell(metrics, 1, 3, timeframe.period == "15" ? "15m" : timeframe.period + "（非15m）", text_color = timeframe.period == "15" ? color.lime : color.yellow)

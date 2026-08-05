@@ -333,6 +333,7 @@ mod tests {
             trigger: "breakout_previous_high".to_string(),
             structure_stop_loss_price: None,
             structure_stop_loss_source: None,
+            entry_signal_evidence: None,
         }];
         let candles = HashMap::from([(
             "ETH-USDT-SWAP".to_string(),

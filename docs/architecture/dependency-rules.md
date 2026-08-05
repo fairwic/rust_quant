@@ -2,7 +2,7 @@
 
 - 状态：已接受
 - 首次接受：2026-07-18
-- 最近修订：2026-07-23
+- 最近修订：2026-08-03
 - 上位文档：[Rust Quant 长期目标架构](target-architecture.md)
 - CRUD 细则：[业务代码与数据访问放置规范](business-code-and-data-access.md)
 
@@ -37,7 +37,7 @@
 ```text
 apps
   ├──> domains::api（Handler/Consumer/Scheduler 的业务调用）
-  ├──> domains::spi（仅 wiring/composition root）
+  ├──> domains::spi（仅已登记的运行装配入口）
   ├──> contracts（只在进程边界映射）
   ├──> adapters（装配实现）
   └──> platform（配置、生命周期、观测）
@@ -77,7 +77,7 @@ contracts
 - 生产 Domain 只依赖需要的 `quant/math`、`quant/indicators`，禁止依赖 Research；
 - Research 是终端离线 Domain，可以调用生产 Domain 的稳定 API 和 Quant Kernel；历史行情只能经 Market historical API/Contract 读取，禁止访问私有 module、Repository Port、Market Storage、生产 Adapter、backfill 命令或 `MarketDataAccessCredential`；
 - `quant-lab` 只装配 Research use case 与 Adapter，不直接实现逐事件交易编排；
-- 其他 Domain、Research 与业务调用方不得导入目标 Domain 的 `spi`；Adapter 不得绕过 `spi` 导入该 Domain 的私有 capability module；App 对 `spi` 的导入只允许出现在 composition root/wiring。
+- 其他 Domain、Research 与业务调用方不得导入目标 Domain 的 `spi`；Adapter 不得绕过 `spi` 导入该 Domain 的私有 capability module；App 对 `spi` 的导入只允许出现在已登记的运行装配入口。
 
 ## 4. Domain 依赖顺序
 
@@ -162,8 +162,8 @@ Use case 可以定义事务必须原子完成哪些业务结果，但不能接�
 - 方法使用业务语言，例如 `stage_order_submission_with_outbox`，禁止泛型 `Repository<T>`、`update_by_id`、`save_json`；
 - Port 不暴露 SQL、表名、数据库事务类型、HTTP status 或 SDK 类型；
 - 写 Port 与 Query Port 分开，避免一张万能 Repository 接口无限膨胀；
-- 非测试 Port 进入 `verified` 前必须有生产 Use Case 调用方、至少一个生产 Adapter，以及失败、原子性/幂等与恢复证据；
-- Fake/Mock 不是生产 Adapter。Fake-only Port 只允许在活跃 `implementing` Manifest 中短暂存在，并必须记录承接 Manifest/删除条件；它不能产生 `pass` Verdict 或被下游当作已完成依赖；
+- 非测试 Port 所属 capability 进入 `implemented` 前必须有生产 Use Case 调用方、至少一个生产 Adapter，以及失败、原子性/幂等与恢复证据；
+- Fake/Mock 不是生产 Adapter。仅为 Fake/Mock 服务的 Port 不得进入生产目录；测试替身只能实现已有真实调用方和同 Wave 生产 Adapter 的 Port，或直接作为测试局部类型存在；
 - 纯 Policy、单一算法或“以后可能替换”的实现不创建 Port/Trait，测试替身本身不是抽象理由。
 
 ### 5.5 Adapters
@@ -182,7 +182,7 @@ Use case 可以定义事务必须原子完成哪些业务结果，但不能接�
 - Handler/CLI/Consumer 只做输入校验、鉴权上下文提取、DTO 映射和 use case 调用；
 - 禁止在 `main.rs`、bootstrap、scheduler callback 或 consumer loop 中实现业务规则；
 - 一个 App 只初始化本职责需要的连接、Secret 和 Adapter；
-- 只有 wiring/composition root 可以导入 Domain `spi`；运行 loop 只能持有并调用 Domain `api` 暴露的稳定能力。
+- 只有已登记的运行装配入口可以导入 Domain `spi`；运行 loop 只能持有并调用 Domain `api` 暴露的稳定能力。
 
 ### 5.7 Contracts、Platform 与 Testkit
 
@@ -244,7 +244,7 @@ Aggregate 中能够破坏不变量的字段不得向任意调用方公开可变�
 | `lib.rs`、`mod.rs`、`api.rs`、`spi.rs` 总行数 | `> 100` | `> 150` |
 | 独立测试文件或 `tests.rs` | `> 250` | `> 500` |
 
-精确生成文件豁免必须登记在 role map，禁止宽 glob。触碰 Error 级超限文件时，先用独立 `structure_only` Manifest 按 capability 拆分并做 characterization；不能用 `part1.rs`、`helpers.rs` 或搬走测试掩盖大文件。完整理由见 [ADR-0015](adr/0015-capability-first-modules-and-api-spi-boundaries.md)。
+精确生成文件豁免必须登记在 role map，禁止宽 glob。触碰 Error 级超限文件时，先在当前 capability 内按真实职责拆分并做 characterization；不能用 `part1.rs`、`helpers.rs` 或搬走测试掩盖大文件。完整理由见 [ADR-0015](adr/0015-capability-first-modules-and-api-spi-boundaries.md)。
 
 ## 6. Owner 规则
 
@@ -380,6 +380,9 @@ CI/CD 通过 Git diff、owning package、`cargo metadata` 反向传递依赖和 
 - 新表必须有表注释，新列必须有列注释；
 - 新查询评估索引、过滤、返回行数、排序、分页和锁范围；
 - 事务的业务原子性由 use case 说明，由一个 owner-scoped Adapter 方法实现；
+- 外部 SDK/HTTP 读取在数据库事务和 provider/advisory lock 外完成；正常提交路径按明确上限分批，禁止对
+  snapshot 每行执行一次 SQL `await`。批量 CAS 失败时允许在失败分支有界定位首个冲突，但不得把诊断循环
+  作为正常写路径；batch 大小还必须受数据库 bind 参数、statement 大小和锁时长约束；
 - 业务状态、幂等记录和 outbox 需要原子性时写入同一事务；Execution live 下单准备还必须同时取得持久 `AccountOpeningSlot`，写入不可变审批引用及 parent OrderIntent/`ExecutionPlanningValue` hash 唯一绑定、由该值初始化的完整 ExecutionPlan/ProtectionPlan 与首个持久状态 `SubmitPending`；
 - 跨 owner 一致性使用 outbox、幂等 command、状态投影和补偿，不建立跨 owner 大事务。
 
@@ -430,12 +433,13 @@ CI/CD 通过 Git diff、owning package、`cargo metadata` 反向传递依赖和 
 
 ## 13. CI 架构门禁
 
-以下是目标 CI 门禁目录，不是把所有语义验证伪装成一个 `cargo xtask arch-check`。`arch-check` 只负责可静态观察的目录、依赖、禁止导入、owner/Contract 声明、Manifest/baseline 与测试注册 ratchet；其余门禁必须由对应测试或发布验证执行。
+以下是目标自动门禁目录，不是把所有语义验证伪装成一个 `cargo xtask arch-check`。`arch-check` 只负责能力总账、目录、依赖、禁止导入、owner/Contract 声明与测试注册；`wave-check` 负责 capability 完成状态和冻结 package tests；其余门禁必须由对应测试或发布验证执行。
 
 | 门禁类别 | 必须由谁执行 |
 |---|---|
-| 目录、依赖方向、禁止 API、role map、未知 package、静态 Contract/Manifest 与测试注册 | `cargo xtask arch-check` |
-| API/SPI 可见面、文件预算、门面文件形态、Port/Adapter 实现登记 | `arch-check` 注入测试 + `migration-check`/调用点证据 |
+| 能力总账、目录、依赖方向、禁止 API、role map、未知 package、静态 Contract 与测试注册 | `cargo xtask arch-check` |
+| API/SPI 可见面、文件预算、门面文件形态、Port/Adapter 实现登记 | `arch-check` 注入测试 + 调用点证据 |
+| Domain Wave 状态与冻结 Cargo package tests | `cargo xtask wave-check --wave Wx` |
 | owner 单事务、唯一约束、`ExecutionPlanningValue` 到 live aggregate 的无损初始化、RiskAction 去重 | Postgres/Adapter 集成测试 |
 | 外部 owner binding、Envelope、N/N-1、`ActivationEligibilityV1` | Contract/compatibility test |
 | Strategy/Portfolio/Risk/Planning value parity、ResearchBar 安全顺序与模拟 KillSwitch | 确定性 parity/safety harness |
@@ -472,7 +476,7 @@ CI/CD 通过 Git diff、owning package、`cargo metadata` 反向传递依赖和 
 26. Execution 是否在有效 Web claim 后原子持久化完整 `ExecutionDecisionContextSnapshot`，subject binding 是否包含 current `ClaimExecutionRequestReceiptV1` 的规范 ref/hash、request/claim/current `claim_fence`/expiry，以及冻结 binding 的 credential revision/revocation generation；后续 live 决策、计划、attempt、capability、permit 与恢复证据是否缺少 `context_id + context_hash + subject_binding_hash` 或允许 TTL 越过 claim；Research 是否改用 `ResearchScenarioRef`/Research Context；
 27. 热路径是否重新读取可变配置、“最新版本”、环境变量或隐式默认值，ResearchRunSpec/Context 是否缺少规范 hash 与兼容测试。
 28. target workspace package/path 是否被 role map 分类，未知 package 是否 fail-closed，且 `apps/` 是否进入所有适用扫描；
-29. baseline/allowlist 内容是否与独立 Manifest、当前 revision Evidence 和注入违规测试一致。
+29. 能力总账 baseline、owner、target、status 和 reuse_policy 是否与当前代码及注入违规测试一致。
 30. Core contracts 是否镜像了 Web/News 等外部 owner payload，或 Envelope 是否承载业务字段、缺少独立 N/N-1 兼容测试。
 31. 是否有 Core 直接读写/轮询 Web `execution_tasks`，而非使用 Claim/Renew/Release/Outcome owner Contract。
 32. `MarketDataAccessCredentialRef` 是否进入 Account、Risk、Execution、Decision Context、私有流或 mutation 路径，或非 Fenced Gateway 持有用户 credential material/capability。
@@ -487,23 +491,26 @@ CI/CD 通过 Git diff、owning package、`cargo metadata` 反向传递依赖和 
 41. `SafetyObligation` 是否在仍有 ManagedExposure、开放订单、Unknown/attempt/permit 或未闭合 Account evidence 时结束，或 SafetyMonitoring remove 未经 current fence ack 就关闭会话。
 42. `ObservedExternalPosition` 是否既禁止自动 mutation 又未计入保证金/净敞口/风险预算，形成可继续新增风险的未管理盲区。
 43. live 交易所/产品是否缺少版本化 `ExchangeExecutionCapabilityProfileV1` 或 `RiskValuationSnapshotV1`，却仍以通用 SDK 支持为由放行。
-44. 其他 Domain/Research 是否导入目标 Domain `spi`，Adapter 是否绕过 `spi` 访问私有 capability，或 App 在 wiring 以外导入 `spi`。
+44. 其他 Domain/Research 是否导入目标 Domain `spi`，Adapter 是否绕过 `spi` 访问私有 capability，或 App 在已登记的运行装配入口以外导入 `spi`。
 45. `api` 是否重导出 Port/Adapter/SDK/Row，`spi` 是否暴露私有 Aggregate/Use Case，crate 根是否绕过 `api`/`spi` 平铺公开类型。
 46. Domain/Adapter 生产代码、任意 Rust 文件、门面文件和测试文件是否超过 ADR-0015 的 400/600、1000、100/150、250/500 预算。
 47. `lib.rs`、`mod.rs`、`api.rs`、`spi.rs` 是否承载业务分支、SQL、SDK 映射或大段测试；是否出现无业务边界的 `part1.rs`/`helpers.rs` 拆分。
 48. 是否新增 Domain 级 `enums.rs`、`types.rs`、`common.rs`、`shared.rs`，把不同 owner/capability 的状态、Wire、Row 或 SDK 表示混在一起。
-49. 非测试 Port 是否缺少真实生产 Use Case 调用方、生产 Adapter 和失败/原子性/恢复证据；Fake-only Port 是否被当作 `verified` 或下游已完成依赖。
+49. 非测试 Port 是否缺少真实生产 Use Case 调用方、生产 Adapter 和失败/原子性/恢复证据；Fake-only Port 所属 capability 是否被当作 `implemented` 或下游已完成依赖。
 50. Use Case 是否持有四个及以上有副作用 Port、两个可独立恢复的主要结果，或通过万能组合 Port/Context 隐藏依赖。
 51. `exchange-gateway` 是否重新按 provider 汇总公共行情、用户私有读取与 mutation，绕过 `public_market`/`private_account`/`fenced_mutation` capability boundary。
+52. 是否为 `module-boundary-policy.toml` 已登记的 canonical 类型、指标、公式或 Strategy Engine 新增同义名称、第二实现，或让 Adapter DTO/Row 冒充业务类型。
+53. 生产路径是否新增 `support`、`*_helpers`、`*_support` 等泛化文件/目录，或用这些名称掩盖超过预算的业务文件；测试局部 support 除外。
+54. 流式/逐 K 线热路径是否复制整个窗口、头删 Vec、无界 collect/sort 或重复构造未消费诊断；数据库事务/锁内是否执行外部 I/O 或正常路径逐行 SQL；性能声称是否缺少 parity、查询次数和相同 release 输入基准。
 
 迁移期采用 ratchet：保存当前 legacy 违规基线，CI 只允许违规数下降，禁止新增。不得在门禁尚未实现时把本文写成“已经自动执行”。首次代码进入目标物理目录前，必须先完成 target-layout P0：role map、未知 package fail-closed、`apps/`/目标源码根扫描、baseline 完整性和注入违规证据；legacy ratchet PASS 不能替代它。
 
-门禁落地状态（2026-07-29）：
+门禁落地状态（2026-08-03）：
 
 - `rust_quant` 的 legacy `arch-check` 仍只对旧 package/path 做 ratchet，存在硬编码 legacy 名称/路径等局限；精确边界见 [baseline-2026-07/README.md](migrations/baseline-2026-07/README.md) 与 [xtask-roadmap.md](migrations/baseline-2026-07/xtask-roadmap.md)；
-- `rust_quant_alpha` 已有 target-layout P0，覆盖 role map、未知 package fail-closed、`apps/`/目标源码根与注入测试，但受跟踪 CI 按迁移阶段延后，不能产生 current-revision `pass` Verdict；
-- Architecture Governance P0.1 已在 `rust_quant_alpha` 本地提交并登记为 `created`，capability-first、API/SPI、Port 完整性、façade 与提前文件预算已有静态门禁和正反例测试；受跟踪 CI/Verdict 仍未形成，因此只能作为执行协议所定义的 successor 源码实施输入，不能解释为依赖已满足或 `verified`；
-- Market M2R 的源码与本地 Evidence 已提交并登记，7 条已偿还的 Market 过渡项已从实时 Policy 删除；P0.1 的历史 Evidence 仍绑定原实施 commit，不通过改写旧 Manifest 追逐 successor。由于 M2R 尚无 current-revision Verdict，`state=implementing` 不等于前序依赖已满足；F3A 只能按父计划已启用的“延后 CI 实施输入门”钉住 M2R 代码、Manifest 与 Evidence 后进入 `implementing`，范围限于目标源码、schema 与 disposable integration test，不得装配 App/runtime、写生产库、切换事实源或进入 `verified`。
+- `rust_quant_alpha` 已有 role map、未知 package fail-closed、`apps/`/目标源码根、API/SPI、Port 完整性、façade、文件预算、泛化生产路径和 canonical 实现唯一性检查；
+- 能力总账与 Domain Wave 门禁是活跃迁移控制面；旧 P0/P0.1、Manifest、Registry 和 Verdict 只保留为历史证据；
+- 受跟踪 CI 按迁移阶段延后，本地 `arch-check` 或 `wave-check` PASS 不能外推为行为、恢复、数据库、SDK parity 或生产发布已验证。
 
 ## 14. 例外流程
 

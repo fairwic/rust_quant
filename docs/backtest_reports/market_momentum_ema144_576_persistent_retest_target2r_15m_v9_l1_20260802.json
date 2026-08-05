@@ -1,0 +1,86 @@
+{
+  "schema_version": "market_momentum_ema144_576_persistent_retest_target2r_l1_v9",
+  "generated_at_utc": "2026-08-02T13:05:59Z",
+  "identity": {
+    "level": "L1_quick_research_no_outcome_labels",
+    "candidate_key": "market_momentum_ema144_576_persistent_retest_target2r_15m_v9",
+    "rule_version": "l1_v6_entry_fixed_sl04_target2r_geometry_v9",
+    "source_candidate_key": "market_momentum_ema144_576_persistent_qualification_order_retest_15m_v6",
+    "source_l1_rule_version": "l1_age144_persistent_dual_transition_latest_arm_reexpand075atr_first_touch030atr_v6",
+    "only_variable": "change only the fixed target from 0.52R to 2.0R while preserving the complete V6 entry, stop, holding, cost, conflict, and universe contracts",
+    "label_boundary": "reads only source identity, signal-time direction and resting-limit geometry; no future candle, fill outcome, exit, MFE, MAE, R, win, loss, or PnL",
+    "runtime_boundary": "research-only V9 L1; not registered in paper, readonly shadow, live worker, compose, or production presets"
+  },
+  "source_l1_report_sha256": "a69b9cafb83ea55601bc35eaf13a821c0a5fb5080f4d256632457ab3e6f974da",
+  "dataset_fingerprint_sha256": "67516c927ce30323f38f34e6c87fd7bac7720bae8084209cc44b86cce6efe997",
+  "protection_geometry": {
+    "stop_loss_pct": 0.04,
+    "target_r": 2.0,
+    "long_stop_factor": 0.96,
+    "long_target_factor": 1.08,
+    "short_stop_factor": 1.04,
+    "short_target_factor": 0.92
+  },
+  "summary": {
+    "source_candidates": 54837,
+    "valid_geometry_candidates": 54837,
+    "invalid_geometry_candidates": 0,
+    "invalid_candidate_examples": [],
+    "by_direction": {
+      "long": 22569,
+      "short": 32268
+    },
+    "symbol_count": 44,
+    "month_count": 13,
+    "effective_market_events": 3747,
+    "returned_symbol_count": 60,
+    "eligible_symbol_count": 44
+  },
+  "target_audits": [
+    {
+      "name": "nmr_2026_07_01_user_chart",
+      "symbol": "NMR-USDT-SWAP",
+      "direction": "long",
+      "start_ms": 1782835200000,
+      "end_ms": 1782878400000,
+      "matched_signal_timestamps_ms": [
+        1782867600000
+      ],
+      "matched": true
+    },
+    {
+      "name": "btc_2026_07_02_user_chart",
+      "symbol": "BTC-USDT-SWAP",
+      "direction": "long",
+      "start_ms": 1782943200000,
+      "end_ms": 1782964800000,
+      "matched_signal_timestamps_ms": [
+        1782952200000
+      ],
+      "matched": true
+    },
+    {
+      "name": "btc_2026_07_12_user_chart",
+      "symbol": "BTC-USDT-SWAP",
+      "direction": "long",
+      "start_ms": 1783828800000,
+      "end_ms": 1783850400000,
+      "matched_signal_timestamps_ms": [
+        1783829700000
+      ],
+      "matched": true
+    }
+  ],
+  "decision": {
+    "status": "coverage_pass_ready_for_l2_prereg",
+    "gates": {
+      "all_candidates_have_valid_4pct_stop_and_2r_target": true,
+      "all_source_candidates_preserved": true,
+      "all_three_user_targets_preserved": true,
+      "source_l1_outcome_free_and_l2_eligible": true,
+      "source_l1_sha_identity_and_dataset_verified": true
+    },
+    "reason": "V9 仅改变目标倍数，V6 全部入场候选与三张目标图保持不变，且 2.0R 多空保护价几何全部有效；下一步只能先冻结 L2 成本回放清单。",
+    "outcome_evaluation_performed": false
+  }
+}

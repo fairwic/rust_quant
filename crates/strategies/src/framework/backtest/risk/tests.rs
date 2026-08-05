@@ -59,6 +59,38 @@ fn compute_targets_prefers_tightest_stop_loss_and_nearest_tp_short() {
 }
 
 #[test]
+fn compute_targets_can_use_the_strategy_stop_without_a_percentage_cap() {
+    let position = TradePosition {
+        trade_side: TradeSide::Long,
+        open_price: 100.0,
+        position_nums: 1.0,
+        signal_kline_stop_close_price: Some(92.0),
+        long_signal_take_profit_price: Some(110.0),
+        ..TradePosition::default()
+    };
+    let candle = CandleItem {
+        o: 100.0,
+        h: 101.0,
+        l: 99.0,
+        c: 100.0,
+        v: 1.0,
+        ts: 1,
+        confirm: 1,
+    };
+    let risk = BasicRiskStrategyConfig {
+        max_loss_percent: 0.03,
+        enforce_base_max_loss: Some(false),
+        dynamic_max_loss: Some(false),
+        ..Default::default()
+    };
+
+    let targets = compute_current_targets(&position, &candle, &risk);
+
+    assert_eq!(targets.stop_loss, Some(92.0));
+    assert_eq!(compute_initial_stop_price(&position, &risk), Some(92.0));
+}
+
+#[test]
 fn first_retest_fixed_cap_executes_before_farther_targets_on_same_candle() {
     let mut position = TradePosition {
         trade_side: TradeSide::Short,

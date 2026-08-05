@@ -1,6 +1,18 @@
+use super::filtered_volume_rsi_ema_macd::{
+    FILTERED_VOLUME_ATR_STOP_SOURCE, FILTERED_VOLUME_V3_ATR_STOP_SOURCE,
+    FILTERED_VOLUME_V3_BEARISH_ENGULFING_STOP_SOURCE,
+    FILTERED_VOLUME_V3_BULLISH_ENGULFING_STOP_SOURCE,
+    FILTERED_VOLUME_V3_INVALID_AT_FILL_STOP_SOURCE, FILTERED_VOLUME_V3_LOWER_WICK_STOP_SOURCE,
+    FILTERED_VOLUME_V3_UPPER_WICK_STOP_SOURCE,
+};
+use super::rsi_volume_regime::RSI_VOLUME_V3_ATR_STOP_SOURCE;
 use super::{
-    ConfirmedEvent, MarketVelocityEventBacktestArgs, MarketVelocityStopLossMode,
-    MarketVelocityTradeDirection,
+    is_filtered_volume_weekly_base_version, ConfirmedEvent, MarketVelocityEventBacktestArgs,
+    MarketVelocityStopLossMode, MarketVelocityTradeDirection,
+    MARKET_FILTERED_VOLUME_RSI_EMA_MACD_V1_ENTRY_RULE_VERSION,
+    MARKET_FILTERED_VOLUME_RSI_EMA_MACD_V2_ENTRY_RULE_VERSION,
+    MARKET_RSI_VOLUME_REGIME_V3_ENTRY_RULE_VERSION, MARKET_RSI_VOLUME_REGIME_V4_ENTRY_RULE_VERSION,
+    MARKET_RSI_VOLUME_REGIME_V5_ENTRY_RULE_VERSION,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -15,6 +27,16 @@ pub(crate) fn select_stop_loss_for_confirmed_signal(
     signal: &ConfirmedEvent,
     args: &MarketVelocityEventBacktestArgs,
 ) -> SelectedStopLossForSignal {
+    if is_filtered_volume_weekly_base_version(&args.paper_outcome_entry_rule_version)
+        && signal.structure_stop_loss_source.as_deref()
+            == Some(FILTERED_VOLUME_V3_INVALID_AT_FILL_STOP_SOURCE)
+    {
+        return SelectedStopLossForSignal {
+            price: signal.entry_price,
+            stop_loss_pct: 0.0,
+            source: FILTERED_VOLUME_V3_INVALID_AT_FILL_STOP_SOURCE.to_string(),
+        };
+    }
     let direction = signal.direction;
     let fixed_price =
         stop_loss_price_for_direction(signal.entry_price, args.stop_loss_pct, direction);
@@ -36,6 +58,36 @@ pub(crate) fn select_stop_loss_for_confirmed_signal(
                 direction,
             )
         });
+    // 这些研究版本的初始 R 已由信号时点 ATR14 冻结；若再比较固定百分比，会静默改写风险口径。
+    if is_filtered_volume_weekly_base_version(&args.paper_outcome_entry_rule_version)
+        || matches!(
+            args.paper_outcome_entry_rule_version.as_str(),
+            MARKET_RSI_VOLUME_REGIME_V3_ENTRY_RULE_VERSION
+                | MARKET_RSI_VOLUME_REGIME_V4_ENTRY_RULE_VERSION
+                | MARKET_RSI_VOLUME_REGIME_V5_ENTRY_RULE_VERSION
+                | MARKET_FILTERED_VOLUME_RSI_EMA_MACD_V1_ENTRY_RULE_VERSION
+                | MARKET_FILTERED_VOLUME_RSI_EMA_MACD_V2_ENTRY_RULE_VERSION
+        )
+    {
+        if let Some((price, source)) = structure.as_ref().filter(|(_, source)| {
+            source == RSI_VOLUME_V3_ATR_STOP_SOURCE
+                || source == FILTERED_VOLUME_ATR_STOP_SOURCE
+                || matches!(
+                    source.as_str(),
+                    FILTERED_VOLUME_V3_ATR_STOP_SOURCE
+                        | FILTERED_VOLUME_V3_BULLISH_ENGULFING_STOP_SOURCE
+                        | FILTERED_VOLUME_V3_LOWER_WICK_STOP_SOURCE
+                        | FILTERED_VOLUME_V3_BEARISH_ENGULFING_STOP_SOURCE
+                        | FILTERED_VOLUME_V3_UPPER_WICK_STOP_SOURCE
+                )
+        }) {
+            return SelectedStopLossForSignal {
+                price: *price,
+                stop_loss_pct: (*price - signal.entry_price).abs() / signal.entry_price,
+                source: source.clone(),
+            };
+        }
+    }
     let (price, source) = match (args.stop_loss_mode, structure) {
         (
             MarketVelocityStopLossMode::StructureOrFixed,
@@ -161,4 +213,49 @@ fn fixed_stop_loss_source(stop_loss_pct: f64) -> String {
         .trim_end_matches('0')
         .to_string();
     format!("market_velocity_fixed_{tag}sl")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::market_velocity_event_backtest::{
+        RadarEvent, MARKET_RSI_VOLUME_REGIME_V5_ENTRY_RULE_VERSION,
+    };
+
+    #[test]
+    fn v5_keeps_atr_stop_without_falling_back_to_fixed_three_percent() {
+        let signal = ConfirmedEvent {
+            event: RadarEvent {
+                id: 1,
+                exchange: "OKX".to_string(),
+                symbol: "TEST-USDT-SWAP".to_string(),
+                ts: 0,
+                detected_at: "1970-01-01 08:00:00".to_string(),
+                new_rank: 0,
+                delta_rank: 0,
+                current_price: 100.0,
+                price_change_pct: 0.0,
+            },
+            direction: MarketVelocityTradeDirection::Long,
+            entry_ts: 0,
+            entry_price: 100.0,
+            entry_idx: 0,
+            trigger: "opposite_96_net_decline_volume_long".to_string(),
+            structure_stop_loss_price: Some(95.0),
+            structure_stop_loss_source: Some(RSI_VOLUME_V3_ATR_STOP_SOURCE.to_string()),
+            entry_signal_evidence: None,
+        };
+        let args = MarketVelocityEventBacktestArgs {
+            paper_outcome_entry_rule_version: MARKET_RSI_VOLUME_REGIME_V5_ENTRY_RULE_VERSION
+                .to_string(),
+            stop_loss_pct: 0.03,
+            ..MarketVelocityEventBacktestArgs::default()
+        };
+
+        let selected = select_stop_loss_for_confirmed_signal(&signal, &args);
+
+        assert_eq!(selected.price, 95.0);
+        assert_eq!(selected.stop_loss_pct, 0.05);
+        assert_eq!(selected.source, RSI_VOLUME_V3_ATR_STOP_SOURCE);
+    }
 }

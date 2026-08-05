@@ -10,14 +10,16 @@ async fn main() -> Result<()> {
     let args = parse_historical_15m_backfill_args(std::env::args().skip(1))?;
     let report = run_historical_15m_backfill(&args).await?;
     println!(
-        "okx_historical_15m_backfill: symbols={} archives={} candles_15m={} rest_fallback_files={} partial_files={} optional_outcome_files_unavailable={} rows_upserted={} dry_run={}",
+        "okx_historical_15m_backfill: symbols={} archives={} already_complete_files={} candles_15m={} rest_fallback_files={} partial_files={} optional_outcome_files_unavailable={} rows_upserted={} coverage_audited_symbols={} dry_run={}",
         report.symbols,
         report.archive_files,
+        report.already_complete_files,
         report.candles_15m,
         report.rest_fallback_files,
         report.partial_files,
         report.optional_outcome_files_unavailable,
         report.rows_upserted,
+        report.coverage_audited_symbols,
         report.dry_run
     );
     Ok(())

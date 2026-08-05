@@ -1,0 +1,389 @@
+{
+  "bullish": {
+    "all": {
+      "count": 460,
+      "zero_net_r": -42.23581279253091,
+      "stress_net_r": -114.68474540620177,
+      "avg_stress_net_r": -0.2493146639265256
+    },
+    "losses": {
+      "count": 286,
+      "zero_net_r": -239.83772635179702,
+      "stress_net_r": -285.2502577031475,
+      "avg_stress_net_r": -0.9973785234375787
+    },
+    "loss_class": [
+      {
+        "key": "gross_loss",
+        "count": 244,
+        "zero_net_r": -241.18738738738736,
+        "stress_net_r": -278.82189447444216,
+        "avg_stress_net_r": -1.142712682272304
+      },
+      {
+        "key": "cost_only",
+        "count": 42,
+        "zero_net_r": 1.3496610355903222,
+        "stress_net_r": -6.428363228705373,
+        "avg_stress_net_r": -0.15305626735012792
+      }
+    ],
+    "exit_policy": [
+      {
+        "key": "CounterTrendStructureV4",
+        "count": 160,
+        "zero_net_r": -138.12960291333803,
+        "stress_net_r": -163.43747161655784,
+        "avg_stress_net_r": -1.0214841976034865
+      },
+      {
+        "key": "DivergenceRegime",
+        "count": 123,
+        "zero_net_r": -98.70812343845905,
+        "stress_net_r": -118.19461521691335,
+        "avg_stress_net_r": -0.9609318310318158
+      },
+      {
+        "key": "Fixed",
+        "count": 3,
+        "zero_net_r": -3,
+        "stress_net_r": -3.618170869676292,
+        "avg_stress_net_r": -1.206056956558764
+      }
+    ],
+    "exit_reason": [
+      {
+        "key": "stop_loss",
+        "count": 241,
+        "zero_net_r": -241,
+        "stress_net_r": -278.1729479278956,
+        "avg_stress_net_r": -1.1542445972111852
+      },
+      {
+        "key": "divergence_break_even",
+        "count": 24,
+        "zero_net_r": 0.2918765615409376,
+        "stress_net_r": -4.062055492146932,
+        "avg_stress_net_r": -0.16925231217278883
+      },
+      {
+        "key": "counter_trend_trailing_stop",
+        "count": 19,
+        "zero_net_r": 0.727539943804845,
+        "stress_net_r": -2.675311425962141,
+        "avg_stress_net_r": -0.1408058645243232
+      },
+      {
+        "key": "structure_take_profit",
+        "count": 2,
+        "zero_net_r": 0.14285714285716056,
+        "stress_net_r": -0.3399428571428403,
+        "avg_stress_net_r": -0.16997142857142014
+      }
+    ],
+    "worst_symbols": [
+      {
+        "key": "ADA-USDT-SWAP",
+        "count": 11,
+        "zero_net_r": -11,
+        "stress_net_r": -12.88261018746098,
+        "avg_stress_net_r": -1.171146380678271
+      },
+      {
+        "key": "DOGE-USDT-SWAP",
+        "count": 9,
+        "zero_net_r": -6.845906902086648,
+        "stress_net_r": -8.407471016184974,
+        "avg_stress_net_r": -0.9341634462427749
+      },
+      {
+        "key": "OP-USDT-SWAP",
+        "count": 8,
+        "zero_net_r": -6.994505494505489,
+        "stress_net_r": -8.187492126616117,
+        "avg_stress_net_r": -1.0234365158270147
+      },
+      {
+        "key": "TURBO-USDT-SWAP",
+        "count": 9,
+        "zero_net_r": -6.986416917471897,
+        "stress_net_r": -8.166811391571533,
+        "avg_stress_net_r": -0.9074234879523926
+      },
+      {
+        "key": "ZRX-USDT-SWAP",
+        "count": 8,
+        "zero_net_r": -6.999999999999988,
+        "stress_net_r": -8.149922287987685,
+        "avg_stress_net_r": -1.0187402859984607
+      },
+      {
+        "key": "INJ-USDT-SWAP",
+        "count": 7,
+        "zero_net_r": -7,
+        "stress_net_r": -8.081985443854752,
+        "avg_stress_net_r": -1.1545693491221074
+      },
+      {
+        "key": "ONE-USDT-SWAP",
+        "count": 7,
+        "zero_net_r": -7,
+        "stress_net_r": -8.05407957245231,
+        "avg_stress_net_r": -1.1505827960646156
+      },
+      {
+        "key": "WIF-USDT-SWAP",
+        "count": 8,
+        "zero_net_r": -6.9677419354838745,
+        "stress_net_r": -8.018541595053273,
+        "avg_stress_net_r": -1.0023176993816592
+      },
+      {
+        "key": "KSM-USDT-SWAP",
+        "count": 8,
+        "zero_net_r": -5.925925925925904,
+        "stress_net_r": -7.3327955720886715,
+        "avg_stress_net_r": -0.9165994465110839
+      },
+      {
+        "key": "YFI-USDT-SWAP",
+        "count": 7,
+        "zero_net_r": -5.9411764705882355,
+        "stress_net_r": -7.3164484388813795,
+        "avg_stress_net_r": -1.045206919840197
+      },
+      {
+        "key": "POL-USDT-SWAP",
+        "count": 8,
+        "zero_net_r": -5.989010989010961,
+        "stress_net_r": -7.212237760046996,
+        "avg_stress_net_r": -0.9015297200058745
+      },
+      {
+        "key": "LAYER-USDT-SWAP",
+        "count": 7,
+        "zero_net_r": -5.953771289537706,
+        "stress_net_r": -7.128940037685196,
+        "avg_stress_net_r": -1.0184200053835994
+      },
+      {
+        "key": "BIGTIME-USDT-SWAP",
+        "count": 7,
+        "zero_net_r": -5.991304347826094,
+        "stress_net_r": -7.0546986385788175,
+        "avg_stress_net_r": -1.0078140912255453
+      },
+      {
+        "key": "ETC-USDT-SWAP",
+        "count": 7,
+        "zero_net_r": -4.895663104965419,
+        "stress_net_r": -6.385353275364113,
+        "avg_stress_net_r": -0.9121933250520161
+      },
+      {
+        "key": "AUCTION-USDT-SWAP",
+        "count": 6,
+        "zero_net_r": -4.97916666666666,
+        "stress_net_r": -5.945897476820137,
+        "avg_stress_net_r": -0.9909829128033562
+      }
+    ]
+  },
+  "bearish": {
+    "all": {
+      "count": 502,
+      "zero_net_r": 5.477936226024848,
+      "stress_net_r": -75.8157680871448,
+      "avg_stress_net_r": -0.15102742646841594
+    },
+    "losses": {
+      "count": 318,
+      "zero_net_r": -247.7487572445963,
+      "stress_net_r": -300.0773943943938,
+      "avg_stress_net_r": -0.943639605013817
+    },
+    "loss_class": [
+      {
+        "key": "gross_loss",
+        "count": 253,
+        "zero_net_r": -250.37918829922216,
+        "stress_net_r": -291.7068850978561,
+        "avg_stress_net_r": -1.1529916407029885
+      },
+      {
+        "key": "cost_only",
+        "count": 65,
+        "zero_net_r": 2.630431054625901,
+        "stress_net_r": -8.370509296537865,
+        "avg_stress_net_r": -0.12877706610058254
+      }
+    ],
+    "exit_policy": [
+      {
+        "key": "DivergenceRegime",
+        "count": 198,
+        "zero_net_r": -145.37289441727825,
+        "stress_net_r": -177.10527835163413,
+        "avg_stress_net_r": -0.8944711027860309
+      },
+      {
+        "key": "CounterTrendStructureV4",
+        "count": 116,
+        "zero_net_r": -98.37586282731799,
+        "stress_net_r": -118.27462754539718,
+        "avg_stress_net_r": -1.0196088581499756
+      },
+      {
+        "key": "Fixed",
+        "count": 4,
+        "zero_net_r": -4,
+        "stress_net_r": -4.697488497362808,
+        "avg_stress_net_r": -1.174372124340702
+      }
+    ],
+    "exit_reason": [
+      {
+        "key": "stop_loss",
+        "count": 249,
+        "zero_net_r": -249,
+        "stress_net_r": -289.67977397806186,
+        "avg_stress_net_r": -1.1633725862572766
+      },
+      {
+        "key": "divergence_break_even",
+        "count": 52,
+        "zero_net_r": 0.42549267949593,
+        "stress_net_r": -7.387077033698163,
+        "avg_stress_net_r": -0.14205917372496468
+      },
+      {
+        "key": "counter_trend_trailing_stop",
+        "count": 14,
+        "zero_net_r": 1.121106869651748,
+        "stress_net_r": -1.604552910005871,
+        "avg_stress_net_r": -0.1146109221432765
+      },
+      {
+        "key": "reverse_at_next_open",
+        "count": 1,
+        "zero_net_r": -0.7983870967741973,
+        "stress_net_r": -0.9560064516129074,
+        "avg_stress_net_r": -0.9560064516129074
+      },
+      {
+        "key": "structure_take_profit",
+        "count": 2,
+        "zero_net_r": 0.5030303030302603,
+        "stress_net_r": -0.4499840210151494,
+        "avg_stress_net_r": -0.2249920105075747
+      }
+    ],
+    "worst_symbols": [
+      {
+        "key": "CVX-USDT-SWAP",
+        "count": 17,
+        "zero_net_r": -12.861111111111114,
+        "stress_net_r": -15.34278018074611,
+        "avg_stress_net_r": -0.9025164812203594
+      },
+      {
+        "key": "ADA-USDT-SWAP",
+        "count": 13,
+        "zero_net_r": -11.967741935483874,
+        "stress_net_r": -14.443964093958272,
+        "avg_stress_net_r": -1.1110741610737132
+      },
+      {
+        "key": "POPCAT-USDT-SWAP",
+        "count": 9,
+        "zero_net_r": -7.998113207547179,
+        "stress_net_r": -9.258187685932622,
+        "avg_stress_net_r": -1.0286875206591803
+      },
+      {
+        "key": "AGLD-USDT-SWAP",
+        "count": 9,
+        "zero_net_r": -7.979591836734697,
+        "stress_net_r": -8.964519043342662,
+        "avg_stress_net_r": -0.996057671482518
+      },
+      {
+        "key": "ETC-USDT-SWAP",
+        "count": 8,
+        "zero_net_r": -6.992907801418443,
+        "stress_net_r": -8.798330861801125,
+        "avg_stress_net_r": -1.0997913577251406
+      },
+      {
+        "key": "BCH-USDT-SWAP",
+        "count": 7,
+        "zero_net_r": -7,
+        "stress_net_r": -8.290618582628289,
+        "avg_stress_net_r": -1.1843740832326126
+      },
+      {
+        "key": "WOO-USDT-SWAP",
+        "count": 7,
+        "zero_net_r": -7,
+        "stress_net_r": -8.02855143066457,
+        "avg_stress_net_r": -1.1469359186663672
+      },
+      {
+        "key": "SSV-USDT-SWAP",
+        "count": 9,
+        "zero_net_r": -6.798941798941797,
+        "stress_net_r": -7.907745014157524,
+        "avg_stress_net_r": -0.8786383349063915
+      },
+      {
+        "key": "YFI-USDT-SWAP",
+        "count": 8,
+        "zero_net_r": -5.893706293706294,
+        "stress_net_r": -7.496761419643159,
+        "avg_stress_net_r": -0.9370951774553948
+      },
+      {
+        "key": "ONE-USDT-SWAP",
+        "count": 8,
+        "zero_net_r": -5.913731128684396,
+        "stress_net_r": -7.092496934964498,
+        "avg_stress_net_r": -0.8865621168705623
+      },
+      {
+        "key": "TURBO-USDT-SWAP",
+        "count": 9,
+        "zero_net_r": -5.980800396427155,
+        "stress_net_r": -7.044164009599624,
+        "avg_stress_net_r": -0.7826848899555138
+      },
+      {
+        "key": "NMR-USDT-SWAP",
+        "count": 7,
+        "zero_net_r": -5.982456140350887,
+        "stress_net_r": -7.010102395944227,
+        "avg_stress_net_r": -1.001443199420604
+      },
+      {
+        "key": "ONT-USDT-SWAP",
+        "count": 7,
+        "zero_net_r": -5.988636363636369,
+        "stress_net_r": -7.006441455141379,
+        "avg_stress_net_r": -1.0009202078773398
+      },
+      {
+        "key": "IOST-USDT-SWAP",
+        "count": 6,
+        "zero_net_r": -4.999999999999991,
+        "stress_net_r": -6.253256572357518,
+        "avg_stress_net_r": -1.042209428726253
+      },
+      {
+        "key": "MEW-USDT-SWAP",
+        "count": 6,
+        "zero_net_r": -4.999999999999986,
+        "stress_net_r": -5.800258111828315,
+        "avg_stress_net_r": -0.9667096853047191
+      }
+    ]
+  }
+}

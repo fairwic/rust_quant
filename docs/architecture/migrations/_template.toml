@@ -163,7 +163,7 @@ live_prerequisite_contracts = [
   "SafetyMonitoringV1",
   "SafetyMonitoringAckV1",
 ]
-# B0 仅可在 test/dry-run 装配；其输入必须是带 ref/hash 的 immutable evidence bundle，禁止网络、数据库写入或 runtime wiring。
+# B0 仅可在 test/dry-run 装配；其输入必须是带 ref/hash 的 immutable evidence bundle，禁止网络、数据库写入或运行时装配。
 test_only_evidence_provider = { required = false, contract_id = "", immutable_inputs_required = true, runtime_wiring_forbidden = true }
 
 [shadow]

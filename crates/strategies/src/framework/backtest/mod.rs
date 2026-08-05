@@ -33,7 +33,7 @@ pub use risk::{
     check_risk_config, check_risk_config_with_r_system, compute_current_targets,
     init_r_system_state, ExitTargets, RSystemRiskConfig, RSystemRuntime,
 };
-pub use signal::deal_signal;
+pub use signal::{deal_signal, IMMEDIATE_EXIT_AT_ENTRY_ADJUSTMENT};
 pub use trait_impl::BackTestAbleStrategyTrait;
 pub use types::{
     BackTestResult, BasicRiskStrategyConfig, MoveStopLoss, SignalResult, TradePosition,

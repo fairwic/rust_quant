@@ -1,0 +1,103 @@
+{
+  "schema_version": "tradingview_velocity_l1_coverage_v1",
+  "research_level": "L1",
+  "label_boundary": "Only signal-time candidate identity, visible features, frozen risk, symbol, month, and event cluster were read. Outcome fields were not read.",
+  "baseline_strategy_version": "volume_anchor_upthrust_failed_acceptance_short_15m_research_v20",
+  "candidate_strategy_version": "volume_recent_horizontal_first_break_upthrust_failed_acceptance_short_15m_research_v23",
+  "variant_axis": "anchor_upthrust_research_variant",
+  "candidate_variant": "recent_horizontal_first_break",
+  "data_identity": {
+    "dataset_fingerprint_sha256": "eda87a30667f040cd74048e659def7453a5d49f6c81e062d012bebcb1c2ad5c4",
+    "universe_version": "top60_v36_direct_kline_20260721_frozen_20260723",
+    "universe_manifest_sha256": "3fd267ca5cf1ecee8199232729da0e6db917803f6e7a1b363fa84e0ba75d5a4f",
+    "evaluation_start_ms": 1751328000000,
+    "evaluation_end_ms": 1784470500000,
+    "expected_symbols": 60,
+    "included_symbols": 43,
+    "scope": "partial_data_diagnostic"
+  },
+  "coverage": {
+    "baseline_family_candidates": 217,
+    "candidate_family_candidates": 7,
+    "candidate_unique_symbols": 7,
+    "candidate_unique_months_utc": 5,
+    "candidate_unique_event_clusters": 7,
+    "retained_baseline_identities": 0,
+    "removed_baseline_identities": 217,
+    "new_candidate_identities": 7
+  },
+  "target_regression": {
+    "symbol": "SHIB-USDT-SWAP",
+    "timeframe": "15m",
+    "breakout_time_shanghai": "2026-07-06 06:15",
+    "failure_time_shanghai": "2026-07-06 06:30",
+    "baseline_v20_created_candidate": true,
+    "candidate_v23_created_candidate": false,
+    "reason": "The previously completed horizontal range had already been closed above before the 06:15 volume bar, so the bar was continuation rather than the first close breakout."
+  },
+  "candidate_visible_rows": [
+    {
+      "symbol": "ZRO-USDT-SWAP",
+      "signal_time_utc": "2025-08-10T01:00:00Z",
+      "signal_close": 1.973,
+      "volume_ratio": 5.4747884781043865,
+      "frozen_stop": 1.99,
+      "frozen_target": 1.944
+    },
+    {
+      "symbol": "XRP-USDT-SWAP",
+      "signal_time_utc": "2025-10-01T13:15:00Z",
+      "signal_close": 2.9443,
+      "volume_ratio": 3.89904550171662,
+      "frozen_stop": 2.956,
+      "frozen_target": 2.927
+    },
+    {
+      "symbol": "BIGTIME-USDT-SWAP",
+      "signal_time_utc": "2025-10-02T06:30:00Z",
+      "signal_close": 0.05018,
+      "volume_ratio": 3.7399748163814537,
+      "frozen_stop": 0.050460000000000005,
+      "frozen_target": 0.049710000000000004
+    },
+    {
+      "symbol": "NMR-USDT-SWAP",
+      "signal_time_utc": "2026-02-25T01:30:00Z",
+      "signal_close": 7.722,
+      "volume_ratio": 15.142068965517241,
+      "frozen_stop": 7.781000000000001,
+      "frozen_target": 7.631
+    },
+    {
+      "symbol": "IOST-USDT-SWAP",
+      "signal_time_utc": "2026-05-04T14:15:00Z",
+      "signal_close": 0.001062,
+      "volume_ratio": 4.67918337586584,
+      "frozen_stop": 0.0010659999999999999,
+      "frozen_target": 0.001057
+    },
+    {
+      "symbol": "BLUR-USDT-SWAP",
+      "signal_time_utc": "2026-05-11T08:45:00Z",
+      "signal_close": 0.02815,
+      "volume_ratio": 3.0212954263025487,
+      "frozen_stop": 0.028380000000000002,
+      "frozen_target": 0.027760000000000003
+    },
+    {
+      "symbol": "SSV-USDT-SWAP",
+      "signal_time_utc": "2026-06-28T23:45:00Z",
+      "signal_close": 1.99,
+      "volume_ratio": 3.9079915549614603,
+      "frozen_stop": 1.999,
+      "frozen_target": 1.951
+    }
+  ],
+  "stop_decision": {
+    "zero_hit": false,
+    "only_one_or_two_hits": false,
+    "target_sample_failed_definition": false,
+    "coverage_reasonable_for_l2": false,
+    "decision": "stop_at_l1_keep_research_only"
+  }
+}

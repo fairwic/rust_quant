@@ -450,6 +450,7 @@ mod tests {
             trigger: "breakdown_range_low".to_string(),
             structure_stop_loss_price: Some(102.0),
             structure_stop_loss_source: Some("range_high".to_string()),
+            entry_signal_evidence: None,
         };
         let mut failures = Vec::new();
 

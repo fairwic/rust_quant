@@ -234,7 +234,7 @@ impl DataSyncService {
                                 .iter()
                                 .map(|v| v.as_str().unwrap_or("").to_string())
                                 .collect();
-                            Some(CandleOkxRespDto::from_vec(fields))
+                            CandleOkxRespDto::try_from_vec(fields).ok()
                         })
                     })
             })

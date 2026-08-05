@@ -4,22 +4,29 @@ use chrono::{SecondsFormat, TimeZone, Utc};
 use rust_quant_domain::entities::BacktestLog;
 use rust_quant_domain::traits::BacktestLogRepository;
 use rust_quant_infrastructure::SqlxBacktestRepository;
+use serde_json::json;
 use sqlx::{postgres::PgPoolOptions, PgPool};
 use std::collections::{BTreeMap, HashMap};
 mod args;
 mod btc_regime;
+mod completed_candle_entry_signal_evidence;
 mod computed_candles;
 mod data;
 mod directional_reversal;
+pub mod ema144_576_breakout_retest_l1;
 mod equity;
 mod equity_stats;
 mod exit;
+mod filtered_volume_baseline;
+mod filtered_volume_rsi_ema_macd;
 mod fvg;
 mod historical_universe;
+mod immediate_entry;
 mod kline_shape;
 mod kline_volume_rank_velocity;
 mod manifest;
 mod momentum_entry_filters;
+pub mod momentum_exhaustion_bollinger_wick_l1;
 mod one_shot_trend_state;
 mod paper_outcome;
 mod paper_signal;
@@ -27,13 +34,28 @@ mod reentry;
 mod relative_volume_at_time;
 mod report;
 mod reversal_retest;
+mod rsi_volume_regime;
 mod setup_open_reclaim;
 mod short_entry;
 mod stop_loss;
+mod strategy_identity;
 #[cfg(test)]
 pub(crate) use args::market_velocity_paper_observation_usage;
 use args::{format_entry_trigger_filter_list, normalize_entry_trigger, normalize_symbol};
 pub use args::{
+    market_filtered_volume_rsi_ema_macd_v10_research_args,
+    market_filtered_volume_rsi_ema_macd_v11_research_args,
+    market_filtered_volume_rsi_ema_macd_v12_research_args,
+    market_filtered_volume_rsi_ema_macd_v13_research_args,
+    market_filtered_volume_rsi_ema_macd_v1_research_args,
+    market_filtered_volume_rsi_ema_macd_v2_research_args,
+    market_filtered_volume_rsi_ema_macd_v3_research_args,
+    market_filtered_volume_rsi_ema_macd_v4_research_args,
+    market_filtered_volume_rsi_ema_macd_v5_research_args,
+    market_filtered_volume_rsi_ema_macd_v9_research_args,
+    market_momentum_direct_kline_v36_frozen_args, market_rsi_volume_regime_v1_research_args,
+    market_rsi_volume_regime_v2_research_args, market_rsi_volume_regime_v3_research_args,
+    market_rsi_volume_regime_v4_research_args, market_rsi_volume_regime_v5_research_args,
     parse_cli_args_from, parse_paper_observation_args_from, parse_paper_observation_command_from,
     print_market_velocity_event_backtest_usage, print_market_velocity_paper_observation_usage,
     FvgEntryMode, MarketVelocityEventBacktestArgs, MarketVelocityEventSource,
@@ -42,13 +64,18 @@ pub use args::{
     MarketVelocityTradeDirection, MarketVelocityTrendTimeframe, StopReentryMode,
 };
 use btc_regime::{filter_confirmed_events_by_btc_regime, print_btc_regime_filter_report};
+pub use completed_candle_entry_signal_evidence::{
+    AnchorEntrySignalEvidence, BollingerConflictSignalEvidence, CompletedCandleEntrySignalEvidence,
+    IsolatedStrategyFamilySignalEvidence, MacdDivergenceSignalEvidence,
+    PlatformBreakdownSignalEvidence, RsiDivergenceSignalEvidence, TrendManagedExitSignalEvidence,
+};
 use data::load_backtest_data;
 use directional_reversal::{
     bullish_structure_break_filter_reason, deferred_long_confirmation_entry_idx,
     deferred_short_confirmation_entry_idx, is_bearish_continuation_setup,
     is_bullish_continuation_setup, long_buffered_reversal_signal, opposite_net_move_filter_reason,
     opposite_reversal_confirmation_filter_reason, reversal_average_reclaim_filter_reason,
-    two_stage_recovery_filter_reason, volume_atr_target_r_with_policy, LongBufferedReversalSignal,
+    two_stage_recovery_filter_reason, LongBufferedReversalSignal,
 };
 pub use equity::{
     build_framework_equity_concentration_reports, build_framework_equity_quartile_reports,
@@ -60,10 +87,15 @@ pub use equity::{
     FrameworkEquityTradeReport,
 };
 pub use exit::{simulate_trade, EarlyExit, ProfitProtection, RunnerExit};
+use exit::{simulate_trade_with_volume_atr_trailing, volume_atr_trailing_for_signal};
+use filtered_volume_rsi_ema_macd::{
+    completed_candle_entry_signal, effective_target_r_for_confirmed_signal,
+};
 use fvg::{
     find_15m_impulse_fvg_retrace_after_signal, find_15m_self_fvg_entry_after_signal,
     find_fvg_entry, FvgEntrySearch,
 };
+use immediate_entry::immediate_entry_from_signal;
 pub use manifest::{market_velocity_paper_strategy_preset_manifest, MarketVelocityPresetManifest};
 use momentum_entry_filters::fast_momentum_entry_filter_reason;
 use one_shot_trend_state::extreme_volume_contrarian_direction;
@@ -83,6 +115,7 @@ use reversal_retest::{find_retest_entry_after_signal, RetestEntrySignal};
 use setup_open_reclaim::find_setup_open_reclaim_entry_after_signal;
 use short_entry::sideways_range_breakdown_candidate;
 pub(crate) use stop_loss::select_stop_loss_for_confirmed_signal;
+pub(crate) use strategy_identity::*;
 pub const MS_15M: i64 = 15 * 60 * 1_000;
 pub const MS_1H: i64 = 60 * 60 * 1_000;
 pub const MS_4H: i64 = 4 * 60 * 60 * 1_000;
@@ -119,16 +152,28 @@ pub struct BacktestCandle {
 pub struct ComputedCandle {
     /// K 线。
     pub candle: BacktestCandle,
+    /// 当前分表 K 线保存的 `vol_ccy`；需要周分位门槛的策略在缺失时失败关闭。
+    pub volume_ccy: Option<f64>,
     /// SMA 指标值；为空时表示未计算。
     pub sma: Option<f64>,
     /// EMA；为空时使用默认值或表示不限制。
     pub ema: Option<f64>,
+    /// EMA12；为空时表示预热样本不足或行情值无效。
+    pub ema12: Option<f64>,
+    /// EMA144；为空时表示预热样本不足或行情值无效。
+    pub ema144: Option<f64>,
+    /// EMA169；为空时表示预热样本不足或行情值无效。
+    pub ema169: Option<f64>,
+    /// EMA696；为空时表示预热样本不足或行情值无效。
+    pub ema696: Option<f64>,
     /// previous成交量平均；为空时使用默认值或表示不限制。
     pub previous_volume_avg: Option<f64>,
     /// previous振幅平均；为空时表示样本不足或振幅无效。
     pub previous_range_avg: Option<f64>,
     /// RSI14；为空时表示样本不足或价格无效。
     pub rsi14: Option<f64>,
+    /// ATR14；为空时表示 Wilder 平滑尚未完成预热或行情值无效。
+    pub atr14: Option<f64>,
     /// 布林带20期中轨；为空时表示样本不足或价格无效。
     pub bollinger_middle: Option<f64>,
     /// 布林带20期上轨；为空时表示样本不足或价格无效。
@@ -194,6 +239,8 @@ pub struct ConfirmedEvent {
     pub structure_stop_loss_price: Option<f64>,
     /// 结构止损来源；为空时表示没有结构锚点。
     pub structure_stop_loss_source: Option<String>,
+    /// 新 15m 研究策略在信号时点冻结的指标与过滤量比证据。
+    pub entry_signal_evidence: Option<CompletedCandleEntrySignalEvidence>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -233,6 +280,12 @@ fn trade_direction_for_entry_event(
     args: &MarketVelocityEventBacktestArgs,
 ) -> MarketVelocityTradeDirection {
     let candle_direction = trade_direction_for_event(event);
+    if args.entry_filtered_volume_rsi_ema_macd || args.entry_rsi_volume_regime {
+        let completed_count = completed_candle_count(candles, event.ts, MS_15M);
+        if let Ok(signal) = completed_candle_entry_signal(candles, completed_count, args) {
+            return signal.direction;
+        }
+    }
     if args.entry_extreme_volume_contrarian {
         let completed_count = completed_candle_count(candles, event.ts, MS_15M);
         if let Some(latest) = completed_count
@@ -499,7 +552,19 @@ async fn save_market_velocity_backtest_detail(
             .into_iter()
             .flatten()
             .collect::<Vec<_>>();
-        let backtest_log = BacktestLog::new(
+        let mut strategy_detail = market_velocity_strategy_detail(args);
+        strategy_detail["evaluation_result"] = json!({
+            "total_trades": report.total_open_trades,
+            "fixed_r_trades": report.fixed_r_trades,
+            "net_sum_r": report.net_sum_r,
+            "net_expectancy_r": report.net_expectancy_r,
+            "net_profit_factor": report.net_profit_factor,
+            "win_rate_pct": report.win_rate,
+            "trade_sharpe": report.trade_sharpe,
+            "max_drawdown_pct": report.max_drawdown_pct,
+            "total_profit": report.total_profit,
+        });
+        let mut backtest_log = BacktestLog::new(
             strategy_type.clone(),
             "MULTI_SYMBOL".to_string(),
             "15m".to_string(),
@@ -509,13 +574,15 @@ async fn save_market_velocity_backtest_detail(
                 .unwrap_or_else(|| "NA".to_string()),
             market_velocity_final_fund(&report).to_string(),
             report.total_open_trades as i32,
-            Some(market_velocity_strategy_detail(args).to_string()),
+            Some(strategy_detail.to_string()),
             market_velocity_risk_config_detail(args, *target_r).to_string(),
             report.total_profit.to_string(),
             kline_start_time,
             kline_end_time,
             kline_nums,
         );
+        backtest_log.sharpe_ratio = report.trade_sharpe;
+        backtest_log.max_drawdown = Some(report.max_drawdown_pct);
         let back_test_id = repository.insert_log(&backtest_log).await?;
         let details = details
             .into_iter()
@@ -793,6 +860,16 @@ pub fn entry_confirmation(
     if idx <= args.entry_period {
         return (false, "insufficient_15m".to_string());
     }
+    if args.entry_filtered_volume_rsi_ema_macd || args.entry_rsi_volume_regime {
+        return match completed_candle_entry_signal(candles, idx, args) {
+            Ok(signal) if signal.direction == direction => (true, signal.trigger),
+            Ok(_) => (
+                false,
+                "completed_candle_strategy_direction_mismatch".to_string(),
+            ),
+            Err(reason) => (false, reason.to_string()),
+        };
+    }
     let latest = &candles[idx - 1];
     let previous = &candles[idx - 2];
     let Some(sma) = latest.sma else {
@@ -1046,45 +1123,6 @@ fn computed_candles_visible_at_signal(
     &candles[..visible_count]
 }
 
-/// 找到入场后用于收益/止损模拟的第一根 K 线；该函数只服务 outcome，不参与入场决策。
-fn outcome_start_candle_idx(candles: &[ComputedCandle], entry_ts: i64) -> Option<usize> {
-    let mut left = 0;
-    let mut right = candles.len();
-    while left < right {
-        let mid = left + (right - left) / 2;
-        if candles[mid].candle.ts < entry_ts {
-            left = mid + 1;
-        } else {
-            right = mid;
-        }
-    }
-    (left < candles.len()).then_some(left)
-}
-
-/// 使用信号时点价格构造即时入场，避免无 retest 模式使用下一根 K 线开盘价。
-fn immediate_entry_from_signal(
-    event: &RadarEvent,
-    candles: &[ComputedCandle],
-    direction: MarketVelocityTradeDirection,
-    trigger: String,
-) -> Result<ConfirmedEvent, String> {
-    if !event.current_price.is_finite() || event.current_price <= 0.0 {
-        return Err("entry_current_price_invalid".to_string());
-    }
-    let entry_idx = outcome_start_candle_idx(candles, event.ts)
-        .ok_or_else(|| "no_entry_outcome_candle".to_string())?;
-    Ok(ConfirmedEvent {
-        event: event.clone(),
-        direction,
-        entry_ts: event.ts,
-        entry_price: event.current_price,
-        entry_idx,
-        trigger,
-        structure_stop_loss_price: None,
-        structure_stop_loss_source: None,
-    })
-}
-
 pub fn select_live_entry_from_signal_shell(
     event_ts: i64,
     current_price: f64,
@@ -1312,6 +1350,7 @@ pub fn evaluate_events(
                                 trigger: entry.trigger,
                                 structure_stop_loss_price: entry.structure_stop_loss_price,
                                 structure_stop_loss_source: entry.structure_stop_loss_source,
+                                entry_signal_evidence: None,
                             });
                         }
                         Err(reason) => {
@@ -1370,6 +1409,7 @@ pub fn evaluate_events(
                                 trigger: entry.trigger,
                                 structure_stop_loss_price: entry.structure_stop_loss_price,
                                 structure_stop_loss_source: entry.structure_stop_loss_source,
+                                entry_signal_evidence: None,
                             });
                         }
                         Err(reason) => {
@@ -1419,6 +1459,7 @@ pub fn evaluate_events(
                                 trigger: entry.trigger,
                                 structure_stop_loss_price: entry.structure_stop_loss_price,
                                 structure_stop_loss_source: entry.structure_stop_loss_source,
+                                entry_signal_evidence: None,
                             });
                         }
                         Err(reason) => {
@@ -1429,7 +1470,8 @@ pub fn evaluate_events(
                     }
                     continue;
                 }
-                match immediate_entry_from_signal(event, symbol_15m, direction, entry_reason) {
+                match immediate_entry_from_signal(event, symbol_15m, direction, entry_reason, args)
+                {
                     Ok(confirmed_event) => {
                         increment(&mut stage_counts, "entry_pass");
                         increment(&mut stage_counts, "entry_execution_pass");
@@ -1496,6 +1538,7 @@ pub fn evaluate_events(
                             trigger: entry.trigger,
                             structure_stop_loss_price: entry.structure_stop_loss_price,
                             structure_stop_loss_source: entry.structure_stop_loss_source,
+                            entry_signal_evidence: None,
                         });
                     }
                     FvgEntrySearch::Blocked(reason) => {
@@ -1561,6 +1604,7 @@ pub fn evaluate_events(
                             trigger: entry.trigger,
                             structure_stop_loss_price: entry.structure_stop_loss_price,
                             structure_stop_loss_source: entry.structure_stop_loss_source,
+                            entry_signal_evidence: None,
                         });
                     }
                     FvgEntrySearch::Blocked(reason) => {
@@ -1596,6 +1640,7 @@ pub fn evaluate_events(
                                         structure_stop_loss_price: entry.structure_stop_loss_price,
                                         structure_stop_loss_source: entry
                                             .structure_stop_loss_source,
+                                        entry_signal_evidence: None,
                                     });
                                 }
                                 Err(fallback_reason) => {
@@ -1681,6 +1726,7 @@ pub fn evaluate_events(
                             trigger: entry.trigger,
                             structure_stop_loss_price: entry.structure_stop_loss_price,
                             structure_stop_loss_source: entry.structure_stop_loss_source,
+                            entry_signal_evidence: None,
                         });
                     }
                     FvgEntrySearch::Blocked(reason) => {
@@ -1772,18 +1818,13 @@ fn summarize_target(
             continue;
         };
         let selected_stop_loss = select_stop_loss_for_confirmed_signal(signal, args);
-        let effective_target_r = if args.volume_atr_take_profit {
-            volume_atr_target_r_with_policy(
-                candles,
-                signal.event.ts,
-                signal.entry_ts,
-                signal.entry_price,
-                selected_stop_loss.stop_loss_pct,
-                args,
-            )
-        } else {
-            Some(target_r)
-        };
+        let effective_target_r = effective_target_r_for_confirmed_signal(
+            signal,
+            candles,
+            selected_stop_loss.stop_loss_pct,
+            target_r,
+            args,
+        );
         let Some(effective_target_r) = effective_target_r else {
             results.push(TradeResult {
                 outcome: TradeOutcome::Incomplete,
@@ -1802,7 +1843,8 @@ fn summarize_target(
             });
             continue;
         };
-        let mut result = simulate_trade(
+        let volume_atr_trailing = volume_atr_trailing_for_signal(signal, args);
+        let mut result = simulate_trade_with_volume_atr_trailing(
             candles,
             signal.entry_idx,
             signal.entry_ts,
@@ -1814,6 +1856,8 @@ fn summarize_target(
             profit_protection_for_target(args, effective_target_r),
             runner_exit_for_target(args, effective_target_r),
             early_exit(args),
+            uses_target_completion_profit_observation(&args.paper_outcome_entry_rule_version),
+            volume_atr_trailing,
         );
         result = maybe_apply_stop_reentry(
             candles,
@@ -1848,6 +1892,7 @@ fn summarize_target(
     }
     (results, skipped_lock)
 }
+
 /// 提供盈利保护for目标的集中实现，避免回测策略调用方重复处理相同细节。
 pub(crate) fn profit_protection_for_target(
     args: &MarketVelocityEventBacktestArgs,
