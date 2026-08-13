@@ -33,6 +33,12 @@ target_image="${DEPLOY_IMAGE:-}"
 ghcr_username="${DEPLOY_GHCR_USERNAME:-}"
 ghcr_token="${DEPLOY_GHCR_TOKEN:-}"
 
+if [[ -n "${six_role_cutover_confirm}" \
+  && "${six_role_cutover_confirm}" != "replace-legacy-runtime-with-six-roles" ]]; then
+  echo "invalid DEPLOY_SIX_ROLE_CUTOVER_CONFIRM" >&2
+  exit 1
+fi
+
 for required_file in "${runtime_services_file}" "${remote_runner}" "${compose_source_file}"; do
   if [ ! -f "${required_file}" ]; then
     echo "deploy input missing: ${required_file}" >&2
@@ -68,6 +74,7 @@ ssh -p "${ssh_port}" "${DEPLOY_SSH_USER}@${ssh_host}" \
   env \
   "DEPLOY_GHCR_USERNAME=${ghcr_username}" \
   "DEPLOY_GHCR_TOKEN=${ghcr_token}" \
+  "DEPLOY_SIX_ROLE_CUTOVER_CONFIRM=${six_role_cutover_confirm}" \
   bash -s -- \
   "${action}" \
   "${SERVER_APP_PATH}" \
@@ -75,5 +82,4 @@ ssh -p "${ssh_port}" "${DEPLOY_SSH_USER}@${ssh_host}" \
   "${services_csv}" \
   "${target_image}" \
   "${retired_services_csv}" \
-  "${six_role_cutover_confirm}" \
   "${obsolete_services_csv}" < "${remote_runner}"

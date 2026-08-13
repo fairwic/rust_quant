@@ -214,6 +214,12 @@ fn image_deploy_and_verification_contract_use_the_same_six_roles() {
     assert!(rollback_entry.contains("deploy_core.sh\" rollback"));
     assert!(promote_entry.lines().count() <= 10 && rollback_entry.lines().count() <= 10);
     assert!(deploy_core.contains("DEPLOY_SERVICES is no longer supported"));
+    assert!(deploy_core.contains("\"DEPLOY_SIX_ROLE_CUTOVER_CONFIRM=${six_role_cutover_confirm}\""));
+    assert!(
+        deploy_remote.contains("six_role_cutover_confirm=\"${DEPLOY_SIX_ROLE_CUTOVER_CONFIRM:-}\"")
+    );
+    assert!(deploy_remote.contains("obsolete_services_csv=\"$7\""));
+    assert!(!deploy_remote.contains("obsolete_services_csv=\"$8\""));
     assert!(!workflow.contains("DEPLOY_SERVICES:"));
     assert!(deploy_surface.contains("require_control_api_deploy_service"));
     assert!(deploy_surface.contains("require_exact_six_role_services"));
