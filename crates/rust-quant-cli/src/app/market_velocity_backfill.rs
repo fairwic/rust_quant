@@ -10,6 +10,22 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{info, warn};
+
+mod candle_writer_cutover;
+mod history_pipeline;
+
+use candle_writer_cutover::{resolve_excluded_symbols, retain_legacy_owned_symbols};
+#[cfg(test)]
+use history_pipeline::okx_history_candles_api_error;
+use history_pipeline::{
+    aligned_symbol_start_ms, load_candle_continuity_status, load_okx_symbol_list_time_ms,
+    resolve_incremental_backfill_window,
+};
+pub use history_pipeline::{
+    build_okx_history_candles_url, build_okx_http_client, candle_interval_ms,
+    fetch_okx_history_candles, is_okx_missing_instrument_error, max_history_pages,
+    okx_bar_for_timeframe, parse_okx_candle_row,
+};
 const DEFAULT_OKX_REST_BASE: &str = "https://www.okx.com";
 const DEFAULT_TIMEFRAME: &str = "15m";
 const DEFAULT_DAYS: u64 = 60;
@@ -34,6 +50,8 @@ pub struct MarketVelocityBackfillConfig {
     pub proxy_url: Option<String>,
     /// 列表数据。
     pub symbols: Vec<String>,
+    /// 已由其他 Market owner 接管、不得由本 backfill 再写入的交易对。
+    pub excluded_symbols: Vec<String>,
     /// require4h，用于配置运行参数。
     pub require_4h: bool,
     /// 是否按已启用的生产策略配置加载本周期交易对，而不是读取短周期雷达候选。
@@ -59,6 +77,8 @@ pub struct MarketVelocityBackfillConfig {
 pub struct MarketVelocityBackfillCliArgs {
     /// 列表数据。
     pub symbols: Option<Vec<String>>,
+    /// 本轮必须排除的交易对；用于单 writer cutover。
+    pub excluded_symbols: Option<Vec<String>>,
     /// 天数。
     pub days: Option<u64>,
     /// 时间周期；为空时使用默认周期。
@@ -184,6 +204,9 @@ where
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--symbols" => parsed.symbols = Some(parse_symbol_list(&next_arg(&mut args, &arg)?)),
+            "--exclude-symbols" => {
+                parsed.excluded_symbols = Some(parse_symbol_list(&next_arg(&mut args, &arg)?))
+            }
             "--days" => parsed.days = Some(parse_next(&mut args, &arg)?),
             "--timeframe" => parsed.timeframe = Some(next_arg(&mut args, &arg)?),
             "--timeframes" => {
@@ -227,7 +250,7 @@ where
 /// 执行输出市场动量backfillusage步骤，串起行情数据需要的状态推进和错误处理。
 pub fn print_market_velocity_backfill_usage() {
     println!(
-        "Usage: market_velocity_candle_backfill [--symbols BTC-USDT-SWAP,ETH-USDT-SWAP] [--days 60] [--timeframe 1m|5m|15m|1h|4h] [--timeframes 1m,5m,15m] [--enabled-strategy-symbols] [--proxy-url http://127.0.0.1:7897] [--dry-run|--write] [--all-radar-symbols] [--loop-interval-seconds 300]"
+        "Usage: market_velocity_candle_backfill [--symbols BTC-USDT-SWAP,ETH-USDT-SWAP] [--exclude-symbols ETH-USDT-SWAP] [--days 60] [--timeframe 1m|5m|15m|1h|4h] [--timeframes 1m,5m,15m] [--enabled-strategy-symbols] [--proxy-url http://127.0.0.1:7897] [--dry-run|--write] [--all-radar-symbols] [--loop-interval-seconds 300]"
     );
 }
 /// 把单进程调度器参数展开成多个周期配置，避免为每个小周期新增一个容器。
@@ -270,6 +293,7 @@ pub fn config_from_env_and_args(
     let symbols = cli_args.symbols.unwrap_or_else(|| {
         parse_symbol_list(&env_or_default("MARKET_VELOCITY_BACKFILL_SYMBOLS", ""))
     });
+    let excluded_symbols = resolve_excluded_symbols(cli_args.excluded_symbols);
     let require_4h = cli_args.require_4h.unwrap_or_else(|| {
         !parse_env_bool("MARKET_VELOCITY_BACKFILL_ALL_RADAR_SYMBOLS", false)
             && parse_env_bool("MARKET_VELOCITY_BACKFILL_REQUIRE_4H", true)
@@ -321,6 +345,7 @@ pub fn config_from_env_and_args(
         okx_rest_base,
         proxy_url,
         symbols,
+        excluded_symbols,
         require_4h,
         enabled_strategy_symbols,
         days,
@@ -351,6 +376,7 @@ pub async fn run_market_velocity_backfill(
     };
     symbols.sort();
     symbols.dedup();
+    retain_legacy_owned_symbols(&mut symbols, &config.excluded_symbols);
     if let Some(max_symbols) = config.max_symbols {
         symbols.truncate(max_symbols);
     }
@@ -507,339 +533,6 @@ async fn backfill_symbol_candles(
 }
 
 /// 上市前不会存在 K 线；用交易所上市时间收窄补数窗口，避免把正常的前置空白反复当成缺口。
-async fn load_okx_symbol_list_time_ms(pool: &PgPool, symbol: &str) -> Result<Option<i64>> {
-    sqlx::query_scalar(
-        r#"
-        SELECT NULLIF(raw_payload ->> 'listTime', '')::BIGINT
-        FROM exchange_symbols
-        WHERE exchange = 'okx'
-          AND market_type = 'perpetual'
-          AND exchange_symbol = $1
-        "#,
-    )
-    .bind(symbol)
-    .fetch_optional(pool)
-    .await
-    .with_context(|| format!("load OKX symbol list time: {symbol}"))
-    .map(Option::flatten)
-}
-
-fn aligned_symbol_start_ms(
-    configured_start_ms: i64,
-    listed_at_ms: Option<i64>,
-    candle_ms: i64,
-) -> i64 {
-    let available_start_ms = listed_at_ms
-        .unwrap_or(configured_start_ms)
-        .max(configured_start_ms);
-    align_up_to_candle_boundary(available_start_ms, candle_ms)
-}
-
-fn align_up_to_candle_boundary(timestamp_ms: i64, candle_ms: i64) -> i64 {
-    let remainder = timestamp_ms.rem_euclid(candle_ms);
-    if remainder == 0 {
-        timestamp_ms
-    } else {
-        timestamp_ms.saturating_add(candle_ms - remainder)
-    }
-}
-
-/// 读取本地 K 线窗口的连续性摘要；已结束但仍未确认的 K 线也视为修复点，避免回测静默跳过历史数据。
-async fn load_candle_continuity_status(
-    pool: &PgPool,
-    symbol: &str,
-    timeframe: &str,
-    start_ms: i64,
-    end_ms: i64,
-    candle_ms: i64,
-) -> Result<CandleContinuityStatus> {
-    let table_name = CandlesModel::get_table_name(symbol, timeframe);
-    let table_exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS (
-            SELECT 1
-            FROM information_schema.tables
-            WHERE table_schema = 'public'
-              AND table_name = $1
-        )",
-    )
-    .bind(&table_name)
-    .fetch_one(pool)
-    .await
-    .with_context(|| format!("check candle table exists: {table_name}"))?;
-    if !table_exists {
-        return Ok(CandleContinuityStatus::default());
-    }
-
-    let quoted_table_name = quote_legacy_table_name(&table_name)?;
-    let query = format!(
-        r#"
-        WITH windowed AS (
-          SELECT ts, confirm
-          FROM {quoted_table_name}
-          WHERE ts >= $1
-            AND ts <= $2
-        ),
-        bounds AS (
-          SELECT
-            MIN(ts) AS earliest_ts,
-            MAX(ts) AS latest_ts,
-            COUNT(*) FILTER (
-              WHERE confirm = '1'
-                 OR ts > $2 - $3
-            )::BIGINT AS actual_count
-          FROM windowed
-        ),
-        ordered AS (
-          SELECT
-            ts,
-            LAG(ts) OVER (ORDER BY ts) AS prev_ts
-          FROM windowed
-        ),
-        repair_points AS (
-          SELECT ts
-          FROM ordered
-          WHERE prev_ts IS NOT NULL
-            AND ts - prev_ts > $3
-          UNION ALL
-          SELECT ts
-          FROM windowed
-          WHERE confirm <> '1'
-            AND ts <= $2 - $3
-        ),
-        gaps AS (
-          SELECT MIN(ts) AS earliest_gap_start_ts
-          FROM repair_points
-        )
-        SELECT
-          bounds.earliest_ts,
-          bounds.latest_ts,
-          bounds.actual_count,
-          gaps.earliest_gap_start_ts
-        FROM bounds
-        CROSS JOIN gaps
-        "#
-    );
-    let row = sqlx::query(&query)
-        .bind(start_ms)
-        .bind(end_ms)
-        .bind(candle_ms)
-        .fetch_one(pool)
-        .await
-        .with_context(|| format!("load candle continuity status: {table_name}"))?;
-    let earliest_ts = row.get::<Option<i64>, _>("earliest_ts");
-    let latest_ts = row.get::<Option<i64>, _>("latest_ts");
-    let actual_count = row.get::<i64, _>("actual_count");
-    let expected_count = expected_candle_count(Some(start_ms), latest_ts, candle_ms);
-    let earliest_gap_start_ts = row.get::<Option<i64>, _>("earliest_gap_start_ts");
-    Ok(CandleContinuityStatus {
-        earliest_ts,
-        latest_ts,
-        actual_count,
-        expected_count,
-        earliest_gap_start_ts,
-    })
-}
-
-fn resolve_incremental_backfill_window(
-    configured_start_ms: i64,
-    _end_ms: i64,
-    candle_ms: i64,
-    continuity: CandleContinuityStatus,
-) -> IncrementalBackfillWindow {
-    if continuity.latest_ts.is_none() {
-        return IncrementalBackfillWindow {
-            fetch_start_ms: configured_start_ms,
-            reason: BackfillWindowReason::EmptyOrMissingTable,
-        };
-    }
-    if continuity
-        .earliest_ts
-        .is_some_and(|earliest_ts| earliest_ts > configured_start_ms)
-    {
-        return IncrementalBackfillWindow {
-            fetch_start_ms: configured_start_ms,
-            reason: BackfillWindowReason::GapRepair,
-        };
-    }
-    if continuity.has_missing_candles() {
-        let repair_anchor = continuity
-            .earliest_gap_start_ts
-            .or(continuity.earliest_ts)
-            .unwrap_or(configured_start_ms);
-        return IncrementalBackfillWindow {
-            fetch_start_ms: overlap_start_ms(repair_anchor, configured_start_ms, candle_ms),
-            reason: BackfillWindowReason::GapRepair,
-        };
-    }
-    IncrementalBackfillWindow {
-        fetch_start_ms: overlap_start_ms(
-            continuity.latest_ts.unwrap_or(configured_start_ms),
-            configured_start_ms,
-            candle_ms,
-        ),
-        reason: BackfillWindowReason::IncrementalTail,
-    }
-}
-
-fn expected_candle_count(earliest_ts: Option<i64>, latest_ts: Option<i64>, candle_ms: i64) -> i64 {
-    match (earliest_ts, latest_ts) {
-        (Some(earliest_ts), Some(latest_ts)) if latest_ts >= earliest_ts && candle_ms > 0 => {
-            ((latest_ts - earliest_ts) / candle_ms) + 1
-        }
-        _ => 0,
-    }
-}
-
-fn overlap_start_ms(anchor_ms: i64, configured_start_ms: i64, candle_ms: i64) -> i64 {
-    anchor_ms.saturating_sub(candle_ms).max(configured_start_ms)
-}
-/// 加载 行情与市场数据 运行所需数据，并把缺失或异常交给调用方处理。
-pub async fn fetch_okx_history_candles(
-    client: &Client,
-    okx_rest_base: &str,
-    symbol: &str,
-    timeframe: &str,
-    start_ms: i64,
-    end_ms: i64,
-    limit: usize,
-    request_sleep_ms: u64,
-) -> Result<Vec<CandleOkxRespDto>> {
-    let mut candles_by_ts = BTreeMap::new();
-    let mut after_ms = None;
-    let candle_ms = candle_interval_ms(timeframe)?;
-    let okx_bar = okx_bar_for_timeframe(timeframe)?;
-    let max_pages = max_history_pages(start_ms, end_ms, candle_ms, limit);
-    for page_index in 0..max_pages {
-        let url = build_okx_history_candles_url(okx_rest_base, symbol, okx_bar, after_ms, limit)?;
-        let payload = request_okx_history_candles_page(client, url, symbol).await?;
-        if payload.code != "0" {
-            bail!(okx_history_candles_api_error(
-                &payload.code,
-                &payload.msg,
-                symbol
-            ));
-        }
-        if payload.data.is_empty() {
-            break;
-        }
-        let mut page_oldest = i64::MAX;
-        for row in payload.data {
-            let candle = parse_okx_candle_row(row)?;
-            let ts = candle
-                .ts
-                .parse::<i64>()
-                .context("parsed OKX candle timestamp should be numeric")?;
-            page_oldest = page_oldest.min(ts);
-            if start_ms <= ts && ts <= end_ms {
-                candles_by_ts.insert(ts, candle);
-            }
-        }
-        if page_oldest <= start_ms {
-            break;
-        }
-        if after_ms.is_some_and(|previous_after| page_oldest >= previous_after) {
-            warn!(
-                "OKX history-candles pagination did not move older: symbol={}, previous_after={:?}, page_oldest={}",
-                symbol, after_ms, page_oldest
-            );
-            break;
-        }
-        after_ms = Some(page_oldest);
-        if page_index + 1 < max_pages && request_sleep_ms > 0 {
-            sleep(Duration::from_millis(request_sleep_ms)).await;
-        }
-    }
-    Ok(candles_by_ts.into_values().collect())
-}
-
-/// 请求单页 OKX 历史 K 线，并对限频、服务端错误和瞬时传输失败做同页退避重试。
-async fn request_okx_history_candles_page(
-    client: &Client,
-    url: Url,
-    symbol: &str,
-) -> Result<OkxHistoryCandlesResponse> {
-    for attempt in 0..=OKX_RATE_LIMIT_MAX_RETRIES {
-        let response = match client
-            .get(url.clone())
-            .header("User-Agent", "rust-quant-market-velocity-backfill/1.0")
-            .send()
-            .await
-        {
-            Ok(response) => response,
-            Err(error) if attempt < OKX_RATE_LIMIT_MAX_RETRIES => {
-                let backoff_ms = OKX_RATE_LIMIT_BACKOFF_MS * (attempt as u64 + 1);
-                warn!(
-                    "OKX history-candles transport failed; retrying page: symbol={}, attempt={}, backoff_ms={}, error={}",
-                    symbol,
-                    attempt + 1,
-                    backoff_ms,
-                    error
-                );
-                sleep(Duration::from_millis(backoff_ms)).await;
-                continue;
-            }
-            Err(error) => {
-                return Err(error).with_context(|| {
-                    format!("request OKX history-candles failed: symbol={symbol}")
-                });
-            }
-        };
-
-        if (response.status() == StatusCode::TOO_MANY_REQUESTS
-            || response.status().is_server_error())
-            && attempt < OKX_RATE_LIMIT_MAX_RETRIES
-        {
-            let backoff_ms = OKX_RATE_LIMIT_BACKOFF_MS * (attempt as u64 + 1);
-            warn!(
-                "OKX history-candles HTTP retry: symbol={}, status={}, attempt={}, backoff_ms={}",
-                symbol,
-                response.status(),
-                attempt + 1,
-                backoff_ms
-            );
-            sleep(Duration::from_millis(backoff_ms)).await;
-            continue;
-        }
-
-        let response = response
-            .error_for_status()
-            .with_context(|| format!("OKX history-candles HTTP status failed: symbol={symbol}"))?;
-        match response.json::<OkxHistoryCandlesResponse>().await {
-            Ok(payload) => return Ok(payload),
-            Err(error) if attempt < OKX_RATE_LIMIT_MAX_RETRIES => {
-                let backoff_ms = OKX_RATE_LIMIT_BACKOFF_MS * (attempt as u64 + 1);
-                warn!(
-                    "OKX history-candles response interrupted; retrying page: symbol={}, attempt={}, backoff_ms={}, error={}",
-                    symbol,
-                    attempt + 1,
-                    backoff_ms,
-                    error
-                );
-                sleep(Duration::from_millis(backoff_ms)).await;
-            }
-            Err(error) => {
-                return Err(error).with_context(|| {
-                    format!("decode OKX history-candles response failed: symbol={symbol}")
-                });
-            }
-        }
-    }
-
-    unreachable!("OKX history-candles retry loop always returns on the final attempt")
-}
-/// 组装 OKX K 线接口错误文本，并保留 code/msg/symbol 供上层识别可落库的永久不可用交易对。
-fn okx_history_candles_api_error(code: &str, msg: &str, symbol: &str) -> String {
-    format!("OKX history-candles returned code={code} msg={msg} symbol={symbol}")
-}
-
-/// 判断 OKX 是否明确返回交易对不存在；这是永久阻塞，应写回 DB 状态避免反复重试。
-pub fn is_okx_missing_instrument_error(error: &anyhow::Error) -> bool {
-    let error_text = format!("{error:#}");
-    error_text.contains(&format!("code={OKX_MISSING_INSTRUMENT_CODE}"))
-        && error_text.to_ascii_lowercase().contains("instrument")
-}
-
-/// 只有显式写入模式才能把 OKX 不存在的合约同步为已删除，保证 dry-run 不修改元数据。
 fn should_mark_okx_exchange_symbol_deleted(dry_run: bool, error: &anyhow::Error) -> bool {
     !dry_run && is_okx_missing_instrument_error(error)
 }
@@ -957,97 +650,6 @@ fn load_market_velocity_backfill_symbols_sql(require_4h: bool) -> String {
     )
 }
 /// 构建 行情与市场数据 请求或响应载荷，把字段组装规则集中在同一入口。
-pub fn build_okx_history_candles_url(
-    okx_rest_base: &str,
-    symbol: &str,
-    timeframe: &str,
-    after_ms: Option<i64>,
-    limit: usize,
-) -> Result<Url> {
-    let base = okx_rest_base.trim_end_matches('/');
-    let mut url = Url::parse(&format!("{base}/api/v5/market/history-candles"))
-        .context("parse OKX REST base URL")?;
-    {
-        let mut pairs = url.query_pairs_mut();
-        pairs.append_pair("instId", symbol);
-        pairs.append_pair("bar", timeframe);
-        pairs.append_pair("limit", &limit.to_string());
-        if let Some(after_ms) = after_ms {
-            pairs.append_pair("after", &after_ms.to_string());
-        }
-    }
-    Ok(url)
-}
-/// 构建 行情与市场数据 请求或响应载荷，把字段组装规则集中在同一入口。
-pub fn build_okx_http_client(proxy_url: Option<&str>) -> Result<Client> {
-    let mut builder = Client::builder()
-        .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(30));
-    if let Some(proxy_url) = proxy_url.map(str::trim).filter(|value| !value.is_empty()) {
-        builder = builder.proxy(Proxy::all(proxy_url).context("configure OKX REST proxy")?);
-    }
-    builder.build().context("build OKX REST HTTP client")
-}
-/// 判断K 线intervalms，给行情数据流程提供布尔结果。
-pub fn candle_interval_ms(timeframe: &str) -> Result<i64> {
-    match timeframe.trim().to_ascii_lowercase().as_str() {
-        "1m" => Ok(CANDLE_1M_MS),
-        "5m" => Ok(CANDLE_5M_MS),
-        "15m" => Ok(CANDLE_15M_MS),
-        "1h" => Ok(CANDLE_1H_MS),
-        "4h" => Ok(CANDLE_4H_MS),
-        other => bail!(
-            "unsupported market velocity candle backfill timeframe: {other}; supported: 1m, 5m, 15m, 1h, 4h"
-        ),
-    }
-}
-/// 提供OKXbarfortimeframe的集中实现，避免行情数据调用方重复处理相同细节。
-pub fn okx_bar_for_timeframe(timeframe: &str) -> Result<&'static str> {
-    match timeframe.trim().to_ascii_lowercase().as_str() {
-        "1m" => Ok("1m"),
-        "5m" => Ok("5m"),
-        "15m" => Ok("15m"),
-        "1h" => Ok("1H"),
-        "4h" => Ok("4H"),
-        other => {
-            bail!(
-                "unsupported market velocity OKX candle bar: {other}; supported: 1m, 5m, 15m, 1h, 4h"
-            )
-        }
-    }
-}
-/// 解析输入参数并收敛为 行情与市场数据 可使用的结构化值。
-pub fn parse_okx_candle_row(row: Vec<String>) -> Result<CandleOkxRespDto> {
-    if row.len() < 9 {
-        bail!(
-            "OKX candle row has {} columns, expected at least 9",
-            row.len()
-        );
-    }
-    row[0]
-        .parse::<i64>()
-        .with_context(|| format!("invalid OKX candle timestamp: {}", row[0]))?;
-    Ok(CandleOkxRespDto {
-        ts: row[0].clone(),
-        o: row[1].clone(),
-        h: row[2].clone(),
-        l: row[3].clone(),
-        c: row[4].clone(),
-        v: row[5].clone(),
-        vol_ccy: row[6].clone(),
-        vol_ccy_quote: row[7].clone(),
-        confirm: row[8].clone(),
-    })
-}
-/// 计算最大historypages，并把公式边界留在行情数据内部。
-pub fn max_history_pages(start_ms: i64, end_ms: i64, candle_ms: i64, limit: usize) -> usize {
-    if end_ms <= start_ms || candle_ms <= 0 || limit == 0 {
-        return 1;
-    }
-    let expected_candles = ((end_ms - start_ms) as f64 / candle_ms as f64).ceil() as usize;
-    (expected_candles / limit).saturating_add(8).max(1)
-}
-/// 解析输入参数并收敛为 行情与市场数据 可使用的结构化值。
 pub fn parse_symbol_list(value: &str) -> Vec<String> {
     let mut symbols = value
         .split(',')
@@ -1171,344 +773,4 @@ fn parse_env_usize(key: &str, default_value: usize) -> usize {
         .unwrap_or(default_value)
 }
 #[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn parse_symbols_normalizes_and_deduplicates() {
-        assert_eq!(
-            parse_symbol_list(" xag-usdt-swap, BTC-USDT-SWAP, xag-USDT-swap "),
-            vec!["BTC-USDT-SWAP".to_string(), "XAG-USDT-SWAP".to_string()]
-        );
-    }
-    #[test]
-    fn cli_args_support_proxy_and_all_radar_symbols() {
-        let args = parse_cli_args_from([
-            "--symbols",
-            "xag-usdt-swap",
-            "--days",
-            "30",
-            "--proxy-url",
-            "http://127.0.0.1:7897",
-            "--all-radar-symbols",
-            "--dry-run",
-        ])
-        .unwrap();
-        assert_eq!(args.symbols, Some(vec!["XAG-USDT-SWAP".to_string()]));
-        assert_eq!(args.days, Some(30));
-        assert_eq!(
-            args.proxy_url,
-            Some(Some("http://127.0.0.1:7897".to_string()))
-        );
-        assert_eq!(args.require_4h, Some(false));
-        assert_eq!(args.dry_run, Some(true));
-    }
-    #[test]
-    fn cli_args_support_fail_fast_for_bulk_backfill() {
-        let args = parse_cli_args_from(["--fail-fast"]).unwrap();
-        assert_eq!(args.continue_on_error, Some(false));
-    }
-    #[test]
-    fn cli_args_support_rust_native_scheduler_loop_interval() {
-        let args = parse_cli_args_from(["--loop-interval-seconds", "300"]).unwrap();
-        assert_eq!(args.loop_interval_seconds, Some(300));
-        let args = parse_cli_args_from(["--loop-interval-seconds=600"]).unwrap();
-        assert_eq!(args.loop_interval_seconds, Some(600));
-        let error = parse_cli_args_from(["--loop-interval-seconds", "0"]).unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("--loop-interval-seconds must be greater than 0"),
-            "unexpected error: {error:#}"
-        );
-    }
-    #[test]
-    fn cli_args_support_multiple_scheduler_timeframes() {
-        let args = parse_cli_args_from(["--timeframes", "1m, 5m,15m"]).unwrap();
-        assert_eq!(
-            args.timeframes,
-            Some(vec!["1m".to_string(), "5m".to_string(), "15m".to_string()])
-        );
-    }
-    #[test]
-    fn cli_args_support_enabled_strategy_symbol_source() {
-        let args = parse_cli_args_from([
-            "--enabled-strategy-symbols",
-            "--timeframe",
-            "4h",
-            "--days",
-            "60",
-        ])
-        .unwrap();
-        assert_eq!(args.enabled_strategy_symbols, Some(true));
-        assert_eq!(args.timeframe, Some("4h".to_string()));
-        assert_eq!(args.days, Some(60));
-    }
-    #[test]
-    fn history_url_paginates_to_older_candles_with_after() {
-        let url = build_okx_history_candles_url(
-            "https://www.okx.com/",
-            "XAG-USDT-SWAP",
-            "15m",
-            Some(1_781_500_000_000),
-            100,
-        )
-        .unwrap();
-        assert_eq!(
-            url.as_str(),
-            "https://www.okx.com/api/v5/market/history-candles?instId=XAG-USDT-SWAP&bar=15m&limit=100&after=1781500000000"
-        );
-    }
-    #[test]
-    fn parse_okx_candle_row_matches_existing_dto_mapping() {
-        let candle = parse_okx_candle_row(vec![
-            "1781503200000".to_string(),
-            "1".to_string(),
-            "2".to_string(),
-            "0.9".to_string(),
-            "1.5".to_string(),
-            "10".to_string(),
-            "11".to_string(),
-            "12".to_string(),
-            "1".to_string(),
-        ])
-        .unwrap();
-        assert_eq!(candle.ts, "1781503200000");
-        assert_eq!(candle.v, "10");
-        assert_eq!(candle.vol_ccy, "11");
-        assert_eq!(candle.vol_ccy_quote, "12");
-        assert_eq!(candle.confirm, "1");
-    }
-    #[test]
-    fn parse_okx_candle_row_rejects_short_rows() {
-        let error = parse_okx_candle_row(vec!["1781503200000".to_string()]).unwrap_err();
-        assert!(error.to_string().contains("expected at least 9"));
-    }
-    #[test]
-    fn max_history_pages_has_buffer_for_60_days_of_15m_candles() {
-        let pages = max_history_pages(0, 60 * 24 * 60 * 60 * 1_000, CANDLE_15M_MS, 100);
-        assert_eq!(pages, 65);
-    }
-    #[test]
-    fn backfill_window_uses_full_range_when_no_local_candles_exist() {
-        let window = resolve_incremental_backfill_window(
-            1_000_000,
-            2_000_000,
-            CANDLE_15M_MS,
-            CandleContinuityStatus::default(),
-        );
-        assert_eq!(window.fetch_start_ms, 1_000_000);
-        assert_eq!(window.reason, BackfillWindowReason::EmptyOrMissingTable);
-    }
-    #[test]
-    fn backfill_window_repairs_earliest_detected_gap_with_overlap() {
-        let window = resolve_incremental_backfill_window(
-            1_000_000,
-            5_000_000,
-            CANDLE_15M_MS,
-            CandleContinuityStatus {
-                earliest_ts: Some(1_000_000),
-                latest_ts: Some(4_800_000),
-                actual_count: 4,
-                expected_count: 5,
-                earliest_gap_start_ts: Some(3_000_000),
-            },
-        );
-        assert_eq!(window.fetch_start_ms, 3_000_000 - CANDLE_15M_MS);
-        assert_eq!(window.reason, BackfillWindowReason::GapRepair);
-    }
-    #[test]
-    fn backfill_window_repairs_leading_gap_from_configured_start() {
-        let window = resolve_incremental_backfill_window(
-            1_000_000,
-            5_000_000,
-            CANDLE_15M_MS,
-            CandleContinuityStatus {
-                earliest_ts: Some(3_000_000),
-                latest_ts: Some(4_800_000),
-                actual_count: 3,
-                expected_count: 3,
-                earliest_gap_start_ts: None,
-            },
-        );
-        assert_eq!(window.fetch_start_ms, 1_000_000);
-        assert_eq!(window.reason, BackfillWindowReason::GapRepair);
-    }
-    #[test]
-    fn backfill_window_uses_latest_candle_overlap_when_local_series_is_continuous() {
-        let window = resolve_incremental_backfill_window(
-            1_000_000,
-            5_000_000,
-            CANDLE_15M_MS,
-            CandleContinuityStatus {
-                earliest_ts: Some(1_000_000),
-                latest_ts: Some(4_800_000),
-                actual_count: 5,
-                expected_count: 5,
-                earliest_gap_start_ts: None,
-            },
-        );
-        assert_eq!(window.fetch_start_ms, 4_800_000 - CANDLE_15M_MS);
-        assert_eq!(window.reason, BackfillWindowReason::IncrementalTail);
-    }
-    #[test]
-    fn symbol_start_aligns_configured_time_to_the_next_candle_boundary() {
-        assert_eq!(
-            aligned_symbol_start_ms(1_000_001, None, CANDLE_15M_MS),
-            1_800_000
-        );
-    }
-    #[test]
-    fn symbol_start_clamps_to_listing_time_before_alignment() {
-        assert_eq!(
-            aligned_symbol_start_ms(1_000_000, Some(2_000_001), CANDLE_15M_MS),
-            2_700_000
-        );
-    }
-    #[test]
-    fn unaligned_scheduler_window_does_not_trigger_false_gap_repair() {
-        let configured_start_ms = 1_784_300_865_335;
-        let aligned_start_ms = aligned_symbol_start_ms(configured_start_ms, None, CANDLE_1M_MS);
-        let latest_ts = aligned_start_ms + CANDLE_1M_MS * 2_879;
-        let window = resolve_incremental_backfill_window(
-            aligned_start_ms,
-            latest_ts + CANDLE_1M_MS,
-            CANDLE_1M_MS,
-            CandleContinuityStatus {
-                earliest_ts: Some(aligned_start_ms),
-                latest_ts: Some(latest_ts),
-                actual_count: 2_880,
-                expected_count: 2_880,
-                earliest_gap_start_ts: None,
-            },
-        );
-        assert_eq!(window.reason, BackfillWindowReason::IncrementalTail);
-        assert_eq!(window.fetch_start_ms, latest_ts - CANDLE_1M_MS);
-    }
-    #[test]
-    fn candle_continuity_uses_bounds_and_count_to_detect_missing_rows() {
-        let status = CandleContinuityStatus {
-            earliest_ts: Some(1_000_000),
-            latest_ts: Some(1_000_000 + CANDLE_15M_MS * 4),
-            actual_count: 4,
-            expected_count: 5,
-            earliest_gap_start_ts: None,
-        };
-        assert!(status.has_missing_candles());
-    }
-    #[test]
-    fn candle_continuity_treats_matching_bounds_and_count_as_continuous() {
-        let status = CandleContinuityStatus {
-            earliest_ts: Some(1_000_000),
-            latest_ts: Some(1_000_000 + CANDLE_15M_MS * 4),
-            actual_count: 5,
-            expected_count: 5,
-            earliest_gap_start_ts: None,
-        };
-        assert!(!status.has_missing_candles());
-    }
-    #[test]
-    fn candle_interval_ms_supports_4h_trend_backfill() {
-        assert_eq!(candle_interval_ms("4h").unwrap(), 4 * 60 * 60 * 1_000);
-    }
-    #[test]
-    fn candle_interval_ms_supports_1h_fvg_backfill() {
-        assert_eq!(candle_interval_ms("1h").unwrap(), 60 * 60 * 1_000);
-    }
-    #[test]
-    fn candle_interval_ms_supports_1m_scalper_backfill() {
-        assert_eq!(candle_interval_ms("1m").unwrap(), 60 * 1_000);
-        assert_eq!(okx_bar_for_timeframe("1m").unwrap(), "1m");
-    }
-    #[test]
-    fn okx_bar_for_timeframe_uses_okx_hour_case() {
-        assert_eq!(okx_bar_for_timeframe("5m").unwrap(), "5m");
-        assert_eq!(okx_bar_for_timeframe("15m").unwrap(), "15m");
-        assert_eq!(okx_bar_for_timeframe("1h").unwrap(), "1H");
-        assert_eq!(okx_bar_for_timeframe("4h").unwrap(), "4H");
-    }
-    #[test]
-    fn max_history_pages_has_buffer_for_60_days_of_5m_candles() {
-        let pages = max_history_pages(0, 60 * 24 * 60 * 60 * 1_000, CANDLE_5M_MS, 100);
-        assert_eq!(pages, 180);
-    }
-    #[test]
-    fn max_history_pages_has_buffer_for_60_days_of_1h_candles() {
-        let pages = max_history_pages(0, 60 * 24 * 60 * 60 * 1_000, CANDLE_1H_MS, 100);
-        assert_eq!(pages, 22);
-    }
-    #[test]
-    fn max_history_pages_has_buffer_for_60_days_of_4h_candles() {
-        let pages = max_history_pages(0, 60 * 24 * 60 * 60 * 1_000, 4 * 60 * 60 * 1_000, 100);
-        assert_eq!(pages, 11);
-    }
-    #[test]
-    fn backfill_symbol_scan_uses_only_active_okx_symbols() {
-        let sql = load_market_velocity_backfill_symbols_sql(false);
-        assert!(
-            sql.contains("exchange_symbols"),
-            "backfill must consult exchange_symbols before requesting OKX candles: {sql}"
-        );
-        assert!(
-            sql.contains("available_okx_symbols"),
-            "backfill should use a dedicated available-symbol CTE before selecting candidates: {sql}"
-        );
-        let normalized_sql = sql.to_ascii_lowercase();
-        assert!(
-            normalized_sql.contains("lower(status) in ('trading', 'live')"),
-            "deleted or unsupported OKX symbols must be excluded by status: {sql}"
-        );
-        assert!(
-            sql.contains("JOIN available_okx_symbols USING (symbol)"),
-            "unavailable OKX symbols must not reach history-candles requests: {sql}"
-        );
-    }
-
-    #[test]
-    fn enabled_strategy_symbol_scan_is_timeframe_scoped_and_exchange_safe() {
-        let sql = load_enabled_strategy_backfill_symbols_sql().to_ascii_lowercase();
-        assert!(sql.contains("from strategy_configs"));
-        assert!(sql.contains("config.enabled = true"));
-        assert!(sql.contains("lower(config.timeframe) = lower($1)"));
-        assert!(sql.contains("lower(config.exchange) = 'okx'"));
-        assert!(sql.contains("exchange_symbol.market_type = 'perpetual'"));
-        assert!(sql.contains("lower(exchange_symbol.status) in ('trading', 'live')"));
-    }
-
-    #[test]
-    fn okx_51001_is_missing_instrument_error() {
-        let error = anyhow!(okx_history_candles_api_error(
-            "51001",
-            "Instrument ID doesn't exist.",
-            "IP-USDT-SWAP"
-        ));
-        assert!(is_okx_missing_instrument_error(&error));
-        let transient = anyhow!(okx_history_candles_api_error(
-            "50011",
-            "Rate limit reached.",
-            "BTC-USDT-SWAP"
-        ));
-        assert!(!is_okx_missing_instrument_error(&transient));
-    }
-
-    #[test]
-    fn dry_run_does_not_mark_missing_okx_instrument_deleted() {
-        let missing = anyhow!(
-            "OKX history-candles returned code={} msg=instrument missing",
-            OKX_MISSING_INSTRUMENT_CODE
-        );
-
-        assert!(!should_mark_okx_exchange_symbol_deleted(true, &missing));
-        assert!(should_mark_okx_exchange_symbol_deleted(false, &missing));
-    }
-
-    #[test]
-    fn okx_missing_instrument_mark_sql_sets_deleted_status() {
-        let sql = mark_okx_exchange_symbol_deleted_sql().to_ascii_lowercase();
-        assert!(sql.contains("update exchange_symbols"));
-        assert!(sql.contains("set status = 'deleted'"));
-        assert!(sql.contains("exchange = 'okx'"));
-        assert!(sql.contains("market_type = 'perpetual'"));
-        assert!(sql.contains("upper(exchange_symbol) = upper($1)"));
-        assert!(sql.contains("upper(normalized_symbol) = upper($1)"));
-    }
-}
+mod tests;

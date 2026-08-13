@@ -4,6 +4,7 @@ use crate::repositories::persist_worker::PersistTask;
 use crate::streams::{timeframe_duration_ms, CandleRuntimeRegistry, WatchdogDecision};
 use chrono::Utc;
 use okx::dto::market_dto::CandleOkxRespDto;
+use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
@@ -14,6 +15,8 @@ pub struct CandleService {
     cache: Arc<dyn LatestCandleCacheProvider>,
     /// 持久化写入通道；为空时表示不启动异步持久化。
     persist_sender: Option<mpsc::UnboundedSender<PersistTask>>,
+    /// 已由新 Market owner 接管的精确 target；legacy 仍可触发策略，但不得再双写。
+    persistence_exclusions: HashSet<(String, String)>,
     /// 策略触发回调函数
     ///
     /// # 架构说明
@@ -30,6 +33,7 @@ impl CandleService {
         Self {
             cache: default_provider(),
             persist_sender: None,
+            persistence_exclusions: HashSet::new(),
             strategy_trigger: None,
             runtime_registry: Arc::new(CandleRuntimeRegistry::default()),
         }
@@ -39,6 +43,7 @@ impl CandleService {
         Self {
             cache,
             persist_sender: None,
+            persistence_exclusions: HashSet::new(),
             strategy_trigger: None,
             runtime_registry: Arc::new(CandleRuntimeRegistry::default()),
         }
@@ -51,6 +56,7 @@ impl CandleService {
         Self {
             cache,
             persist_sender: Some(persist_sender),
+            persistence_exclusions: HashSet::new(),
             strategy_trigger: None,
             runtime_registry: Arc::new(CandleRuntimeRegistry::default()),
         }
@@ -64,6 +70,7 @@ impl CandleService {
         Self {
             cache,
             persist_sender: Some(persist_sender),
+            persistence_exclusions: HashSet::new(),
             strategy_trigger: None,
             runtime_registry,
         }
@@ -84,6 +91,7 @@ impl CandleService {
         Self {
             cache,
             persist_sender,
+            persistence_exclusions: HashSet::new(),
             strategy_trigger: Some(strategy_trigger),
             runtime_registry: Arc::new(CandleRuntimeRegistry::default()),
         }
@@ -98,9 +106,23 @@ impl CandleService {
         Self {
             cache,
             persist_sender,
+            persistence_exclusions: HashSet::new(),
             strategy_trigger: Some(strategy_trigger),
             runtime_registry,
         }
+    }
+
+    /// 为明确完成 writer cutover 的 target 关闭 legacy 持久化，不改变策略回调。
+    pub fn with_persistence_exclusions(mut self, targets: HashSet<(String, String)>) -> Self {
+        self.persistence_exclusions = targets;
+        self
+    }
+
+    fn persistence_is_excluded(&self, inst_id: &str, time_interval: &str) -> bool {
+        self.persistence_exclusions.contains(&(
+            inst_id.trim().to_ascii_uppercase(),
+            time_interval.trim().to_ascii_uppercase(),
+        ))
     }
 
     /// 通过统一幂等门禁触发确认 K 线，供 WS 与 DB watchdog 共用。
@@ -302,6 +324,15 @@ impl CandleService {
                 .filter(|candle| candle.confirm == "1")
                 .collect::<Vec<_>>();
             if confirmed_candles.is_empty() {
+                return Ok(());
+            }
+            if self.persistence_is_excluded(inst_id, time_interval) {
+                info!(
+                    event = "legacy_candle_persistence_excluded",
+                    inst_id,
+                    time_interval,
+                    "该 target 已交由新 Market owner 单写；legacy 仅保留策略触发"
+                );
                 return Ok(());
             }
 
@@ -532,6 +563,39 @@ mod tests {
             .expect("duplicate confirmed update should be ignored");
 
         assert_eq!(cache.redis_set_count.load(Ordering::Relaxed), 1);
+        assert!(persist_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn cutover_target_still_triggers_strategy_without_legacy_persistence() {
+        let cache = Arc::new(RecordingCache::default());
+        let (persist_tx, mut persist_rx) = mpsc::unbounded_channel();
+        let trigger_count = Arc::new(AtomicUsize::new(0));
+        let observed_count = Arc::clone(&trigger_count);
+        let trigger: StrategyTrigger = Arc::new(move |_, _, _| {
+            observed_count.fetch_add(1, Ordering::Relaxed);
+        });
+        let exclusions = HashSet::from([("ETH-USDT-SWAP".to_string(), "4H".to_string())]);
+        let service = CandleService::new_with_strategy_trigger_and_runtime(
+            cache,
+            Some(persist_tx),
+            trigger,
+            Arc::new(CandleRuntimeRegistry::default()),
+        )
+        .with_persistence_exclusions(exclusions);
+        let now_ms = Utc::now().timestamp_millis();
+        let candle_ts = now_ms - 14_400_001;
+
+        service
+            .update_candles_batch(
+                vec![websocket_candle(candle_ts, "1")],
+                "ETH-USDT-SWAP",
+                "4H",
+            )
+            .await
+            .expect("cutover target should still be consumed");
+
+        assert_eq!(trigger_count.load(Ordering::Relaxed), 1);
         assert!(persist_rx.try_recv().is_err());
     }
 }

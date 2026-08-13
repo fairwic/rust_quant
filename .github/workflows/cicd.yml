@@ -51,6 +51,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: fairwic/crypto_exc_all
+          ref: 4d83997af344a3ffc1cc7e2444f1f8385e054dcd
           path: crypto_exc_all
 
       - name: Verify SDK sibling checkout
@@ -86,6 +87,7 @@ jobs:
           cargo check -p rust-quant-cli --bin market_velocity_kline_scanner
           cargo check -p rust-quant-cli --bin market_velocity_event_backtest
           cargo test -p rust-quant-services --test market_velocity_production_deploy_contract -- --nocapture
+          cargo test -p rust-quant-services --test eth_4h_market_cutover_deploy_contract -- --nocapture
           cargo test -p rust-quant-services --test six_role_production_deploy_contract -- --nocapture
           cargo check -p rust-quant-cli --bin quant_core_control_api --bin quant_core_market_worker --bin quant_core_signal_worker --bin quant_core_account_worker --bin quant_core_execution_worker --bin quant_core_reconciliation_worker
           cargo test -p rust-quant-services market_velocity_signal --lib -- --nocapture
@@ -111,6 +113,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: fairwic/crypto_exc_all
+          ref: 4d83997af344a3ffc1cc7e2444f1f8385e054dcd
           path: crypto_exc_all
 
       - name: Verify SDK sibling checkout

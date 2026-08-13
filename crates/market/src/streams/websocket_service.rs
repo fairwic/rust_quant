@@ -13,6 +13,7 @@ use okx::websocket::auto_reconnect_client::{
     AutoReconnectWebsocketClient, ConnectionState, ReconnectConfig,
 };
 use okx::websocket::{Args, ChannelType};
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -24,6 +25,7 @@ const WATCHDOG_BOUNDARY_OBSERVE_MS: i64 = 12_000;
 const WATCHDOG_FALLBACK_QUERY_MS: i64 = 30_000;
 const HEALTH_LOG_INTERVAL: Duration = Duration::from_secs(10);
 const BUSINESS_MESSAGE_STALE_AFTER_MS: i64 = 15_000;
+const PERSISTENCE_EXCLUSIONS_ENV: &str = "WEBSOCKET_CANDLE_PERSIST_EXCLUDED_TARGETS";
 
 #[derive(Debug, Clone)]
 struct WatchdogTarget {
@@ -81,19 +83,26 @@ pub async fn run_socket_with_strategy_trigger(
         worker.run().await;
     });
 
+    let persistence_exclusions = persistence_exclusions_from_env()?;
     let candle_service = if let Some(trigger) = strategy_trigger {
-        Arc::new(CandleService::new_with_strategy_trigger_and_runtime(
-            default_provider(),
-            Some(persist_tx),
-            trigger,
-            Arc::clone(&runtime_registry),
-        ))
+        Arc::new(
+            CandleService::new_with_strategy_trigger_and_runtime(
+                default_provider(),
+                Some(persist_tx),
+                trigger,
+                Arc::clone(&runtime_registry),
+            )
+            .with_persistence_exclusions(persistence_exclusions),
+        )
     } else {
-        Arc::new(CandleService::new_with_persist_worker_and_runtime(
-            default_provider(),
-            persist_tx,
-            Arc::clone(&runtime_registry),
-        ))
+        Arc::new(
+            CandleService::new_with_persist_worker_and_runtime(
+                default_provider(),
+                persist_tx,
+                Arc::clone(&runtime_registry),
+            )
+            .with_persistence_exclusions(persistence_exclusions),
+        )
     };
     initialize_watchdog_baselines(&runtime_registry, &mut targets).await?;
 
@@ -225,6 +234,37 @@ pub async fn run_socket_with_strategy_trigger(
     health_task.abort();
     persist_task.abort();
     Err(exit_error)
+}
+
+fn persistence_exclusions_from_env() -> Result<HashSet<(String, String)>> {
+    parse_persistence_exclusions(&std::env::var(PERSISTENCE_EXCLUSIONS_ENV).unwrap_or_default())
+}
+
+fn parse_persistence_exclusions(value: &str) -> Result<HashSet<(String, String)>> {
+    let mut targets = HashSet::new();
+    for raw_target in value
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let (symbol, timeframe) = raw_target.split_once(':').ok_or_else(|| {
+            anyhow!("{PERSISTENCE_EXCLUSIONS_ENV} target must use SYMBOL:TIMEFRAME")
+        })?;
+        let symbol = symbol.trim().to_ascii_uppercase();
+        let timeframe = timeframe.trim().to_ascii_uppercase();
+        if symbol.is_empty()
+            || !symbol
+                .chars()
+                .all(|value| value.is_ascii_alphanumeric() || value == '-')
+        {
+            return Err(anyhow!(
+                "{PERSISTENCE_EXCLUSIONS_ENV} contains an invalid symbol"
+            ));
+        }
+        timeframe_duration_ms(&timeframe).map_err(anyhow::Error::msg)?;
+        targets.insert((symbol, timeframe));
+    }
+    Ok(targets)
 }
 
 /// 登记所有 K 线订阅；真正 ACK 由 SDK 健康状态记录。
@@ -535,8 +575,8 @@ fn supervised_result(
 #[cfg(test)]
 mod tests {
     use super::{
-        message_is_fresh, message_is_fresh_when_required, WatchdogTarget,
-        WATCHDOG_FALLBACK_QUERY_MS,
+        message_is_fresh, message_is_fresh_when_required, parse_persistence_exclusions,
+        WatchdogTarget, WATCHDOG_FALLBACK_QUERY_MS,
     };
 
     /// 收盘边界短窗口内必须高频查询，边界外不能持续压 DB。
@@ -573,5 +613,12 @@ mod tests {
     fn disabled_ticker_stream_does_not_require_ticker_business_messages() {
         assert!(message_is_fresh_when_required(false, None, 20_000, 15_000));
         assert!(!message_is_fresh_when_required(true, None, 20_000, 15_000));
+    }
+
+    #[test]
+    fn persistence_exclusions_are_exact_normalized_targets() {
+        let targets = parse_persistence_exclusions(" eth-usdt-swap:4h ").unwrap();
+        assert!(targets.contains(&("ETH-USDT-SWAP".to_string(), "4H".to_string())));
+        assert!(parse_persistence_exclusions("ETH-USDT-SWAP").is_err());
     }
 }

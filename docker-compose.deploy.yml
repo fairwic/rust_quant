@@ -116,6 +116,7 @@ services:
       IS_RUN_REAL_STRATEGY: "true"
       IS_OPEN_SOCKET: "true"
       WEBSOCKET_SUBSCRIBE_TICKERS: "false"
+      WEBSOCKET_CANDLE_PERSIST_EXCLUDED_TARGETS: ${LEGACY_CANDLE_PERSIST_EXCLUDED_TARGETS:-}
       IS_RUN_SYNC_DATA_JOB: "false"
       IS_RUN_EXECUTION_WORKER: "false"
       IS_RUN_EXCHANGE_SYMBOL_SYNC_WORKER: "false"
@@ -210,6 +211,7 @@ services:
       IS_RUN_REAL_STRATEGY: "true"
       IS_OPEN_SOCKET: "true"
       WEBSOCKET_SUBSCRIBE_TICKERS: "false"
+      WEBSOCKET_CANDLE_PERSIST_EXCLUDED_TARGETS: ${LEGACY_CANDLE_PERSIST_EXCLUDED_TARGETS:-}
       IS_RUN_SYNC_DATA_JOB: "false"
       IS_RUN_EXECUTION_WORKER: "false"
       IS_RUN_EXCHANGE_SYMBOL_SYNC_WORKER: "false"
@@ -245,6 +247,7 @@ services:
       IS_RUN_REAL_STRATEGY: "true"
       IS_OPEN_SOCKET: "true"
       WEBSOCKET_SUBSCRIBE_TICKERS: "false"
+      WEBSOCKET_CANDLE_PERSIST_EXCLUDED_TARGETS: ${LEGACY_CANDLE_PERSIST_EXCLUDED_TARGETS:-}
       IS_RUN_SYNC_DATA_JOB: "false"
       IS_RUN_EXECUTION_WORKER: "false"
       IS_RUN_EXCHANGE_SYMBOL_SYNC_WORKER: "false"
@@ -395,6 +398,8 @@ services:
     command:
       - market_velocity_candle_backfill
       - --enabled-strategy-symbols
+      - --exclude-symbols
+      - ${STRATEGY_4H_CANDLE_BACKFILL_EXCLUDED_SYMBOLS:-}
       - --timeframe
       - 4h
       - --days
