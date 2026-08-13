@@ -1,0 +1,97 @@
+name: Legacy ETH 4H Market Handoff
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Scoped legacy writer handoff action
+        required: true
+        type: choice
+        options:
+          - prepare
+          - verify
+          - rollback
+      source_revision:
+        description: Full 40-character Core source revision
+        required: true
+        type: string
+      confirmation:
+        description: Exact confirmation phrase for the selected action
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: legacy-eth-4h-market-handoff-production
+  cancel-in-progress: false
+
+jobs:
+  handoff:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: production
+    steps:
+      - name: Validate scoped request
+        shell: bash
+        env:
+          ACTION: ${{ inputs.action }}
+          SOURCE_REVISION: ${{ inputs.source_revision }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          [[ "${SOURCE_REVISION}" =~ ^[0-9a-f]{40}$ ]]
+          case "${ACTION}" in
+            prepare)
+              [[ "${CONFIRMATION}" == "prepare-legacy-eth-usdt-swap-4h-handoff" ]]
+              ;;
+            verify)
+              [[ "${CONFIRMATION}" == "verify-legacy-eth-usdt-swap-4h-handoff" ]]
+              ;;
+            rollback)
+              [[ "${CONFIRMATION}" == "rollback-legacy-eth-usdt-swap-4h-before-ownership" ]]
+              ;;
+          esac
+
+      - name: Checkout exact Core revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_revision }}
+
+      - name: Verify checked-out revision
+        env:
+          SOURCE_REVISION: ${{ inputs.source_revision }}
+        run: test "$(git rev-parse HEAD)" = "${SOURCE_REVISION}"
+
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Add known hosts
+        run: ./scripts/ci/prepare_ssh.sh
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+
+      - name: Run scoped handoff action
+        shell: bash
+        env:
+          DEPLOY_SSH_USER: ${{ secrets.SSH_USER }}
+          DEPLOY_SSH_HOST: ${{ secrets.SSH_HOST }}
+          DEPLOY_SSH_PORT: ${{ secrets.SSH_PORT }}
+          SERVER_APP_PATH: ${{ secrets.SERVER_APP_PATH }}
+          DEPLOY_GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          DEPLOY_GHCR_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
+          DEPLOY_ETH_4H_HANDOFF_CONFIRM: ${{ inputs.confirmation }}
+          DEPLOY_EXPECTED_REVISION: ${{ inputs.source_revision }}
+          HANDOFF_ACTION: ${{ inputs.action }}
+        run: |
+          set -euo pipefail
+          image_owner="${GITHUB_REPOSITORY_OWNER,,}"
+          export DEPLOY_IMAGE="ghcr.io/${image_owner}/quant-core-worker:sha-${DEPLOY_EXPECTED_REVISION}"
+          ./scripts/deploy/deploy_eth_4h_market_handoff.sh "${HANDOFF_ACTION}"

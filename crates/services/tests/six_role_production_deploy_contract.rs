@@ -247,6 +247,7 @@ fn image_deploy_and_verification_contract_use_the_same_six_roles() {
     assert!(deploy_surface.contains("command: [rust_quant]"));
     assert!(deploy_surface.contains("DEPLOY_OBSOLETE_SERVICES:-quant-core-vegas-eth-4h-live"));
     assert!(workflow.contains("DEPLOY_SIX_ROLE_CUTOVER_CONFIRM"));
+    assert!(workflow.contains("vars.LEGACY_SIX_ROLE_AUTO_DEPLOY_ENABLED == 'true'"));
     assert!(workflow.contains("Verify production runtime"));
     assert!(workflow.contains("./scripts/deploy/verify_production.sh \"${{ github.sha }}\""));
     for evidence in [

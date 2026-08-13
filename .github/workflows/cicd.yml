@@ -12,6 +12,7 @@ on:
       - 'scripts/ci/**'
       - 'scripts/deploy/**'
       - '.github/workflows/cicd.yml'
+      - '.github/workflows/eth-4h-market-handoff.yml'
   pull_request:
     branches: [main]
     paths:
@@ -23,6 +24,7 @@ on:
       - 'scripts/ci/**'
       - 'scripts/deploy/**'
       - '.github/workflows/cicd.yml'
+      - '.github/workflows/eth-4h-market-handoff.yml'
   workflow_dispatch:
     inputs:
       rollback:
@@ -77,7 +79,7 @@ jobs:
       - name: Focused tests
         working-directory: rust_quant
         run: |
-          bash -n scripts/deploy/promote_stable.sh scripts/deploy/rollback.sh scripts/deploy/deploy_core.sh scripts/deploy/deploy_core_remote.sh scripts/deploy/verify_production.sh
+          bash -n scripts/deploy/promote_stable.sh scripts/deploy/rollback.sh scripts/deploy/deploy_core.sh scripts/deploy/deploy_core_remote.sh scripts/deploy/deploy_eth_4h_market_handoff.sh scripts/deploy/deploy_eth_4h_market_handoff_remote.sh scripts/deploy/verify_production.sh
           cargo test -p rust-quant-cli market_velocity_live_handoff --lib -- --nocapture
           cargo check -p rust-quant-cli --bin market_velocity_live_handoff
           cargo check -p rust-quant-cli --bin quant_core_schema_ensure
@@ -160,7 +162,7 @@ jobs:
     name: Deploy Production
     runs-on: ubuntu-24.04
     needs: build-and-push
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.LEGACY_SIX_ROLE_AUTO_DEPLOY_ENABLED == 'true'
     environment:
       name: production
     concurrency:
