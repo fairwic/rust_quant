@@ -1,0 +1,116 @@
+{
+  "schema_version": "strict_visual_v22_unified_retest_machine_v1",
+  "research_level": "L2_MULTI_SYMBOL_DIAGNOSTIC",
+  "promotion_status": "stopped_at_l2_negative_cost_adjusted_edge",
+  "runtime_scope": "research_only",
+  "strategy_version": "strict_visual_consolidation_symmetric_retest_50pct_15bps_short_excess_0_39atr_ema144_neg4_65_body_0_915_maker2_taker5_slippage1_15m_research_v1",
+  "contract": {
+    "entry": "long_and_short_first_legal_retest_in_completed_bars_1_to_5",
+    "direct_entry_allowed": false,
+    "minimum_breakout_body_to_range": 0.5,
+    "minimum_directional_body_to_open": 0.0015,
+    "minimum_full_candle_amplitude": null,
+    "short_max_breakout_excess_atr": 0.39,
+    "short_min_breakout_close_vs_ema144_atr": -4.65,
+    "short_max_breakout_body_atr": 0.915,
+    "stop": "one_tick_outside_breakout_candle_extreme_with_minimum_one_atr_entry_risk",
+    "target": "one_frozen_range_height",
+    "entry_fee_bps": 2.0,
+    "entry_slippage_bps": 1.0,
+    "exit_fee_bps": 5.0,
+    "exit_slippage_bps": 1.0
+  },
+  "weak_departure": {
+    "meaning": "range_structure_departure_not_position_exit",
+    "trigger": "completed_close_outside_frozen_p90_p10_boundary_and_breakout_strength_gate_failed",
+    "strength_gate": "body_to_range_at_least_0_50_and_directional_body_to_open_at_least_0_0015",
+    "resolution_window_completed_bars": 1,
+    "return_rule": "next_completed_close_inside_inclusive_frozen_range_restores_range",
+    "consume_rule": "otherwise_old_range_ends_at_departure_bar",
+    "confirmation_bar_can_seed_later_range": true,
+    "confirmation_bar_can_upgrade_or_break_old_range": false
+  },
+  "dataset": {
+    "report_scope": "partial_data_diagnostic",
+    "universe_version": "top60_v36_direct_kline_20260721_frozen_20260723",
+    "expected_symbols": 60,
+    "included_symbols": 43,
+    "excluded_symbols": 17,
+    "full_universe_complete": false,
+    "evaluation_start_ms": 1751328000000,
+    "evaluation_end_ms": 1784470500000,
+    "evaluation_start_bjt": "2025-07-01 08:00:00",
+    "evaluation_end_bjt": "2026-07-19 22:15:00",
+    "universe_manifest_sha256": "3fd267ca5cf1ecee8199232729da0e6db917803f6e7a1b363fa84e0ba75d5a4f",
+    "l1_dataset_fingerprint_sha256": "4919b364fb4737b0da7921cd53e401adb97013597ba3049ca79c6e1e9890577f",
+    "l2_dataset_fingerprint_sha256": "eda87a30667f040cd74048e659def7453a5d49f6c81e062d012bebcb1c2ad5c4"
+  },
+  "l1": {
+    "gate_passed": true,
+    "confirmed_ranges": 41037,
+    "parent_upgrades": 26452,
+    "qualified_candidates": 9986,
+    "long_candidates": 7857,
+    "short_candidates": 2129,
+    "short_signal_gate_rejections": 6012,
+    "covered_symbols": 43,
+    "covered_shanghai_months": 13,
+    "direction_time_event_clusters_60m": 3258,
+    "direct_signals": 0,
+    "acceptance_unresolved": 0,
+    "unexpected_legacy_rejections": 0,
+    "invalid_structural_stops": 0,
+    "invalid_minimum_one_atr_contracts": 0,
+    "weak_upper": {
+      "pending": 5354,
+      "returned": 2065,
+      "consumed": 3289,
+      "unresolved": 0,
+      "maximum_resolution_age_bars": 1
+    },
+    "weak_lower": {
+      "pending": 6287,
+      "returned": 2375,
+      "consumed": 3912,
+      "unresolved": 0,
+      "maximum_resolution_age_bars": 1
+    }
+  },
+  "l2": {
+    "long": {
+      "trades": 7519,
+      "zero_cost_average_net_r": -0.05206056928073165,
+      "zero_cost_profit_factor": 0.9110739107574384,
+      "cost_adjusted_average_net_r": -0.186378893988996,
+      "cost_adjusted_profit_factor": 0.7215209882453892,
+      "cost_adjusted_net_r": -1401.3829039032607
+    },
+    "short": {
+      "trades": 2091,
+      "zero_cost_average_net_r": 0.007110355633637879,
+      "zero_cost_profit_factor": 1.0120957416727496,
+      "cost_adjusted_average_net_r": -0.12679345969592878,
+      "cost_adjusted_profit_factor": 0.8110265795068977,
+      "cost_adjusted_net_r": -265.12512422418706
+    },
+    "combined_strict_visual": {
+      "trades": 9610,
+      "zero_cost_average_net_r": -0.039185813401861024,
+      "zero_cost_profit_factor_derived": 0.9331253659023178,
+      "cost_adjusted_average_net_r": -0.1734139467354264,
+      "cost_adjusted_profit_factor_derived": 0.7410344746151533,
+      "cost_adjusted_net_r": -1666.5080281274478
+    }
+  },
+  "tradingview": {
+    "title": "15m Strict Visual Consolidation Breakout - V22 Unified Retest Research",
+    "script_id": "USER;94e64236d9a0452fb49dd9f4662127ab",
+    "saved_version": "4.0",
+    "compile_errors": 0,
+    "compile_warnings": 1,
+    "warning": "CW10003_f_evaluate_range_consistency",
+    "local_source_sha256": "3d984cf2869132a2018734416d5846ef3d74da745a1d36fff3d3e5268eb7ec46",
+    "local_source_lines": 1041,
+    "v12_saved_script_overwritten": false
+  }
+}

@@ -1,0 +1,153 @@
+{
+  "schema_version": "strict_visual_v39_dual_boundary_l1_v1",
+  "research_level": "L1_OUTCOME_BLIND_PARITY",
+  "report_scope": "fixed_completed_candle_windows_only",
+  "baseline_variant": "v31_internal_impulse_body_50pct_range_guard_acceptance_retention_75pct_maker2_taker5_slippage1",
+  "single_variable": "visual_parent_attached_to_unchanged_trade_core",
+  "label_boundary": "No order, entry, exit, stop, target, MFE, MAE, final R, PnL, or win/loss field was read or serialized.",
+  "dataset_fingerprint_sha256": "ce8b7c31cb720e50f32689c35d5c1b28148f55b0b07f82ed4ee4be7fce8f648c",
+  "evaluation_start_ms": 1785168000000,
+  "evaluation_end_exclusive_ms": 1786248900000,
+  "requested_symbols": 61,
+  "included_symbols": 53,
+  "excluded_symbols": [
+    {
+      "symbol": "0G-USDT-SWAP",
+      "warmup_expected": 5760,
+      "warmup_loaded": 4559,
+      "evaluation_expected": 1201,
+      "evaluation_loaded": 1201,
+      "reason": "warmup_incomplete"
+    },
+    {
+      "symbol": "NIGHT-USDT-SWAP",
+      "warmup_expected": 5760,
+      "warmup_loaded": 4558,
+      "evaluation_expected": 1201,
+      "evaluation_loaded": 1201,
+      "reason": "warmup_incomplete"
+    },
+    {
+      "symbol": "OL-USDT-SWAP",
+      "warmup_expected": 5760,
+      "warmup_loaded": 4558,
+      "evaluation_expected": 1201,
+      "evaluation_loaded": 1201,
+      "reason": "warmup_incomplete"
+    },
+    {
+      "symbol": "RESOLV-USDT-SWAP",
+      "warmup_expected": 5760,
+      "warmup_loaded": 4846,
+      "evaluation_expected": 1201,
+      "evaluation_loaded": 1201,
+      "reason": "warmup_incomplete"
+    },
+    {
+      "symbol": "ROBO-USDT-SWAP",
+      "warmup_expected": 5760,
+      "warmup_loaded": 4846,
+      "evaluation_expected": 1201,
+      "evaluation_loaded": 1201,
+      "reason": "warmup_incomplete"
+    },
+    {
+      "symbol": "SOON-USDT-SWAP",
+      "warmup_expected": 5760,
+      "warmup_loaded": 4558,
+      "evaluation_expected": 1201,
+      "evaluation_loaded": 1201,
+      "reason": "warmup_incomplete"
+    },
+    {
+      "symbol": "SOPH-USDT-SWAP",
+      "warmup_expected": 5760,
+      "warmup_loaded": 4558,
+      "evaluation_expected": 1201,
+      "evaluation_loaded": 1201,
+      "reason": "warmup_incomplete"
+    },
+    {
+      "symbol": "USELESS-USDT-SWAP",
+      "warmup_expected": 5760,
+      "warmup_loaded": 4558,
+      "evaluation_expected": 1201,
+      "evaluation_loaded": 1201,
+      "reason": "warmup_incomplete"
+    }
+  ],
+  "evaluated_windows": 509224,
+  "baseline_valid_windows": 19735,
+  "dual_valid_windows": 19735,
+  "identity_presence_violations": 0,
+  "trade_core_field_violations": 0,
+  "visual_parent_changed_windows": 14033,
+  "visual_parent_changed_ratio": 0.7110717000253357,
+  "visual_parent_changed_symbols": 53,
+  "visual_parent_changed_hour_event_clusters": 301,
+  "body_inclusion_violations": 0,
+  "trade_core_containment_violations": 0,
+  "sweep_allowance_violations": 0,
+  "target": {
+    "symbol_present": true,
+    "end_time_present": true,
+    "window_start_time_ms": 1785105900000,
+    "baseline": {
+      "start_index": 5691,
+      "first_confirmation_index": 5738,
+      "boundary_confirmation_index": 5738,
+      "length_bars": 48,
+      "upper": 65511.5,
+      "lower": 65050.0,
+      "containment_ratio": 0.9583333333333334,
+      "direction_efficiency": 0.0030881017257039056,
+      "edge_transition_count": 3,
+      "upper_touch_groups": 3,
+      "lower_touch_groups": 3,
+      "upper_drift_ratio": 0.060021668472382154,
+      "lower_drift_ratio": 0.18743228602383533
+    },
+    "dual": {
+      "trade_core": {
+        "start_index": 5691,
+        "first_confirmation_index": 5738,
+        "boundary_confirmation_index": 5738,
+        "length_bars": 48,
+        "upper": 65511.5,
+        "lower": 65050.0,
+        "containment_ratio": 0.9583333333333334,
+        "direction_efficiency": 0.0030881017257039056,
+        "edge_transition_count": 3,
+        "upper_touch_groups": 3,
+        "lower_touch_groups": 3,
+        "upper_drift_ratio": 0.060021668472382154,
+        "lower_drift_ratio": 0.18743228602383533
+      },
+      "visual_parent": {
+        "allowed_sweep_wicks_per_side": 4,
+        "wick_upper": 65511.5,
+        "wick_lower": 65050.0,
+        "body_upper": 65573.1,
+        "body_lower": 64991.6,
+        "upper": 65573.1,
+        "lower": 64991.6,
+        "upper_wicks_outside": 3,
+        "lower_wicks_outside": 2
+      }
+    },
+    "body_0915": {
+      "time_ms": 1785114900000,
+      "open": 65022.5,
+      "close": 64991.6,
+      "included_by_visual_parent": true
+    },
+    "body_1415": {
+      "time_ms": 1785132900000,
+      "open": 65573.1,
+      "close": 65471.5,
+      "included_by_visual_parent": true
+    },
+    "passed": true
+  },
+  "l1_gate_passed": true
+}

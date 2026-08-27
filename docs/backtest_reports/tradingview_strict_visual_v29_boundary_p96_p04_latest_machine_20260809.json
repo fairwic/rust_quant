@@ -1,0 +1,57 @@
+{
+  "schema_version": "strict_visual_boundary_p96_p04_l1_l2_summary_v1",
+  "research_status": "stopped_l2_cost_edge_negative",
+  "single_variable": "range_high_percentile_90_to_96_and_low_percentile_10_to_4",
+  "dataset_fingerprint_sha256": "4b5245555237072f5c1ed7169634037879e7cf3997ea9331be66ba10a2a752f1",
+  "l1": {
+    "source_path": "/tmp/strict-visual-v29-boundary-p96-p04-l1-20260809.json",
+    "source_sha256": "aca50ab00fde6359c8d525db8ddb4a8cc37d2bb2ad21cde387149b68a05d80aa",
+    "included_symbols": 53,
+    "baseline_confirmed_sources": 699,
+    "candidate_confirmed_sources": 520,
+    "candidate_long_sources": 230,
+    "candidate_short_sources": 290,
+    "candidate_direction_hour_event_clusters": 237,
+    "shared_range_windows": 843,
+    "monotonic_range_violations": 0,
+    "changed_confirmed_identities": 1053,
+    "gate_passed": true
+  },
+  "l2": {
+    "baseline_source_path": "/tmp/strict-visual-latest-extension-20260809.json",
+    "baseline_source_sha256": "a72bd9104cd5bd603a498e02f32608c84581c56ac069f2c0edfd20bafff4abb6",
+    "candidate_source_path": "/tmp/strict-visual-v29-boundary-p96-p04-l2-20260809.json",
+    "candidate_source_sha256": "402a2a4a597f139bfc56b0a4e0c6b264df826f1379da57719fa637daa6214a41",
+    "baseline": {
+      "trades": 661,
+      "wins": 280,
+      "losses": 381,
+      "win_rate_percent": 42.36006051437216,
+      "net_r": -153.7141690190307,
+      "average_net_r": -0.23254791077009182,
+      "profit_factor_r": 0.6380196467892474,
+      "chronological_max_drawdown_r": 156.66563337443142,
+      "direction_hour_event_clusters": 268
+    },
+    "candidate": {
+      "trades": 490,
+      "wins": 183,
+      "losses": 307,
+      "win_rate_percent": 37.3469387755102,
+      "net_r": -153.39106267173233,
+      "average_net_r": -0.3130429850443517,
+      "profit_factor_r": 0.5562424190293292,
+      "chronological_max_drawdown_r": 162.85503327950494,
+      "direction_hour_event_clusters": 237
+    },
+    "delta_candidate_minus_baseline": {
+      "trades": -171,
+      "win_rate_percentage_points": -5.013121738861955,
+      "net_r": 0.3231063472983635,
+      "average_net_r": -0.08049507427425986,
+      "profit_factor_r": -0.08177722775991814,
+      "chronological_max_drawdown_r": 6.189399905073515,
+      "direction_hour_event_clusters": -31
+    }
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "schema_version": "strict_visual_v27_l1_target_audit_v1",
+  "research_level": "L1",
+  "outcome_fields_read_for_decision": false,
+  "baseline_variant": "V23AcceptanceRetention75CostReplay",
+  "candidate_variant": "V27AcceptanceRetention75BodyMidpointHold",
+  "target": {
+    "symbol": "BTC-USDT-SWAP",
+    "signal_time_ms": 1785460500000,
+    "signal_time_bjt": "2026-07-31 09:15:00",
+    "old_entry_time_ms": 1785461400000,
+    "old_entry_time_bjt": "2026-07-31 09:30:00",
+    "direction": "long"
+  },
+  "frozen_range": {
+    "upper": 64990.0,
+    "height": 460.2,
+    "length_bars": 48
+  },
+  "breakout_bar": {
+    "time_bjt": "2026-07-31 09:00:00",
+    "open": 64704.3,
+    "high": 65390.8,
+    "low": 64704.3,
+    "close": 65166.6,
+    "body_midpoint": 64935.45
+  },
+  "first_legal_confirmation_bar": {
+    "time_bjt": "2026-07-31 09:15:00",
+    "open": 65166.5,
+    "high": 65212.3,
+    "low": 65000.4,
+    "close": 65156.6,
+    "minimum_acceptance_close": 65122.45,
+    "actual_acceptance_retention_ratio": 0.943374858437,
+    "holds_breakout_body_midpoint": true,
+    "passes_v27_candidate_gate": true
+  },
+  "bar_highlighted_in_user_screenshot": {
+    "time_bjt": "2026-07-31 09:30:00",
+    "open": 65156.6,
+    "high": 65164.5,
+    "low": 64801.6,
+    "close": 64808.1,
+    "role_under_baseline": "entry_bar_after_signal",
+    "available_when_old_entry_was_decided": false
+  },
+  "l1_decision": {
+    "target_is_rejected_by_candidate": false,
+    "preregistered_target_condition_satisfied": false,
+    "status": "stopped_l1_target_mismatch",
+    "reason": "The completed confirmation bar holds both the 75% acceptance threshold and the breakout-body midpoint. The collapse shown by the user completes only after the baseline entry decision."
+  }
+}

@@ -1,0 +1,1998 @@
+{
+  "schema_version": "strict_visual_v23_acceptance_retention_75_cost_l2_v1",
+  "generated_at_ms": 1786246628512,
+  "level": "L2_multi_symbol_cost_diagnostic",
+  "research_status": "stopped_l2_cost_edge_negative",
+  "promotion_status": "research_only_not_promoted",
+  "single_variable": "first_v23_legal_confirmation_acceptance_retention_ratio",
+  "frozen_threshold": 0.75,
+  "forbidden_threshold_search": "no_0_70_0_80_or_other_thresholds_were_evaluated",
+  "preregistration_sha256": "1ef35898cfa37cdb6eb76633a64a3cf0508864cbca7633af6853d5202e6a826d",
+  "source_sha256": {
+    "baseline_replay_json": "25284c4662cc078228380ede5846fa077de8c081418b696426714035d0991995",
+    "candidate_replay_json": "6fe731d4115c369124244c59c65c204269b4616ed110d0b2a2f37d1582d7b17d",
+    "quality_oracle_json": "009188f981aefd22251fab8f5bef2d0b10e0f3559b23d97c21da4466de24720a"
+  },
+  "dataset": {
+    "universe_version": "top60_v36_direct_kline_20260721_frozen_20260723",
+    "universe_manifest_sha256": "3fd267ca5cf1ecee8199232729da0e6db917803f6e7a1b363fa84e0ba75d5a4f",
+    "dataset_fingerprint_sha256": "eda87a30667f040cd74048e659def7453a5d49f6c81e062d012bebcb1c2ad5c4",
+    "evaluation_start_ms": 1751328000000,
+    "evaluation_end_ms": 1784470500000,
+    "manifest_evaluation_end_ms": 1784470500000,
+    "evaluation_window_was_clipped": false,
+    "expected_symbols": 60,
+    "included_symbols": 43,
+    "excluded_symbols": [
+      {
+        "evaluation_expected": 36826,
+        "evaluation_loaded": 0,
+        "evaluation_missing": 36826,
+        "reason": "评价窗口与预热窗口均不完整",
+        "symbol": "OL-USDT-SWAP",
+        "warmup_expected": 5760,
+        "warmup_loaded": 5728
+      },
+      {
+        "evaluation_expected": 36826,
+        "evaluation_loaded": 20256,
+        "evaluation_missing": 16570,
+        "reason": "评价窗口与预热窗口均不完整",
+        "symbol": "GIGGLE-USDT-SWAP",
+        "warmup_expected": 5760,
+        "warmup_loaded": 0
+      },
+      {
+        "evaluation_expected": 36826,
+        "evaluation_loaded": 8832,
+        "evaluation_missing": 27994,
+        "reason": "评价窗口与预热窗口均不完整",
+        "symbol": "ROBO-USDT-SWAP",
+        "warmup_expected": 5760,
+        "warmup_loaded": 0
+      },
+      {
+        "evaluation_expected": 36826,
+        "evaluation_loaded": 17376,
+        "evaluation_missing": 19450,
+        "reason": "评价窗口与预热窗口均不完整",
+        "symbol": "LIT-USDT-SWAP",
+        "warmup_expected": 5760,
+        "warmup_loaded": 0
+      },
+      {
+        "evaluation_expected": 36826,
+        "evaluation_loaded": 32128,
+        "evaluation_missing": 4698,
+        "reason": "评价窗口与预热窗口均不完整",
+        "symbol": "RESOLV-USDT-SWAP",
+        "warmup_expected": 5760,
+        "warmup_loaded": 32
+      },
+      {
+        "evaluation_expected": 36826,
+        "evaluation_loaded": 5920,
+        "evaluation_missing": 30906,
+        "reason": "评价窗口与预热窗口均不完整",
+        "symbol": "SOPH-USDT-SWAP",
+        "warmup_expected": 5760,
+        "warmup_loaded": 2912
+      },
+      {
+        "evaluation_expected": 36826,
+        "evaluation_loaded": 5856,
+        "evaluation_missing": 30970,
+        "reason": "评价窗口与预热窗口均不完整",
+        "symbol": "BSB-USDT-SWAP",
+        "warmup_expected": 5760,
+        "warmup_loaded": 0
+      },
+      {
+        "evaluation_expected": 36826,
+        "evaluation_loaded": 5856,
+        "evaluation_missing": 30970,
+        "reason": "评价窗口与预热窗口均不完整",
+        "symbol": "UB-USDT-SWAP",
+        "warmup_expected": 5760,
+        "warmup_loaded": 0
+      },
+      {
+        "evaluation_expected": 36826,
+        "evaluation_loaded": 8832,
+        "evaluation_missing": 27994,
+        "reason": "评价窗口与预热窗口均不完整",
+        "symbol": "0G-USDT-SWAP",
+        "warmup_expected": 5760,
+        "warmup_loaded": 0
+      },
+      {
+        "evaluation_expected": 36826,
+        "evaluation_loaded": 8640,
+        "evaluation_missing": 28186,
+        "reason": "评价窗口与预热窗口均不完整",
+        "symbol": "NIGHT-USDT-SWAP",
+        "warmup_expected": 5760,
+        "warmup_loaded": 0
+      },
+      {
+        "evaluation_expected": 36826,
+        "evaluation_loaded": 17664,
+        "evaluation_missing": 19162,
+        "reason": "评价窗口与预热窗口均不完整",
+        "symbol": "USELESS-USDT-SWAP",
+        "warmup_expected": 5760,
+        "warmup_loaded": 0
+      },
+      {
+        "evaluation_expected": 36826,
+        "evaluation_loaded": 5856,
+        "evaluation_missing": 30970,
+        "reason": "评价窗口与预热窗口均不完整",
+        "symbol": "OPG-USDT-SWAP",
+        "warmup_expected": 5760,
+        "warmup_loaded": 0
+      },
+      {
+        "evaluation_expected": 36826,
+        "evaluation_loaded": 20352,
+        "evaluation_missing": 16474,
+        "reason": "评价窗口与预热窗口均不完整",
+        "symbol": "ZEC-USDT-SWAP",
+        "warmup_expected": 5760,
+        "warmup_loaded": 0
+      },
+      {
+        "evaluation_expected": 36826,
+        "evaluation_loaded": 5856,
+        "evaluation_missing": 30970,
+        "reason": "评价窗口与预热窗口均不完整",
+        "symbol": "MEGA-USDT-SWAP",
+        "warmup_expected": 5760,
+        "warmup_loaded": 0
+      },
+      {
+        "evaluation_expected": 36826,
+        "evaluation_loaded": 17376,
+        "evaluation_missing": 19450,
+        "reason": "评价窗口与预热窗口均不完整",
+        "symbol": "PIPPIN-USDT-SWAP",
+        "warmup_expected": 5760,
+        "warmup_loaded": 0
+      },
+      {
+        "evaluation_expected": 36826,
+        "evaluation_loaded": 26208,
+        "evaluation_missing": 10618,
+        "reason": "评价窗口与预热窗口均不完整",
+        "symbol": "ASTER-USDT-SWAP",
+        "warmup_expected": 5760,
+        "warmup_loaded": 0
+      },
+      {
+        "evaluation_expected": 36826,
+        "evaluation_loaded": 17664,
+        "evaluation_missing": 19162,
+        "reason": "评价窗口与预热窗口均不完整",
+        "symbol": "SOON-USDT-SWAP",
+        "warmup_expected": 5760,
+        "warmup_loaded": 0
+      }
+    ],
+    "full_universe_complete": false
+  },
+  "execution_cost_contract": {
+    "entry_fee_bps": 2.0,
+    "entry_slippage_bps": 1.0,
+    "exit_fee_bps": 5.0,
+    "exit_slippage_bps": 1.0
+  },
+  "raw_subset_audit": {
+    "eligible_symbols": 43,
+    "baseline_v23_raw_confirmations": 15998,
+    "retention_75_raw_confirmations": 10757,
+    "retention_75_share_percent": 67.23965495686961,
+    "retention_75_long_confirmations": 5226,
+    "retention_75_short_confirmations": 5531,
+    "retention_75_discovery_confirmations": 6925,
+    "retention_75_validation_confirmations": 3832,
+    "retention_75_symbols": 43,
+    "retention_75_direction_hour_event_clusters": 5466,
+    "retention_75_minimum_observed": 0.7499999999998644,
+    "raw_identity_duplicates": 0,
+    "candidate_actual_intents_absent_from_raw_retention_75_oracle": 0,
+    "candidate_actual_intents_not_present_in_baseline_actual_intents": 34,
+    "interpretation": "raw subset is validated against the original V23 confirmation-time oracle; actual entry intents need not be a subset of baseline executions because rejecting an earlier trade can free the single-symbol position for a later oracle-qualified signal"
+  },
+  "baseline": {
+    "strategy_version": "strict_visual_consolidation_symmetric_retest_50pct_15bps_no_short_gates_maker2_taker5_slippage1_15m_research_v1",
+    "variant": "v23_unified_retest_no_short_gates_maker2_taker5_slippage1",
+    "execution": {
+      "strict_candidate_intents": 15258,
+      "closed_trades": 15238,
+      "non_closed_status_counts": {
+        "blocked": 16,
+        "pending_at_end": 1,
+        "possibly_open_at_end": 3
+      },
+      "max_concurrent_positions_same_timestamp_entries_first": 20,
+      "max_concurrent_initial_r": 20,
+      "published_family_trade_count": 15238,
+      "published_family_net_r": -2145.416404107912,
+      "ledger_matches_published_family_metrics": true
+    },
+    "metrics": {
+      "overall": {
+        "trades": 15238,
+        "wins": 6383,
+        "losses": 8855,
+        "flats": 0,
+        "win_rate_percent": 41.888699304370654,
+        "net_r": -2145.416404107906,
+        "average_net_r": -0.1407938314810281,
+        "gross_profit_r": 7810.397562951187,
+        "gross_loss_r": 9955.81396705908,
+        "profit_factor_r": 0.7845061778769211,
+        "profit_factor_r_is_infinite": false,
+        "chronological_closed_equity_max_drawdown_r": 2179.6738458900677,
+        "reference_100r_max_drawdown_percent": 2179.6738458900677,
+        "reference_100r_ending_equity_r": -2045.4164041079052,
+        "reference_100r_minimum_equity_r": -2046.3544146331324,
+        "reference_equity_breached": true,
+        "distinct_symbols": 43,
+        "direction_hour_event_clusters": 4034
+      },
+      "discovery": {
+        "trades": 9726,
+        "wins": 4118,
+        "losses": 5608,
+        "flats": 0,
+        "win_rate_percent": 42.3401192679416,
+        "net_r": -1187.8052699651062,
+        "average_net_r": -0.12212680135359924,
+        "gross_profit_r": 5086.94988877978,
+        "gross_loss_r": 6274.755158744906,
+        "profit_factor_r": 0.8107009373410015,
+        "profit_factor_r_is_infinite": false,
+        "chronological_closed_equity_max_drawdown_r": 1261.0993522239876,
+        "reference_100r_max_drawdown_percent": 1261.0993522239876,
+        "reference_100r_ending_equity_r": -1087.8052699651078,
+        "reference_100r_minimum_equity_r": -1127.779920967052,
+        "reference_equity_breached": true,
+        "distinct_symbols": 43,
+        "direction_hour_event_clusters": 2437
+      },
+      "validation": {
+        "trades": 5512,
+        "wins": 2265,
+        "losses": 3247,
+        "flats": 0,
+        "win_rate_percent": 41.0921625544267,
+        "net_r": -957.6111341427948,
+        "average_net_r": -0.17373206352372908,
+        "gross_profit_r": 2723.4476741713875,
+        "gross_loss_r": 3681.058808314173,
+        "profit_factor_r": 0.7398544321052708,
+        "profit_factor_r_is_infinite": false,
+        "chronological_closed_equity_max_drawdown_r": 970.849822784457,
+        "reference_100r_max_drawdown_percent": 970.849822784457,
+        "reference_100r_ending_equity_r": -857.6111341427926,
+        "reference_100r_minimum_equity_r": -858.5491446680201,
+        "reference_equity_breached": true,
+        "distinct_symbols": 43,
+        "direction_hour_event_clusters": 1597
+      },
+      "long": {
+        "trades": 7527,
+        "wins": 3042,
+        "losses": 4485,
+        "flats": 0,
+        "win_rate_percent": 40.41450777202073,
+        "net_r": -1407.5628992450177,
+        "average_net_r": -0.18700184658496316,
+        "gross_profit_r": 3610.8500887787,
+        "gross_loss_r": 5018.412988023703,
+        "profit_factor_r": 0.7195203139709483,
+        "profit_factor_r_is_infinite": false,
+        "chronological_closed_equity_max_drawdown_r": 1435.9848142826909,
+        "reference_100r_max_drawdown_percent": 1435.9848142826909,
+        "reference_100r_ending_equity_r": -1307.5628992450163,
+        "reference_100r_minimum_equity_r": -1307.6774188005566,
+        "reference_equity_breached": true,
+        "distinct_symbols": 43,
+        "direction_hour_event_clusters": 2049
+      },
+      "short": {
+        "trades": 7711,
+        "wins": 3341,
+        "losses": 4370,
+        "flats": 0,
+        "win_rate_percent": 43.32771365581637,
+        "net_r": -737.8535048628913,
+        "average_net_r": -0.09568843274061617,
+        "gross_profit_r": 4199.547474172471,
+        "gross_loss_r": 4937.400979035375,
+        "profit_factor_r": 0.8505583184359762,
+        "profit_factor_r_is_infinite": false,
+        "chronological_closed_equity_max_drawdown_r": 779.8851329808806,
+        "reference_100r_max_drawdown_percent": 779.8851329808806,
+        "reference_100r_ending_equity_r": -637.853504862889,
+        "reference_100r_minimum_equity_r": -641.0396808835765,
+        "reference_equity_breached": true,
+        "distinct_symbols": 43,
+        "direction_hour_event_clusters": 1985
+      }
+    },
+    "concentration": {
+      "top_five_winning_trades": [
+        {
+          "symbol": "TURBO-USDT-SWAP",
+          "direction": "short",
+          "signal_time_bjt": "2025-12-21 08:15:00",
+          "entry_time_bjt": "2025-12-21 08:30:00",
+          "entry_price": 0.00176,
+          "exit_time_bjt": "2025-12-21 10:15:00",
+          "exit_price": 0.0017109999999999998,
+          "exit_reason": "take_profit",
+          "frozen_stop": 0.0017652,
+          "frozen_target": 0.0017109999999999998,
+          "actual_initial_stop": 0.0017654,
+          "actual_target": 0.0017109999999999998,
+          "exit_policy": "Fixed",
+          "signal_atr": 5.3545110747631295e-6,
+          "range_height": 0.00005199999999999996,
+          "range_length_bars": 96,
+          "cost_adjusted_net_r": 8.786185185185188
+        },
+        {
+          "symbol": "YFI-USDT-SWAP",
+          "direction": "short",
+          "signal_time_bjt": "2025-12-04 20:00:00",
+          "entry_time_bjt": "2025-12-04 20:15:00",
+          "entry_price": 3872.0,
+          "exit_time_bjt": "2025-12-05 03:15:00",
+          "exit_price": 3761.0,
+          "exit_reason": "take_profit",
+          "frozen_stop": 3879.0,
+          "frozen_target": 3761.0,
+          "actual_initial_stop": 3886.0,
+          "actual_target": 3761.0,
+          "exit_policy": "Fixed",
+          "signal_atr": 13.213719310343022,
+          "range_height": 116.0,
+          "range_length_bars": 96,
+          "cost_adjusted_net_r": 7.684414285714285
+        },
+        {
+          "symbol": "BTC-USDT-SWAP",
+          "direction": "long",
+          "signal_time_bjt": "2025-07-16 15:45:00",
+          "entry_time_bjt": "2025-07-16 16:00:00",
+          "entry_price": 118216.8,
+          "exit_time_bjt": "2025-07-17 05:00:00",
+          "exit_price": 120025.3,
+          "exit_reason": "take_profit",
+          "frozen_stop": 118059.5,
+          "frozen_target": 120025.3,
+          "actual_initial_stop": 117959.1,
+          "actual_target": 120025.3,
+          "exit_policy": "Fixed",
+          "signal_atr": 257.6852937828679,
+          "range_height": 1844.5,
+          "range_length_bars": 96,
+          "cost_adjusted_net_r": 6.6007752425301485
+        },
+        {
+          "symbol": "BLUR-USDT-SWAP",
+          "direction": "short",
+          "signal_time_bjt": "2026-06-30 16:45:00",
+          "entry_time_bjt": "2026-06-30 17:00:00",
+          "entry_price": 0.01446,
+          "exit_time_bjt": "2026-06-30 20:45:00",
+          "exit_price": 0.01407,
+          "exit_reason": "take_profit",
+          "frozen_stop": 0.014520000000000002,
+          "frozen_target": 0.01407,
+          "actual_initial_stop": 0.014520000000000002,
+          "actual_target": 0.01407,
+          "exit_policy": "Fixed",
+          "signal_atr": 0.000047869085733609806,
+          "range_height": 0.00041000000000000064,
+          "range_length_bars": 96,
+          "cost_adjusted_net_r": 6.286999999999888
+        },
+        {
+          "symbol": "ZRO-USDT-SWAP",
+          "direction": "long",
+          "signal_time_bjt": "2026-01-13 17:30:00",
+          "entry_time_bjt": "2026-01-13 17:45:00",
+          "entry_price": 1.488,
+          "exit_time_bjt": "2026-01-13 21:30:00",
+          "exit_price": 1.527,
+          "exit_reason": "take_profit",
+          "frozen_stop": 1.485,
+          "frozen_target": 1.527,
+          "actual_initial_stop": 1.482,
+          "actual_target": 1.527,
+          "exit_policy": "Fixed",
+          "signal_atr": 0.005819739088095105,
+          "range_height": 0.04000000000000003,
+          "range_length_bars": 96,
+          "cost_adjusted_net_r": 6.272900000000019
+        }
+      ],
+      "top_five_winning_gross_profit_share_percent": 0.4562030860304392,
+      "after_removing_top_five_winners": {
+        "trades": 15233,
+        "wins": 6378,
+        "losses": 8855,
+        "flats": 0,
+        "win_rate_percent": 41.869625155911514,
+        "net_r": -2181.0476788213364,
+        "average_net_r": -0.14317912944405806,
+        "gross_profit_r": 7774.766288237758,
+        "gross_loss_r": 9955.81396705908,
+        "profit_factor_r": 0.7809272364833473,
+        "profit_factor_r_is_infinite": false,
+        "chronological_closed_equity_max_drawdown_r": 2215.3051206034984,
+        "reference_100r_max_drawdown_percent": 2215.3051206034984,
+        "reference_100r_ending_equity_r": -2081.047678821336,
+        "reference_100r_minimum_equity_r": -2081.985689346563,
+        "reference_equity_breached": true,
+        "distinct_symbols": 43,
+        "direction_hour_event_clusters": 4034
+      },
+      "symbol_contributions_descending": [
+        {
+          "key": "MEW-USDT-SWAP",
+          "trades": 329,
+          "net_r": 8.05693023553322,
+          "average_net_r": 0.02448914965207666
+        },
+        {
+          "key": "RENDER-USDT-SWAP",
+          "trades": 358,
+          "net_r": 4.022623651320857,
+          "average_net_r": 0.01123637891430407
+        },
+        {
+          "key": "MERL-USDT-SWAP",
+          "trades": 305,
+          "net_r": -5.480315604346132,
+          "average_net_r": -0.017968247883102074
+        },
+        {
+          "key": "PNUT-USDT-SWAP",
+          "trades": 355,
+          "net_r": -19.599443655162055,
+          "average_net_r": -0.05520970043707621
+        },
+        {
+          "key": "UMA-USDT-SWAP",
+          "trades": 339,
+          "net_r": -23.915839070121457,
+          "average_net_r": -0.07054819784696595
+        },
+        {
+          "key": "WIF-USDT-SWAP",
+          "trades": 338,
+          "net_r": -24.49797871609607,
+          "average_net_r": -0.07247922697069843
+        },
+        {
+          "key": "SSV-USDT-SWAP",
+          "trades": 359,
+          "net_r": -25.57473981625102,
+          "average_net_r": -0.07123882957172986
+        },
+        {
+          "key": "EIGEN-USDT-SWAP",
+          "trades": 354,
+          "net_r": -27.180478006822774,
+          "average_net_r": -0.0767810113187084
+        },
+        {
+          "key": "VIRTUAL-USDT-SWAP",
+          "trades": 354,
+          "net_r": -28.54664152867432,
+          "average_net_r": -0.08064023030698961
+        },
+        {
+          "key": "ETC-USDT-SWAP",
+          "trades": 363,
+          "net_r": -35.72297729402441,
+          "average_net_r": -0.09841040576866229
+        },
+        {
+          "key": "YFI-USDT-SWAP",
+          "trades": 388,
+          "net_r": -36.9021540604207,
+          "average_net_r": -0.09510864448562036
+        },
+        {
+          "key": "YGG-USDT-SWAP",
+          "trades": 341,
+          "net_r": -38.13133963941093,
+          "average_net_r": -0.1118221103795042
+        },
+        {
+          "key": "BLUR-USDT-SWAP",
+          "trades": 353,
+          "net_r": -39.539833920834404,
+          "average_net_r": -0.11201086096553656
+        },
+        {
+          "key": "ALGO-USDT-SWAP",
+          "trades": 368,
+          "net_r": -39.666738494179434,
+          "average_net_r": -0.10779005025592238
+        },
+        {
+          "key": "MOVE-USDT-SWAP",
+          "trades": 351,
+          "net_r": -41.82486905295294,
+          "average_net_r": -0.11915917109103402
+        },
+        {
+          "key": "IOST-USDT-SWAP",
+          "trades": 332,
+          "net_r": -41.99702185790524,
+          "average_net_r": -0.1264970537888712
+        },
+        {
+          "key": "XRP-USDT-SWAP",
+          "trades": 374,
+          "net_r": -42.83106959444705,
+          "average_net_r": -0.11452157645574078
+        },
+        {
+          "key": "AGLD-USDT-SWAP",
+          "trades": 378,
+          "net_r": -45.60870204892027,
+          "average_net_r": -0.1206579419283605
+        },
+        {
+          "key": "ORDI-USDT-SWAP",
+          "trades": 357,
+          "net_r": -46.87485673387831,
+          "average_net_r": -0.13130211970274036
+        },
+        {
+          "key": "WOO-USDT-SWAP",
+          "trades": 368,
+          "net_r": -47.768675298532635,
+          "average_net_r": -0.12980618287644738
+        },
+        {
+          "key": "HBAR-USDT-SWAP",
+          "trades": 360,
+          "net_r": -50.91892588627172,
+          "average_net_r": -0.14144146079519923
+        },
+        {
+          "key": "BAT-USDT-SWAP",
+          "trades": 355,
+          "net_r": -51.17397040124832,
+          "average_net_r": -0.14415202929929105
+        },
+        {
+          "key": "LAYER-USDT-SWAP",
+          "trades": 323,
+          "net_r": -52.42150715786597,
+          "average_net_r": -0.16229568779525066
+        },
+        {
+          "key": "BABY-USDT-SWAP",
+          "trades": 362,
+          "net_r": -53.07508746286695,
+          "average_net_r": -0.1466162637095772
+        },
+        {
+          "key": "OP-USDT-SWAP",
+          "trades": 362,
+          "net_r": -53.2175839975093,
+          "average_net_r": -0.1470099005456058
+        },
+        {
+          "key": "ADA-USDT-SWAP",
+          "trades": 354,
+          "net_r": -57.039815197197285,
+          "average_net_r": -0.16112942146100928
+        },
+        {
+          "key": "RSR-USDT-SWAP",
+          "trades": 369,
+          "net_r": -60.727659022793674,
+          "average_net_r": -0.16457360168778773
+        },
+        {
+          "key": "TURBO-USDT-SWAP",
+          "trades": 343,
+          "net_r": -62.193414349265375,
+          "average_net_r": -0.18132190772380577
+        },
+        {
+          "key": "BNB-USDT-SWAP",
+          "trades": 352,
+          "net_r": -65.2061916567275,
+          "average_net_r": -0.18524486266115767
+        },
+        {
+          "key": "ZRO-USDT-SWAP",
+          "trades": 372,
+          "net_r": -66.19333265742922,
+          "average_net_r": -0.17793906628341188
+        },
+        {
+          "key": "KSM-USDT-SWAP",
+          "trades": 347,
+          "net_r": -66.2686735744543,
+          "average_net_r": -0.19097600453733227
+        },
+        {
+          "key": "1INCH-USDT-SWAP",
+          "trades": 354,
+          "net_r": -67.71236963341534,
+          "average_net_r": -0.19127788032038232
+        },
+        {
+          "key": "ICP-USDT-SWAP",
+          "trades": 359,
+          "net_r": -67.90477389973077,
+          "average_net_r": -0.18914978802153418
+        },
+        {
+          "key": "ACT-USDT-SWAP",
+          "trades": 370,
+          "net_r": -68.51424917362101,
+          "average_net_r": -0.18517364641519193
+        },
+        {
+          "key": "ONT-USDT-SWAP",
+          "trades": 360,
+          "net_r": -70.22216966517146,
+          "average_net_r": -0.19506158240325405
+        },
+        {
+          "key": "SATS-USDT-SWAP",
+          "trades": 335,
+          "net_r": -71.82964547657814,
+          "average_net_r": -0.21441685216888995
+        },
+        {
+          "key": "NMR-USDT-SWAP",
+          "trades": 353,
+          "net_r": -72.02853244745236,
+          "average_net_r": -0.20404683412876023
+        },
+        {
+          "key": "DOGE-USDT-SWAP",
+          "trades": 337,
+          "net_r": -72.97127879785606,
+          "average_net_r": -0.21653198456337108
+        },
+        {
+          "key": "ATOM-USDT-SWAP",
+          "trades": 385,
+          "net_r": -73.25247334158423,
+          "average_net_r": -0.1902661645235954
+        },
+        {
+          "key": "LTC-USDT-SWAP",
+          "trades": 384,
+          "net_r": -73.3074379078656,
+          "average_net_r": -0.1909047862184
+        },
+        {
+          "key": "BIGTIME-USDT-SWAP",
+          "trades": 372,
+          "net_r": -77.07458166744271,
+          "average_net_r": -0.2071897356651686
+        },
+        {
+          "key": "AUCTION-USDT-SWAP",
+          "trades": 336,
+          "net_r": -86.41336160407697,
+          "average_net_r": -0.25718262382165763
+        },
+        {
+          "key": "BTC-USDT-SWAP",
+          "trades": 330,
+          "net_r": -106.1652486233529,
+          "average_net_r": -0.3217128746162209
+        }
+      ],
+      "best_symbol_removed": "MEW-USDT-SWAP",
+      "after_removing_best_symbol": {
+        "trades": 14909,
+        "wins": 6231,
+        "losses": 8678,
+        "flats": 0,
+        "win_rate_percent": 41.79354752163123,
+        "net_r": -2153.473334343442,
+        "average_net_r": -0.14444116535940987,
+        "gross_profit_r": 7604.966680099468,
+        "gross_loss_r": 9758.440014442895,
+        "profit_factor_r": 0.7793219683518885,
+        "profit_factor_r_is_infinite": false,
+        "chronological_closed_equity_max_drawdown_r": 2183.517424651922,
+        "reference_100r_max_drawdown_percent": 2183.517424651922,
+        "reference_100r_ending_equity_r": -2053.473334343439,
+        "reference_100r_minimum_equity_r": -2055.1064981628633,
+        "reference_equity_breached": true,
+        "distinct_symbols": 42,
+        "direction_hour_event_clusters": 4016
+      },
+      "month_contributions_chronological": [
+        {
+          "key": "2025-07",
+          "trades": 1412,
+          "net_r": -141.86517681507414,
+          "average_net_r": -0.10047108839594486
+        },
+        {
+          "key": "2025-08",
+          "trades": 1303,
+          "net_r": -199.1100251776086,
+          "average_net_r": -0.1528089218554172
+        },
+        {
+          "key": "2025-09",
+          "trades": 1199,
+          "net_r": -248.81556260199872,
+          "average_net_r": -0.2075192348640523
+        },
+        {
+          "key": "2025-10",
+          "trades": 1175,
+          "net_r": -96.10146063365181,
+          "average_net_r": -0.08178847713502282
+        },
+        {
+          "key": "2025-11",
+          "trades": 1183,
+          "net_r": -280.85179281454356,
+          "average_net_r": -0.2374064182709582
+        },
+        {
+          "key": "2025-12",
+          "trades": 1178,
+          "net_r": -133.3618384211324,
+          "average_net_r": -0.11321038915206486
+        },
+        {
+          "key": "2026-01",
+          "trades": 1190,
+          "net_r": -82.7978174478921,
+          "average_net_r": -0.06957799785537151
+        },
+        {
+          "key": "2026-02",
+          "trades": 1086,
+          "net_r": -4.90159605320815,
+          "average_net_r": -0.004513440196324264
+        },
+        {
+          "key": "2026-03",
+          "trades": 1269,
+          "net_r": -202.8986608047197,
+          "average_net_r": -0.1598886215955238
+        },
+        {
+          "key": "2026-04",
+          "trades": 1211,
+          "net_r": -187.23634006358165,
+          "average_net_r": -0.15461299757521194
+        },
+        {
+          "key": "2026-05",
+          "trades": 1171,
+          "net_r": -228.7769590632513,
+          "average_net_r": -0.19536888049807968
+        },
+        {
+          "key": "2026-06",
+          "trades": 1122,
+          "net_r": -171.0995433199614,
+          "average_net_r": -0.15249513664880696
+        },
+        {
+          "key": "2026-07",
+          "trades": 739,
+          "net_r": -167.59963089128087,
+          "average_net_r": -0.22679246399361416
+        }
+      ],
+      "event_cluster_count": 4034,
+      "positive_event_cluster_r": 4418.408589001715,
+      "largest_positive_event_cluster": {
+        "key": "short-1753986600000",
+        "trades": 12,
+        "net_r": 27.660075031195177,
+        "average_net_r": 2.3050062525995982
+      },
+      "largest_positive_event_cluster_share_percent": 0.6260189494481457,
+      "top_positive_event_clusters": [
+        {
+          "key": "short-1753986600000",
+          "trades": 12,
+          "net_r": 27.660075031195177,
+          "average_net_r": 2.3050062525995982
+        },
+        {
+          "key": "short-1755857700000",
+          "trades": 9,
+          "net_r": 24.647523425526398,
+          "average_net_r": 2.7386137139473776
+        },
+        {
+          "key": "short-1763522100000",
+          "trades": 11,
+          "net_r": 23.637043415324683,
+          "average_net_r": 2.14882212866588
+        },
+        {
+          "key": "short-1756138500000",
+          "trades": 15,
+          "net_r": 21.83776397583083,
+          "average_net_r": 1.4558509317220552
+        },
+        {
+          "key": "long-1761858000000",
+          "trades": 9,
+          "net_r": 21.5453526350384,
+          "average_net_r": 2.3939280705598223
+        },
+        {
+          "key": "short-1774490400000",
+          "trades": 8,
+          "net_r": 21.517284047619185,
+          "average_net_r": 2.689660505952398
+        },
+        {
+          "key": "long-1755072000000",
+          "trades": 15,
+          "net_r": 20.623855287772486,
+          "average_net_r": 1.374923685851499
+        },
+        {
+          "key": "long-1753059600000",
+          "trades": 14,
+          "net_r": 19.582495925330814,
+          "average_net_r": 1.398749708952201
+        },
+        {
+          "key": "short-1762836300000",
+          "trades": 12,
+          "net_r": 19.04973278205992,
+          "average_net_r": 1.5874777318383266
+        },
+        {
+          "key": "short-1782803700000",
+          "trades": 7,
+          "net_r": 18.9729157540732,
+          "average_net_r": 2.7104165362961714
+        }
+      ]
+    },
+    "latest_ten_losses": [
+      {
+        "symbol": "BABY-USDT-SWAP",
+        "direction": "short",
+        "signal_time_bjt": "2026-07-19 20:15:00",
+        "entry_time_bjt": "2026-07-19 20:30:00",
+        "entry_price": 0.01246,
+        "exit_time_bjt": "2026-07-19 21:00:00",
+        "exit_price": 0.01251,
+        "exit_reason": "stop_loss",
+        "frozen_stop": 0.01251,
+        "frozen_target": 0.01236,
+        "actual_initial_stop": 0.01251,
+        "actual_target": 0.01236,
+        "exit_policy": "Fixed",
+        "signal_atr": 0.00004028838920904171,
+        "range_height": 0.0001399999999999995,
+        "range_length_bars": 64,
+        "cost_adjusted_net_r": -1.2248800000000015
+      },
+      {
+        "symbol": "HBAR-USDT-SWAP",
+        "direction": "short",
+        "signal_time_bjt": "2026-07-19 20:15:00",
+        "entry_time_bjt": "2026-07-19 20:30:00",
+        "entry_price": 0.06653,
+        "exit_time_bjt": "2026-07-19 21:30:00",
+        "exit_price": 0.06668,
+        "exit_reason": "stop_loss",
+        "frozen_stop": 0.06668,
+        "frozen_target": 0.06594,
+        "actual_initial_stop": 0.06668,
+        "actual_target": 0.06594,
+        "exit_policy": "Fixed",
+        "signal_atr": 0.00012725325531637535,
+        "range_height": 0.00066999999999999,
+        "range_length_bars": 64,
+        "cost_adjusted_net_r": -1.3997800000000071
+      },
+      {
+        "symbol": "RSR-USDT-SWAP",
+        "direction": "short",
+        "signal_time_bjt": "2026-07-19 20:15:00",
+        "entry_time_bjt": "2026-07-19 20:30:00",
+        "entry_price": 0.0012,
+        "exit_time_bjt": "2026-07-19 20:45:00",
+        "exit_price": 0.001204,
+        "exit_reason": "stop_loss",
+        "frozen_stop": 0.001202,
+        "frozen_target": 0.001193,
+        "actual_initial_stop": 0.001204,
+        "actual_target": 0.001193,
+        "exit_policy": "Fixed",
+        "signal_atr": 3.352461734397135e-6,
+        "range_height": 8.999999999999894e-6,
+        "range_length_bars": 24,
+        "cost_adjusted_net_r": -1.2705999999999935
+      },
+      {
+        "symbol": "PNUT-USDT-SWAP",
+        "direction": "long",
+        "signal_time_bjt": "2026-07-19 18:45:00",
+        "entry_time_bjt": "2026-07-19 19:00:00",
+        "entry_price": 0.04131,
+        "exit_time_bjt": "2026-07-19 19:15:00",
+        "exit_price": 0.04115,
+        "exit_reason": "stop_loss",
+        "frozen_stop": 0.041170000000000005,
+        "frozen_target": 0.04184,
+        "actual_initial_stop": 0.04115,
+        "actual_target": 0.04184,
+        "exit_policy": "Fixed",
+        "signal_atr": 0.00015627113603762266,
+        "range_height": 0.0005500000000000019,
+        "range_length_bars": 96,
+        "cost_adjusted_net_r": -1.2317687499999992
+      },
+      {
+        "symbol": "MEW-USDT-SWAP",
+        "direction": "short",
+        "signal_time_bjt": "2026-07-19 18:15:00",
+        "entry_time_bjt": "2026-07-19 18:30:00",
+        "entry_price": 0.0003551,
+        "exit_time_bjt": "2026-07-19 18:45:00",
+        "exit_price": 0.0003563,
+        "exit_reason": "stop_loss",
+        "frozen_stop": 0.000356,
+        "frozen_target": 0.00035069999999999996,
+        "actual_initial_stop": 0.0003563,
+        "actual_target": 0.00035069999999999996,
+        "exit_policy": "Fixed",
+        "signal_atr": 1.1655206620626462e-6,
+        "range_height": 4.799999999999954e-6,
+        "range_length_bars": 24,
+        "cost_adjusted_net_r": -1.2669250000000056
+      },
+      {
+        "symbol": "OP-USDT-SWAP",
+        "direction": "short",
+        "signal_time_bjt": "2026-07-19 18:00:00",
+        "entry_time_bjt": "2026-07-19 18:15:00",
+        "entry_price": 0.09442,
+        "exit_time_bjt": "2026-07-19 18:45:00",
+        "exit_price": 0.0948,
+        "exit_reason": "stop_loss",
+        "frozen_stop": 0.0948,
+        "frozen_target": 0.0934,
+        "actual_initial_stop": 0.0948,
+        "actual_target": 0.0934,
+        "exit_policy": "Fixed",
+        "signal_atr": 0.0002631866628813239,
+        "range_height": 0.0012500000000000011,
+        "range_length_bars": 96,
+        "cost_adjusted_net_r": -1.2242263157894706
+      },
+      {
+        "symbol": "YFI-USDT-SWAP",
+        "direction": "long",
+        "signal_time_bjt": "2026-07-19 16:30:00",
+        "entry_time_bjt": "2026-07-19 16:45:00",
+        "entry_price": 2130.0,
+        "exit_time_bjt": "2026-07-19 17:00:00",
+        "exit_price": 2113.0,
+        "exit_reason": "stop_loss",
+        "frozen_stop": 2113.0,
+        "frozen_target": 2140.0,
+        "actual_initial_stop": 2113.0,
+        "actual_target": 2140.0,
+        "exit_policy": "Fixed",
+        "signal_atr": 8.135841283570816,
+        "range_height": 19.0,
+        "range_length_bars": 32,
+        "cost_adjusted_net_r": -1.112164705882353
+      },
+      {
+        "symbol": "SATS-USDT-SWAP",
+        "direction": "long",
+        "signal_time_bjt": "2026-07-19 16:15:00",
+        "entry_time_bjt": "2026-07-19 16:30:00",
+        "entry_price": 9.54e-9,
+        "exit_time_bjt": "2026-07-19 17:30:00",
+        "exit_price": 9.48e-9,
+        "exit_reason": "stop_loss",
+        "frozen_stop": 9.48e-9,
+        "frozen_target": 9.57e-9,
+        "actual_initial_stop": 9.48e-9,
+        "actual_target": 9.57e-9,
+        "exit_policy": "Fixed",
+        "signal_atr": 3.466108193289543e-11,
+        "range_height": 5.2999999999998886e-11,
+        "range_length_bars": 12,
+        "cost_adjusted_net_r": -1.1424999999999994
+      },
+      {
+        "symbol": "ALGO-USDT-SWAP",
+        "direction": "short",
+        "signal_time_bjt": "2026-07-19 16:00:00",
+        "entry_time_bjt": "2026-07-19 16:15:00",
+        "entry_price": 0.08242,
+        "exit_time_bjt": "2026-07-19 18:45:00",
+        "exit_price": 0.08266000000000001,
+        "exit_reason": "stop_loss",
+        "frozen_stop": 0.08266000000000001,
+        "frozen_target": 0.08205000000000001,
+        "actual_initial_stop": 0.08266000000000001,
+        "actual_target": 0.08205000000000001,
+        "exit_policy": "Fixed",
+        "signal_atr": 0.00018292706101823045,
+        "range_height": 0.0005100000000000104,
+        "range_length_bars": 12,
+        "cost_adjusted_net_r": -1.3096749999999768
+      },
+      {
+        "symbol": "ZRO-USDT-SWAP",
+        "direction": "long",
+        "signal_time_bjt": "2026-07-19 16:00:00",
+        "entry_time_bjt": "2026-07-19 16:15:00",
+        "entry_price": 0.8174,
+        "exit_time_bjt": "2026-07-19 17:45:00",
+        "exit_price": 0.811,
+        "exit_reason": "stop_loss",
+        "frozen_stop": 0.811,
+        "frozen_target": 0.8300000000000001,
+        "actual_initial_stop": 0.811,
+        "actual_target": 0.8300000000000001,
+        "exit_policy": "Fixed",
+        "signal_atr": 0.004451577954528903,
+        "range_height": 0.015999999999999903,
+        "range_length_bars": 24,
+        "cost_adjusted_net_r": -1.1143468750000007
+      }
+    ]
+  },
+  "candidate": {
+    "strategy_version": "strict_visual_consolidation_symmetric_retest_50pct_15bps_no_short_gates_acceptance_retention_75pct_maker2_taker5_slippage1_15m_research_v1",
+    "variant": "v23_acceptance_retention_75pct_maker2_taker5_slippage1",
+    "execution": {
+      "strict_candidate_intents": 10216,
+      "closed_trades": 10211,
+      "non_closed_status_counts": {
+        "blocked": 1,
+        "pending_at_end": 1,
+        "possibly_open_at_end": 3
+      },
+      "max_concurrent_positions_same_timestamp_entries_first": 16,
+      "max_concurrent_initial_r": 16,
+      "published_family_trade_count": 10211,
+      "published_family_net_r": -1277.6909809237543,
+      "ledger_matches_published_family_metrics": true
+    },
+    "metrics": {
+      "overall": {
+        "trades": 10211,
+        "wins": 4627,
+        "losses": 5584,
+        "flats": 0,
+        "win_rate_percent": 45.313877191264325,
+        "net_r": -1277.690980923759,
+        "average_net_r": -0.1251288787507354,
+        "gross_profit_r": 4919.6832365059545,
+        "gross_loss_r": 6197.374217429686,
+        "profit_factor_r": 0.7938334952679936,
+        "profit_factor_r_is_infinite": false,
+        "chronological_closed_equity_max_drawdown_r": 1299.2333267862375,
+        "reference_100r_max_drawdown_percent": 1299.2333267862375,
+        "reference_100r_ending_equity_r": -1177.6909809237538,
+        "reference_100r_minimum_equity_r": -1179.8995914489813,
+        "reference_equity_breached": true,
+        "distinct_symbols": 43,
+        "direction_hour_event_clusters": 3609
+      },
+      "discovery": {
+        "trades": 6553,
+        "wins": 2998,
+        "losses": 3555,
+        "flats": 0,
+        "win_rate_percent": 45.750038150465436,
+        "net_r": -704.4227627216546,
+        "average_net_r": -0.10749622504527005,
+        "gross_profit_r": 3227.5070343626344,
+        "gross_loss_r": 3931.9297970842895,
+        "profit_factor_r": 0.8208455391945152,
+        "profit_factor_r_is_infinite": false,
+        "chronological_closed_equity_max_drawdown_r": 749.9538458727253,
+        "reference_100r_max_drawdown_percent": 749.9538458727253,
+        "reference_100r_ending_equity_r": -604.4227627216527,
+        "reference_100r_minimum_equity_r": -630.620110535469,
+        "reference_equity_breached": true,
+        "distinct_symbols": 43,
+        "direction_hour_event_clusters": 2183
+      },
+      "validation": {
+        "trades": 3658,
+        "wins": 1629,
+        "losses": 2029,
+        "flats": 0,
+        "win_rate_percent": 44.532531437944236,
+        "net_r": -573.2682182021011,
+        "average_net_r": -0.1567162980322857,
+        "gross_profit_r": 1692.1762021433083,
+        "gross_loss_r": 2265.444420345413,
+        "profit_factor_r": 0.7469511001666073,
+        "profit_factor_r_is_infinite": false,
+        "chronological_closed_equity_max_drawdown_r": 576.9125359773266,
+        "reference_100r_max_drawdown_percent": 576.9125359773266,
+        "reference_100r_ending_equity_r": -473.2682182020992,
+        "reference_100r_minimum_equity_r": -475.4768287273266,
+        "reference_equity_breached": true,
+        "distinct_symbols": 43,
+        "direction_hour_event_clusters": 1426
+      },
+      "long": {
+        "trades": 4975,
+        "wins": 2187,
+        "losses": 2788,
+        "flats": 0,
+        "win_rate_percent": 43.959798994974875,
+        "net_r": -838.6138310660964,
+        "average_net_r": -0.16856559418413997,
+        "gross_profit_r": 2228.5224862760238,
+        "gross_loss_r": 3067.1363173421087,
+        "profit_factor_r": 0.7265808414433945,
+        "profit_factor_r_is_infinite": false,
+        "chronological_closed_equity_max_drawdown_r": 845.3119766791232,
+        "reference_100r_max_drawdown_percent": 845.3119766791232,
+        "reference_100r_ending_equity_r": -738.6138310660956,
+        "reference_100r_minimum_equity_r": -739.0471620447962,
+        "reference_equity_breached": true,
+        "distinct_symbols": 43,
+        "direction_hour_event_clusters": 1823
+      },
+      "short": {
+        "trades": 5236,
+        "wins": 2440,
+        "losses": 2796,
+        "flats": 0,
+        "win_rate_percent": 46.60045836516425,
+        "net_r": -439.0771498576578,
+        "average_net_r": -0.08385736246326543,
+        "gross_profit_r": 2691.1607502299166,
+        "gross_loss_r": 3130.237900087577,
+        "profit_factor_r": 0.8597304218170203,
+        "profit_factor_r_is_infinite": false,
+        "chronological_closed_equity_max_drawdown_r": 477.2171499253179,
+        "reference_100r_max_drawdown_percent": 477.2171499253179,
+        "reference_100r_ending_equity_r": -339.0771498576581,
+        "reference_100r_minimum_equity_r": -346.6625697020547,
+        "reference_equity_breached": true,
+        "distinct_symbols": 43,
+        "direction_hour_event_clusters": 1786
+      }
+    },
+    "concentration": {
+      "top_five_winning_trades": [
+        {
+          "symbol": "TURBO-USDT-SWAP",
+          "direction": "short",
+          "signal_time_bjt": "2025-12-21 08:15:00",
+          "entry_time_bjt": "2025-12-21 08:30:00",
+          "entry_price": 0.00176,
+          "exit_time_bjt": "2025-12-21 10:15:00",
+          "exit_price": 0.0017109999999999998,
+          "exit_reason": "take_profit",
+          "frozen_stop": 0.0017652,
+          "frozen_target": 0.0017109999999999998,
+          "actual_initial_stop": 0.0017654,
+          "actual_target": 0.0017109999999999998,
+          "exit_policy": "Fixed",
+          "signal_atr": 5.3545110747631295e-6,
+          "range_height": 0.00005199999999999996,
+          "range_length_bars": 96,
+          "cost_adjusted_net_r": 8.786185185185188
+        },
+        {
+          "symbol": "DOGE-USDT-SWAP",
+          "direction": "short",
+          "signal_time_bjt": "2026-06-18 11:45:00",
+          "entry_time_bjt": "2026-06-18 12:00:00",
+          "entry_price": 0.08529,
+          "exit_time_bjt": "2026-06-18 23:15:00",
+          "exit_price": 0.08313000000000001,
+          "exit_reason": "take_profit",
+          "frozen_stop": 0.08559000000000001,
+          "frozen_target": 0.08313000000000001,
+          "actual_initial_stop": 0.08564000000000001,
+          "actual_target": 0.08313000000000001,
+          "exit_policy": "Fixed",
+          "signal_atr": 0.0003435441258767983,
+          "range_height": 0.0022900000000000004,
+          "range_length_bars": 96,
+          "cost_adjusted_net_r": 5.9558142857142204
+        },
+        {
+          "symbol": "RENDER-USDT-SWAP",
+          "direction": "short",
+          "signal_time_bjt": "2026-06-30 15:45:00",
+          "entry_time_bjt": "2026-06-30 16:00:00",
+          "entry_price": 1.539,
+          "exit_time_bjt": "2026-06-30 20:15:00",
+          "exit_price": 1.497,
+          "exit_reason": "take_profit",
+          "frozen_stop": 1.545,
+          "frozen_target": 1.497,
+          "actual_initial_stop": 1.5459999999999998,
+          "actual_target": 1.497,
+          "exit_policy": "Fixed",
+          "signal_atr": 0.006412505652572499,
+          "range_height": 0.04499999999999993,
+          "range_length_bars": 96,
+          "cost_adjusted_net_r": 5.805728571428633
+        },
+        {
+          "symbol": "BNB-USDT-SWAP",
+          "direction": "long",
+          "signal_time_bjt": "2025-07-20 09:45:00",
+          "entry_time_bjt": "2025-07-20 10:00:00",
+          "entry_price": 738.6,
+          "exit_time_bjt": "2025-07-21 00:00:00",
+          "exit_price": 752.9000000000001,
+          "exit_reason": "take_profit",
+          "frozen_stop": 736.2,
+          "frozen_target": 752.9000000000001,
+          "actual_initial_stop": 736.2,
+          "actual_target": 752.9000000000001,
+          "exit_policy": "Fixed",
+          "signal_atr": 2.096772357161201,
+          "range_height": 14.700000000000044,
+          "range_length_bars": 96,
+          "cost_adjusted_net_r": 5.677783333333416
+        },
+        {
+          "symbol": "ALGO-USDT-SWAP",
+          "direction": "long",
+          "signal_time_bjt": "2026-03-20 09:15:00",
+          "entry_time_bjt": "2026-03-20 09:30:00",
+          "entry_price": 0.08962,
+          "exit_time_bjt": "2026-03-20 13:15:00",
+          "exit_price": 0.09149,
+          "exit_reason": "take_profit",
+          "frozen_stop": 0.08933,
+          "frozen_target": 0.09149,
+          "actual_initial_stop": 0.08929000000000001,
+          "actual_target": 0.09149,
+          "exit_policy": "Fixed",
+          "signal_atr": 0.0003254518580807102,
+          "range_height": 0.00202999999999999,
+          "range_length_bars": 64,
+          "cost_adjusted_net_r": 5.4188484848485245
+        }
+      ],
+      "top_five_winning_gross_profit_share_percent": 0.6432194582304929,
+      "after_removing_top_five_winners": {
+        "trades": 10206,
+        "wins": 4622,
+        "losses": 5584,
+        "flats": 0,
+        "win_rate_percent": 45.28708602782677,
+        "net_r": -1309.3353407842683,
+        "average_net_r": -0.12829074473684776,
+        "gross_profit_r": 4888.038876645442,
+        "gross_loss_r": 6197.374217429686,
+        "profit_factor_r": 0.7887274037604782,
+        "profit_factor_r_is_infinite": false,
+        "chronological_closed_equity_max_drawdown_r": 1330.8776866467472,
+        "reference_100r_max_drawdown_percent": 1330.8776866467472,
+        "reference_100r_ending_equity_r": -1209.3353407842635,
+        "reference_100r_minimum_equity_r": -1211.543951309491,
+        "reference_equity_breached": true,
+        "distinct_symbols": 43,
+        "direction_hour_event_clusters": 3609
+      },
+      "symbol_contributions_descending": [
+        {
+          "key": "MERL-USDT-SWAP",
+          "trades": 210,
+          "net_r": 15.092640967926036,
+          "average_net_r": 0.07186971889488589
+        },
+        {
+          "key": "SSV-USDT-SWAP",
+          "trades": 242,
+          "net_r": 2.9036588216341963,
+          "average_net_r": 0.011998590172042134
+        },
+        {
+          "key": "EIGEN-USDT-SWAP",
+          "trades": 240,
+          "net_r": -0.6145868920046644,
+          "average_net_r": -0.0025607787166861016
+        },
+        {
+          "key": "MEW-USDT-SWAP",
+          "trades": 220,
+          "net_r": -0.8057681489839528,
+          "average_net_r": -0.0036625824953816035
+        },
+        {
+          "key": "UMA-USDT-SWAP",
+          "trades": 214,
+          "net_r": -4.4190363360657114,
+          "average_net_r": -0.02064970250497996
+        },
+        {
+          "key": "RENDER-USDT-SWAP",
+          "trades": 234,
+          "net_r": -8.144074498566452,
+          "average_net_r": -0.0348037371733609
+        },
+        {
+          "key": "PNUT-USDT-SWAP",
+          "trades": 253,
+          "net_r": -9.297456271277529,
+          "average_net_r": -0.03674883901690723
+        },
+        {
+          "key": "VIRTUAL-USDT-SWAP",
+          "trades": 234,
+          "net_r": -15.405480301107499,
+          "average_net_r": -0.0658353859021688
+        },
+        {
+          "key": "YGG-USDT-SWAP",
+          "trades": 243,
+          "net_r": -19.273307109506124,
+          "average_net_r": -0.07931402102677418
+        },
+        {
+          "key": "RSR-USDT-SWAP",
+          "trades": 248,
+          "net_r": -19.31389578414349,
+          "average_net_r": -0.07787861203283665
+        },
+        {
+          "key": "WIF-USDT-SWAP",
+          "trades": 230,
+          "net_r": -19.68241779577973,
+          "average_net_r": -0.0855757295468684
+        },
+        {
+          "key": "ALGO-USDT-SWAP",
+          "trades": 237,
+          "net_r": -21.230967104468775,
+          "average_net_r": -0.08958213968130285
+        },
+        {
+          "key": "ETC-USDT-SWAP",
+          "trades": 218,
+          "net_r": -21.377761587287537,
+          "average_net_r": -0.09806312654719054
+        },
+        {
+          "key": "WOO-USDT-SWAP",
+          "trades": 257,
+          "net_r": -21.4171555333265,
+          "average_net_r": -0.08333523553823541
+        },
+        {
+          "key": "AGLD-USDT-SWAP",
+          "trades": 250,
+          "net_r": -22.0146620370984,
+          "average_net_r": -0.0880586481483936
+        },
+        {
+          "key": "YFI-USDT-SWAP",
+          "trades": 252,
+          "net_r": -23.263644237175022,
+          "average_net_r": -0.09231604856021834
+        },
+        {
+          "key": "SATS-USDT-SWAP",
+          "trades": 228,
+          "net_r": -24.427385115917534,
+          "average_net_r": -0.10713765401718217
+        },
+        {
+          "key": "ADA-USDT-SWAP",
+          "trades": 234,
+          "net_r": -25.17150590313893,
+          "average_net_r": -0.10757053804760226
+        },
+        {
+          "key": "BABY-USDT-SWAP",
+          "trades": 254,
+          "net_r": -25.251509442066677,
+          "average_net_r": -0.09941539150419952
+        },
+        {
+          "key": "HBAR-USDT-SWAP",
+          "trades": 250,
+          "net_r": -25.673341447304242,
+          "average_net_r": -0.10269336578921696
+        },
+        {
+          "key": "BLUR-USDT-SWAP",
+          "trades": 241,
+          "net_r": -26.19067048282144,
+          "average_net_r": -0.10867498125652049
+        },
+        {
+          "key": "BNB-USDT-SWAP",
+          "trades": 216,
+          "net_r": -26.363669951828715,
+          "average_net_r": -0.12205402755476256
+        },
+        {
+          "key": "1INCH-USDT-SWAP",
+          "trades": 228,
+          "net_r": -28.35866404154814,
+          "average_net_r": -0.12438010544538657
+        },
+        {
+          "key": "XRP-USDT-SWAP",
+          "trades": 269,
+          "net_r": -32.20493455566922,
+          "average_net_r": -0.11972094630360304
+        },
+        {
+          "key": "OP-USDT-SWAP",
+          "trades": 246,
+          "net_r": -32.22299763685313,
+          "average_net_r": -0.1309877952717607
+        },
+        {
+          "key": "NMR-USDT-SWAP",
+          "trades": 237,
+          "net_r": -33.13152193132926,
+          "average_net_r": -0.13979545118704328
+        },
+        {
+          "key": "MOVE-USDT-SWAP",
+          "trades": 230,
+          "net_r": -33.30514039127372,
+          "average_net_r": -0.14480495822292921
+        },
+        {
+          "key": "TURBO-USDT-SWAP",
+          "trades": 226,
+          "net_r": -34.22430011152333,
+          "average_net_r": -0.15143495624567843
+        },
+        {
+          "key": "ORDI-USDT-SWAP",
+          "trades": 252,
+          "net_r": -34.24920229547042,
+          "average_net_r": -0.13590953291853342
+        },
+        {
+          "key": "IOST-USDT-SWAP",
+          "trades": 212,
+          "net_r": -35.207732279937396,
+          "average_net_r": -0.16607420886762922
+        },
+        {
+          "key": "ACT-USDT-SWAP",
+          "trades": 253,
+          "net_r": -37.2032285419075,
+          "average_net_r": -0.14704833415773716
+        },
+        {
+          "key": "KSM-USDT-SWAP",
+          "trades": 230,
+          "net_r": -39.14054562671085,
+          "average_net_r": -0.17017628533352544
+        },
+        {
+          "key": "BIGTIME-USDT-SWAP",
+          "trades": 260,
+          "net_r": -44.39490323089189,
+          "average_net_r": -0.17074962781112266
+        },
+        {
+          "key": "LAYER-USDT-SWAP",
+          "trades": 219,
+          "net_r": -44.9159501697128,
+          "average_net_r": -0.20509566287540093
+        },
+        {
+          "key": "DOGE-USDT-SWAP",
+          "trades": 225,
+          "net_r": -46.184195155701225,
+          "average_net_r": -0.20526308958089434
+        },
+        {
+          "key": "LTC-USDT-SWAP",
+          "trades": 250,
+          "net_r": -48.44904698406506,
+          "average_net_r": -0.19379618793626024
+        },
+        {
+          "key": "BTC-USDT-SWAP",
+          "trades": 206,
+          "net_r": -51.84939394570096,
+          "average_net_r": -0.2516960871150532
+        },
+        {
+          "key": "ICP-USDT-SWAP",
+          "trades": 249,
+          "net_r": -54.425954693108345,
+          "average_net_r": -0.21857813129762388
+        },
+        {
+          "key": "BAT-USDT-SWAP",
+          "trades": 233,
+          "net_r": -55.066947754112995,
+          "average_net_r": -0.2363388315627167
+        },
+        {
+          "key": "ONT-USDT-SWAP",
+          "trades": 243,
+          "net_r": -55.8838229774066,
+          "average_net_r": -0.22997458015393663
+        },
+        {
+          "key": "ZRO-USDT-SWAP",
+          "trades": 268,
+          "net_r": -57.97292053706774,
+          "average_net_r": -0.2163168676756259
+        },
+        {
+          "key": "AUCTION-USDT-SWAP",
+          "trades": 213,
+          "net_r": -63.01097872497475,
+          "average_net_r": -0.29582619119706455
+        },
+        {
+          "key": "ATOM-USDT-SWAP",
+          "trades": 257,
+          "net_r": -74.94660314848096,
+          "average_net_r": -0.2916210239240504
+        }
+      ],
+      "best_symbol_removed": "MERL-USDT-SWAP",
+      "after_removing_best_symbol": {
+        "trades": 10001,
+        "wins": 4512,
+        "losses": 5489,
+        "flats": 0,
+        "win_rate_percent": 45.11548845115488,
+        "net_r": -1292.7836218916857,
+        "average_net_r": -0.129265435645604,
+        "gross_profit_r": 4803.771258295455,
+        "gross_loss_r": 6096.554880187114,
+        "profit_factor_r": 0.7879484975862333,
+        "profit_factor_r_is_infinite": false,
+        "chronological_closed_equity_max_drawdown_r": 1315.4043907541643,
+        "reference_100r_max_drawdown_percent": 1315.4043907541643,
+        "reference_100r_ending_equity_r": -1192.7836218916805,
+        "reference_100r_minimum_equity_r": -1194.9922324169079,
+        "reference_equity_breached": true,
+        "distinct_symbols": 42,
+        "direction_hour_event_clusters": 3543
+      },
+      "month_contributions_chronological": [
+        {
+          "key": "2025-07",
+          "trades": 964,
+          "net_r": -100.98655455608163,
+          "average_net_r": -0.10475783667643322
+        },
+        {
+          "key": "2025-08",
+          "trades": 887,
+          "net_r": -80.88481868006716,
+          "average_net_r": -0.09118919806095507
+        },
+        {
+          "key": "2025-09",
+          "trades": 822,
+          "net_r": -151.36922304128362,
+          "average_net_r": -0.1841474732862331
+        },
+        {
+          "key": "2025-10",
+          "trades": 786,
+          "net_r": -56.9154800750614,
+          "average_net_r": -0.07241155225834785
+        },
+        {
+          "key": "2025-11",
+          "trades": 825,
+          "net_r": -188.47875978860085,
+          "average_net_r": -0.22845910277406165
+        },
+        {
+          "key": "2025-12",
+          "trades": 775,
+          "net_r": -49.67726126454031,
+          "average_net_r": -0.06409969195424557
+        },
+        {
+          "key": "2026-01",
+          "trades": 791,
+          "net_r": -68.4972355659479,
+          "average_net_r": -0.08659574660676093
+        },
+        {
+          "key": "2026-02",
+          "trades": 703,
+          "net_r": -7.61342975007044,
+          "average_net_r": -0.010829914295975022
+        },
+        {
+          "key": "2026-03",
+          "trades": 834,
+          "net_r": -173.85684421183586,
+          "average_net_r": -0.20846144389908378
+        },
+        {
+          "key": "2026-04",
+          "trades": 793,
+          "net_r": -97.79032376791237,
+          "average_net_r": -0.12331692782838886
+        },
+        {
+          "key": "2026-05",
+          "trades": 781,
+          "net_r": -161.85673819335582,
+          "average_net_r": -0.20724294262913678
+        },
+        {
+          "key": "2026-06",
+          "trades": 757,
+          "net_r": -44.60425594761092,
+          "average_net_r": -0.05892239887399065
+        },
+        {
+          "key": "2026-07",
+          "trades": 493,
+          "net_r": -95.16005608138707,
+          "average_net_r": -0.19302242612857418
+        }
+      ],
+      "event_cluster_count": 3609,
+      "positive_event_cluster_r": 3077.0806360915676,
+      "largest_positive_event_cluster": {
+        "key": "short-1755857700000",
+        "trades": 8,
+        "net_r": 21.142584081264136,
+        "average_net_r": 2.642823010158017
+      },
+      "largest_positive_event_cluster_share_percent": 0.6870987985585886,
+      "top_positive_event_clusters": [
+        {
+          "key": "short-1755857700000",
+          "trades": 8,
+          "net_r": 21.142584081264136,
+          "average_net_r": 2.642823010158017
+        },
+        {
+          "key": "long-1755072000000",
+          "trades": 11,
+          "net_r": 17.519949314866047,
+          "average_net_r": 1.5927226649878223
+        },
+        {
+          "key": "short-1781752500000",
+          "trades": 9,
+          "net_r": 16.151545267695965,
+          "average_net_r": 1.7946161408551073
+        },
+        {
+          "key": "long-1761858000000",
+          "trades": 6,
+          "net_r": 14.042161077694317,
+          "average_net_r": 2.3403601796157196
+        },
+        {
+          "key": "short-1762836300000",
+          "trades": 10,
+          "net_r": 13.91656059455998,
+          "average_net_r": 1.3916560594559981
+        },
+        {
+          "key": "short-1763523900000",
+          "trades": 7,
+          "net_r": 13.686644740457794,
+          "average_net_r": 1.955234962922542
+        },
+        {
+          "key": "short-1760403600000",
+          "trades": 12,
+          "net_r": 13.431589090789313,
+          "average_net_r": 1.1192990908991094
+        },
+        {
+          "key": "short-1755756900000",
+          "trades": 15,
+          "net_r": 12.810950915589503,
+          "average_net_r": 0.8540633943726336
+        },
+        {
+          "key": "short-1771435800000",
+          "trades": 7,
+          "net_r": 12.758632011896546,
+          "average_net_r": 1.822661715985221
+        },
+        {
+          "key": "short-1751594400000",
+          "trades": 7,
+          "net_r": 12.727056017773554,
+          "average_net_r": 1.8181508596819362
+        }
+      ]
+    },
+    "latest_ten_losses": [
+      {
+        "symbol": "BABY-USDT-SWAP",
+        "direction": "short",
+        "signal_time_bjt": "2026-07-19 20:15:00",
+        "entry_time_bjt": "2026-07-19 20:30:00",
+        "entry_price": 0.01246,
+        "exit_time_bjt": "2026-07-19 21:00:00",
+        "exit_price": 0.01251,
+        "exit_reason": "stop_loss",
+        "frozen_stop": 0.01251,
+        "frozen_target": 0.01236,
+        "actual_initial_stop": 0.01251,
+        "actual_target": 0.01236,
+        "exit_policy": "Fixed",
+        "signal_atr": 0.00004028838920904171,
+        "range_height": 0.0001399999999999995,
+        "range_length_bars": 64,
+        "cost_adjusted_net_r": -1.2248800000000015
+      },
+      {
+        "symbol": "HBAR-USDT-SWAP",
+        "direction": "short",
+        "signal_time_bjt": "2026-07-19 20:15:00",
+        "entry_time_bjt": "2026-07-19 20:30:00",
+        "entry_price": 0.06653,
+        "exit_time_bjt": "2026-07-19 21:30:00",
+        "exit_price": 0.06668,
+        "exit_reason": "stop_loss",
+        "frozen_stop": 0.06668,
+        "frozen_target": 0.06594,
+        "actual_initial_stop": 0.06668,
+        "actual_target": 0.06594,
+        "exit_policy": "Fixed",
+        "signal_atr": 0.00012725325531637535,
+        "range_height": 0.00066999999999999,
+        "range_length_bars": 64,
+        "cost_adjusted_net_r": -1.3997800000000071
+      },
+      {
+        "symbol": "OP-USDT-SWAP",
+        "direction": "short",
+        "signal_time_bjt": "2026-07-19 18:00:00",
+        "entry_time_bjt": "2026-07-19 18:15:00",
+        "entry_price": 0.09442,
+        "exit_time_bjt": "2026-07-19 18:45:00",
+        "exit_price": 0.0948,
+        "exit_reason": "stop_loss",
+        "frozen_stop": 0.0948,
+        "frozen_target": 0.0934,
+        "actual_initial_stop": 0.0948,
+        "actual_target": 0.0934,
+        "exit_policy": "Fixed",
+        "signal_atr": 0.0002631866628813239,
+        "range_height": 0.0012500000000000011,
+        "range_length_bars": 96,
+        "cost_adjusted_net_r": -1.2242263157894706
+      },
+      {
+        "symbol": "YFI-USDT-SWAP",
+        "direction": "long",
+        "signal_time_bjt": "2026-07-19 16:30:00",
+        "entry_time_bjt": "2026-07-19 16:45:00",
+        "entry_price": 2130.0,
+        "exit_time_bjt": "2026-07-19 17:00:00",
+        "exit_price": 2113.0,
+        "exit_reason": "stop_loss",
+        "frozen_stop": 2113.0,
+        "frozen_target": 2140.0,
+        "actual_initial_stop": 2113.0,
+        "actual_target": 2140.0,
+        "exit_policy": "Fixed",
+        "signal_atr": 8.135841283570816,
+        "range_height": 19.0,
+        "range_length_bars": 32,
+        "cost_adjusted_net_r": -1.112164705882353
+      },
+      {
+        "symbol": "SATS-USDT-SWAP",
+        "direction": "long",
+        "signal_time_bjt": "2026-07-19 16:15:00",
+        "entry_time_bjt": "2026-07-19 16:30:00",
+        "entry_price": 9.54e-9,
+        "exit_time_bjt": "2026-07-19 17:30:00",
+        "exit_price": 9.48e-9,
+        "exit_reason": "stop_loss",
+        "frozen_stop": 9.48e-9,
+        "frozen_target": 9.57e-9,
+        "actual_initial_stop": 9.48e-9,
+        "actual_target": 9.57e-9,
+        "exit_policy": "Fixed",
+        "signal_atr": 3.466108193289543e-11,
+        "range_height": 5.2999999999998886e-11,
+        "range_length_bars": 12,
+        "cost_adjusted_net_r": -1.1424999999999994
+      },
+      {
+        "symbol": "ALGO-USDT-SWAP",
+        "direction": "short",
+        "signal_time_bjt": "2026-07-19 16:00:00",
+        "entry_time_bjt": "2026-07-19 16:15:00",
+        "entry_price": 0.08242,
+        "exit_time_bjt": "2026-07-19 18:45:00",
+        "exit_price": 0.08266000000000001,
+        "exit_reason": "stop_loss",
+        "frozen_stop": 0.08266000000000001,
+        "frozen_target": 0.08205000000000001,
+        "actual_initial_stop": 0.08266000000000001,
+        "actual_target": 0.08205000000000001,
+        "exit_policy": "Fixed",
+        "signal_atr": 0.00018292706101823045,
+        "range_height": 0.0005100000000000104,
+        "range_length_bars": 12,
+        "cost_adjusted_net_r": -1.3096749999999768
+      },
+      {
+        "symbol": "ZRO-USDT-SWAP",
+        "direction": "long",
+        "signal_time_bjt": "2026-07-19 16:00:00",
+        "entry_time_bjt": "2026-07-19 16:15:00",
+        "entry_price": 0.8174,
+        "exit_time_bjt": "2026-07-19 17:45:00",
+        "exit_price": 0.811,
+        "exit_reason": "stop_loss",
+        "frozen_stop": 0.811,
+        "frozen_target": 0.8300000000000001,
+        "actual_initial_stop": 0.811,
+        "actual_target": 0.8300000000000001,
+        "exit_policy": "Fixed",
+        "signal_atr": 0.004451577954528903,
+        "range_height": 0.015999999999999903,
+        "range_length_bars": 24,
+        "cost_adjusted_net_r": -1.1143468750000007
+      },
+      {
+        "symbol": "NMR-USDT-SWAP",
+        "direction": "long",
+        "signal_time_bjt": "2026-07-19 10:30:00",
+        "entry_time_bjt": "2026-07-19 10:45:00",
+        "entry_price": 10.222,
+        "exit_time_bjt": "2026-07-19 11:00:00",
+        "exit_price": 10.184,
+        "exit_reason": "stop_loss",
+        "frozen_stop": 10.184,
+        "frozen_target": 10.28,
+        "actual_initial_stop": 10.184,
+        "actual_target": 10.28,
+        "exit_policy": "Fixed",
+        "signal_atr": 0.036304426570187696,
+        "range_height": 0.07600000000000051,
+        "range_length_bars": 12,
+        "cost_adjusted_net_r": -1.2415000000000098
+      },
+      {
+        "symbol": "ACT-USDT-SWAP",
+        "direction": "long",
+        "signal_time_bjt": "2026-07-19 07:15:00",
+        "entry_time_bjt": "2026-07-19 07:30:00",
+        "entry_price": 0.008313,
+        "exit_time_bjt": "2026-07-19 09:45:00",
+        "exit_price": 0.00824,
+        "exit_reason": "stop_loss",
+        "frozen_stop": 0.00824,
+        "frozen_target": 0.008360000000000001,
+        "actual_initial_stop": 0.00824,
+        "actual_target": 0.008360000000000001,
+        "exit_policy": "Fixed",
+        "signal_atr": 0.00003450630729195884,
+        "range_height": 0.00007399999999999941,
+        "range_length_bars": 32,
+        "cost_adjusted_net_r": -1.1018890410958926
+      },
+      {
+        "symbol": "YGG-USDT-SWAP",
+        "direction": "long",
+        "signal_time_bjt": "2026-07-19 01:45:00",
+        "entry_time_bjt": "2026-07-19 02:00:00",
+        "entry_price": 0.02126,
+        "exit_time_bjt": "2026-07-19 03:30:00",
+        "exit_price": 0.0211,
+        "exit_reason": "stop_loss",
+        "frozen_stop": 0.0211,
+        "frozen_target": 0.02142,
+        "actual_initial_stop": 0.0211,
+        "actual_target": 0.02142,
+        "exit_policy": "Fixed",
+        "signal_atr": 0.000101941265195596,
+        "range_height": 0.0002500000000000002,
+        "range_length_bars": 12,
+        "cost_adjusted_net_r": -1.1189874999999998
+      }
+    ]
+  },
+  "candidate_minus_baseline": {
+    "closed_trades": -5027,
+    "net_r": 867.7254231841471,
+    "average_net_r": 0.015664952730292697,
+    "profit_factor_r": 0.00932731739107251,
+    "max_drawdown_r": -880.4405191038302
+  },
+  "gate_checks": [
+    {
+      "name": "coverage_and_raw_strict_subset",
+      "passed": true,
+      "observed": "raw=10757 symbols=43 clusters=5466 long=5226 short=5531 actual_absent=0",
+      "requirement": ">=1000 raw, >=30 symbols, >=100 clusters, >=200 each side, zero candidate intents outside the raw >=0.75 oracle"
+    },
+    {
+      "name": "cost_ev_and_pf_improve_vs_v23",
+      "passed": true,
+      "observed": "EV -0.140794->-0.125129; PF 0.784506->0.793833",
+      "requirement": "candidate cost-adjusted average net R and PF both exceed V23"
+    },
+    {
+      "name": "discovery_and_validation_positive",
+      "passed": false,
+      "observed": "discovery EV=-0.107496 PF=0.820846; validation EV=-0.156716 PF=0.746951",
+      "requirement": "cost-adjusted EV>0 and PF>1 in both frozen windows"
+    },
+    {
+      "name": "long_and_short_positive",
+      "passed": false,
+      "observed": "long EV=-0.168566 PF=0.726581; short EV=-0.083857 PF=0.859730",
+      "requirement": "cost-adjusted EV>0 and PF>1 for both directions"
+    },
+    {
+      "name": "max_drawdown_not_worse",
+      "passed": true,
+      "observed": "2179.673846R -> 1299.233327R",
+      "requirement": "candidate chronological closed-equity max drawdown R <= V23"
+    },
+    {
+      "name": "remove_top_five_winners_still_positive",
+      "passed": false,
+      "observed": "net=-1309.335341R EV=-0.128291 PF=0.788727",
+      "requirement": "remaining net R>0 and PF>1"
+    },
+    {
+      "name": "remove_best_symbol_still_positive",
+      "passed": false,
+      "observed": "removed=Some(\"MERL-USDT-SWAP\"); remaining net=-1292.783622R",
+      "requirement": "remaining net R>0"
+    },
+    {
+      "name": "largest_positive_event_cluster_share",
+      "passed": true,
+      "observed": "0.687099%",
+      "requirement": "<=10% of total positive event-cluster R"
+    }
+  ],
+  "verdict": "reject_retention_75_as_a_tradeable_cost_filter_and_stop_without_threshold_chasing",
+  "limitations": [
+    "only 43 of 60 frozen members satisfy the full evaluation and 60-day warmup contract in the current local Top60 replay, so this is not a formal full-universe conclusion",
+    "each symbol is replayed independently; max concurrency is reported, but no capacity ranking, correlation cap, leverage cap, or unified portfolio selection is applied",
+    "drawdown uses exit-time aggregated cost-adjusted net R with fixed 1R initial risk and a non-compounding 100R reference equity",
+    "the quality oracle is the earlier V23 confirmation ledger on the same manifest; unit tests separately prove that a rejected first confirmation consumes the source and cannot be resurrected"
+  ]
+}

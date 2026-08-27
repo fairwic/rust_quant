@@ -1,0 +1,60 @@
+{
+  "schema_version": "strict_visual_v24_min_departure_excess_atr_l1_machine_v1",
+  "research_level": "L1_OUTCOME_BLIND_TARGET_AVAILABILITY_CHECK",
+  "promotion_status": "stopped_at_l1_target_data_unavailable",
+  "runtime_scope": "research_only",
+  "single_variable": "minimum_departure_excess_divided_by_source_atr",
+  "main_candidate_minimum_excess_atr": 0.1,
+  "coverage_neighbors": [0.05, 0.15],
+  "outcome_fields_read": false,
+  "target": {
+    "symbol": "BTC-USDT-SWAP",
+    "timeframe": "15m",
+    "timestamp_bjt": "2026-08-03 01:15:00",
+    "timestamp_ms": 1785690900000,
+    "ohlcv_source": "local_tradingview_desktop_data_window_okx_btcusdt_perpetual",
+    "open": 63183.3,
+    "high": 63318.4,
+    "low": 63161.8,
+    "close": 63257.9,
+    "volume_usdt": 25040000.0,
+    "body": 74.6,
+    "full_range": 156.6,
+    "body_to_range": 0.4763729246,
+    "directional_body_to_open": 0.0011806917,
+    "directional_body_percent": 0.118069,
+    "passes_existing_50pct_body_gate": false,
+    "passes_existing_15bps_direction_gate": false,
+    "passes_proposed_5bps_direction_gate": true,
+    "frozen_visual_boundary": null,
+    "source_atr": null,
+    "absolute_departure_excess": null,
+    "departure_excess_atr": null,
+    "classification_at_0_10_atr": "unresolved"
+  },
+  "local_quant_core_availability": {
+    "table": "btc-usdt-swap_candles_15m",
+    "loaded_rows": 142790,
+    "first_timestamp_ms": 1654012800000,
+    "last_timestamp_ms": 1785203100000,
+    "last_timestamp_bjt": "2026-07-28 09:45:00",
+    "missing_intervals_between_last_row_and_target": 542,
+    "target_row_available": false
+  },
+  "tradingview_audit": {
+    "target_ohlcv_matches_user_screenshot": true,
+    "current_loaded_research_script": "15m Strict Visual Consolidation Breakout - V22 Unified Retest Research",
+    "user_screenshot_script": "15m Strict Visual Consolidation Breakout - V12 Strict Parity Research",
+    "frozen_range_boundary_exposed_in_data_window": false,
+    "source_atr_exposed_in_data_window": false,
+    "exact_v12_target_replay_available": false
+  },
+  "variant_coverage": {
+    "threshold_0_05_atr": null,
+    "threshold_0_10_atr": null,
+    "threshold_0_15_atr": null,
+    "not_run_reason": "preregistered_stop_condition_triggered_before_coverage_scan"
+  },
+  "code_or_pine_changed": false,
+  "verdict": "target_ohlcv_and_weak_shape_are_verified_but_minimum_departure_excess_cannot_be_tested_without_the_frozen_boundary_and_source_atr"
+}

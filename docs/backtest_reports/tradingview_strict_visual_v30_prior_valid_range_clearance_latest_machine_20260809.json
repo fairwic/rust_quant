@@ -1,0 +1,43 @@
+{
+  "schema_version": "strict_visual_prior_valid_range_clearance_l1_summary_v1",
+  "research_status": "stopped_l1_target_miss",
+  "single_variable": "reject_unresolved_prior_valid_range_within_one_current_range_height_over_96_bars",
+  "dataset_fingerprint_sha256": "4b5245555237072f5c1ed7169634037879e7cf3997ea9331be66ba10a2a752f1",
+  "source_path": "/tmp/strict-visual-v30-prior-valid-range-clearance-l1-20260809.json",
+  "source_sha256": "c10e8a269825a7b5915871c5c9082c24bbc22aa25a1767616b10c41a19d3e5ba",
+  "included_symbols": 53,
+  "baseline_confirmed_sources": 699,
+  "candidate_confirmed_sources": 491,
+  "rejected_sources": 208,
+  "rejected_source_percent": 29.756795422031473,
+  "candidate_long_sources": 228,
+  "candidate_short_sources": 263,
+  "candidate_distinct_symbols": 53,
+  "candidate_direction_hour_event_clusters": 245,
+  "targets": {
+    "btc_2026_07_22_08_00_66653_6": "not_rejected",
+    "btc_2026_07_24_05_00_65014_3": {
+      "status": "rejected",
+      "current_upper": 64931.1,
+      "current_lower": 64646.0,
+      "current_range_height": 285.09999999999854,
+      "prior_upper": 65192.8,
+      "prior_lower": 64782.4,
+      "clearance": 0.0,
+      "clearance_in_range_heights": 0.0
+    }
+  },
+  "l1_gate_passed": false,
+  "l2_executed": false,
+  "baseline_behavior_regression": {
+    "source_path": "/tmp/strict-visual-v23-post-v30-parity-20260809.json",
+    "source_sha256": "ae13d57af8580f574f00562aa7cc4232df7ab30f343ec0453c81066ddc583d25",
+    "normalized_report_sha256_before_and_after": "64eedc14b52771c60a65935437d85084e009cd0ebae668f53b73803093d8c87d",
+    "same_dataset_fingerprint": true,
+    "same_strict_visual_metrics": true,
+    "same_latest_twenty_btc_eth_first": true,
+    "same_per_symbol": true,
+    "strict_trades_before": 661,
+    "strict_trades_after": 661
+  }
+}

@@ -1,0 +1,74 @@
+{
+  "schema_version": "strict_visual_v28_latest_l1_l2_summary_v1",
+  "status": "stopped_l2_cost_edge_negative",
+  "dataset_fingerprint_sha256": "4b5245555237072f5c1ed7169634037879e7cf3997ea9331be66ba10a2a752f1",
+  "evaluation_start_ms": 1784471400000,
+  "evaluation_end_exclusive_ms": 1786248900000,
+  "requested_symbols": 61,
+  "included_symbols": 53,
+  "cost_contract_bps": {
+    "entry_maker": 2.0,
+    "entry_slippage": 1.0,
+    "exit_taker": 5.0,
+    "exit_slippage": 1.0
+  },
+  "l1": {
+    "raw_confirmed_sources": 699,
+    "resolved_sources": 699,
+    "passed_sources": 485,
+    "rejected_sources": 214,
+    "rejected_source_percent": 30.61516452074392,
+    "passed_long_sources": 211,
+    "passed_short_sources": 274,
+    "passed_distinct_symbols": 53,
+    "passed_direction_hour_event_clusters": 233,
+    "target_source_rejected": true,
+    "gate_passed": true,
+    "full_report_sha256": "04a6a08c05b6e258f995efa8e0c321c30ce93bd09c844fc4c0ecd869da64b1d5"
+  },
+  "baseline_v23": {
+    "trades": 661,
+    "wins": 280,
+    "losses": 381,
+    "win_rate_percent": 42.36006051437216,
+    "net_r": -153.7141690190307,
+    "average_net_r": -0.23254791077009182,
+    "profit_factor_r": 0.6380196467892474,
+    "chronological_max_drawdown_r": 156.66563337443142,
+    "direction_hour_event_clusters": 268,
+    "full_report_sha256": "a72bd9104cd5bd603a498e02f32608c84581c56ac069f2c0edfd20bafff4abb6"
+  },
+  "candidate_v28": {
+    "trades": 433,
+    "wins": 212,
+    "losses": 221,
+    "win_rate_percent": 48.96073903002309,
+    "net_r": -81.1616769541787,
+    "average_net_r": -0.18744036248078222,
+    "profit_factor_r": 0.6615989136650264,
+    "chronological_max_drawdown_r": 88.15198003354986,
+    "direction_hour_event_clusters": 223,
+    "after_removing_top5_net_r": -96.22612753072298,
+    "after_removing_best_symbol_net_r": -86.10591528751206,
+    "full_report_sha256": "4f7404ae2a2dc50fd453d2e0b6639d1779a86db60cbe959b8180c792555fa0f3"
+  },
+  "candidate_minus_baseline": {
+    "trades": -228,
+    "trades_percent": -34.49319213313162,
+    "win_rate_percentage_points": 6.600678515650934,
+    "net_r": 72.55249206485199,
+    "average_net_r": 0.0451075482893096,
+    "profit_factor_r": 0.023579266875779048,
+    "chronological_max_drawdown_r": -68.51365334088156,
+    "chronological_max_drawdown_percent": -43.73240759007668
+  },
+  "target_attribution": {
+    "symbol": "BTC-USDT-SWAP",
+    "initial_confirmation_time_ms": 1785460500000,
+    "hold_time_ms": 1785461400000,
+    "strict_visual_source_rejected": true,
+    "composite_order_still_opened": true,
+    "remaining_family": "confirmed_range_acceptance_long",
+    "note": "The strict visual family is filtered causally, but the frozen V20 composite still opens the same timestamp through an independent legacy family."
+  }
+}
