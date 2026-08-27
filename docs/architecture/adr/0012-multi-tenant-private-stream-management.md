@@ -23,7 +23,7 @@
 
 若不显式设计，会出现以下失败：私有流断线导致 Account 投影与交易所真实状态不一致却无人察觉；冷启动串行建连撞速率墙导致恢复缓慢；多实例并存时同一账户被两个实例同时持有（脑裂）；连接异常时用户体验在"完全停服"与"用脏数据继续开仓"之间没有中间态。
 
-私有连接管理本质上是 Account owner 的 `ExchangeSession` readiness（[target §5](../target-architecture.md)）在工程上的落地，直接决定平台可支持的 monitored session 规模。
+私有连接管理本质上是 Account owner 的 `ExchangeSession` status（[target §5](../target-architecture.md)）在工程上的落地，直接决定平台可支持的 monitored session 规模。
 
 ## 决策
 
@@ -42,7 +42,7 @@
 
 AccountSession Phase 1 → AccountSession Phase 2 的唯一触发条件就是上表的“≥100 monitored sessions 或冷启动 >5 分钟”；200/300 会话、2 分钟预警或按 IP 估算只能是容量观测，不能形成第二套迁移门。退订后仍有安全义务的会话计入该规模，不能因不再商业活跃而绕过容量门。
 
-AccountSession Phase 1/2 对外发布的 `ExchangeSession` readiness 只有 `healthy` 与 `stale`。`connecting`、`buffering`、`reconnecting`、`backoff` 是 stale 期间的内部连接生命周期；AccountSession Phase 2 的 `cold` 只是未承接活跃自动交易任务的调度分类，不是可开仓的第三种 readiness。`degraded` 仅在 AccountSession Phase 3 出现。
+AccountSession Phase 1/2 对外发布的 `ExchangeSession` status 只有 `healthy` 与 `stale`。`connecting`、`buffering`、`reconnecting`、`backoff` 是 stale 期间的内部连接生命周期；AccountSession Phase 2 的 `cold` 只是未承接活跃自动交易任务的调度分类，不是可开仓的第三种 status。`degraded` 仅在 AccountSession Phase 3 出现。
 
 ### 1.1 公共市场数据不属于私有账户容量
 
@@ -52,7 +52,7 @@ Market 使用平台固定的 `MarketDataAccessCredential` 时，只能访问 K �
 
 Web owner API 提供当前有活跃 combo、会员与可用用户 credential 的商业账户引用，并返回稳定 `ExchangeAccountRef`、当前 credential revision/revocation generation 与产品/子账户范围；Account 还必须消费 Execution 发布的版本化安全监测 Contract，以保留存在未结 `SafetyObligation` 的账户会话。二者的并集是需要私有流/签名查询监测的账户集合，但它们的语义不同：商业资格只授权新的风险增加，安全监测义务只允许对既有受管敞口执行受限的收敛动作。
 
-退订、会员/claim 到期必须从商业集合移除并冻结新开仓/加仓，却不能在 SafetyObligation 未闭合时把账户会话冷却或关闭。`SafetyMonitoringV1` 使用 ADR-0006 定义的唯一 schema，由 Execution Outbox 发布 `Add|Update|Remove`，必须带稳定账户引用、obligation id/generation、单调 `monitoring_fence`、受管订单/敞口摘要、required fact kinds、最低 Account session generation/projection watermark 与原因；Account 以 Inbox 幂等消费、持久化最大 fence 后发布绑定同一 operation/fence、session generation 与 projection watermark 的 `SafetyMonitoringAckV1`。只有 current-fence Remove 已确认且 Execution 的闭合谓词成立，才允许会话进入可关闭候选；重启、漏收或 fence 间隙一律通过版本化全量 snapshot/replay 重建，并保守保留会话。用户 credential 被删除、撤销或 Gateway 不再能提供安全 capability 时，Execution 按 ADR-0006 持久化 `SafetyBlocked` 并发布用户/运营通知与人工处置证据；Account 只消费安全监测 Contract、保守保留会话并维持账户事实，不得借用平台公共市场数据材料、缓存 secret 或默认账户继续读取/下单，也不直读 Execution 私有表。
+退订、会员/claim 到期必须从商业集合移除并冻结新开仓/加仓，却不能在 SafetyObligation 未闭合时把账户会话冷却或关闭。`SafetyMonitoringV1` 使用 ADR-0006 定义的唯一 schema，由 Execution Outbox 发布 `Add|Update|Remove`，必须带稳定账户引用、obligation id/generation、单调 `monitoring_fence`、受管订单/敞口摘要、required fact kinds、最低 Account session generation/projection checkpoint 与原因；Account 以 Inbox 幂等消费、持久化最大 fence 后发布绑定同一 operation/fence、session generation 与 projection checkpoint 的 `SafetyMonitoringAckV1`。只有 current-fence Remove 已确认且 Execution 的闭合谓词成立，才允许会话进入可关闭候选；重启、漏收或 fence 间隙一律通过版本化全量 snapshot/replay 重建，并保守保留会话。用户 credential 被删除、撤销或 Gateway 不再能提供安全 capability 时，Execution 按 ADR-0006 持久化 `SafetyBlocked` 并发布用户/运营通知与人工处置记录；Account 只消费安全监测 Contract、保守保留会话并维持账户事实，不得借用平台公共市场数据材料、缓存 secret 或默认账户继续读取/下单，也不直读 Execution 私有表。
 
 ### 2. 单账户连接必须"先缓冲、后闭合水位"才进 Healthy
 
@@ -69,11 +69,11 @@ Disconnected -> Connecting -> Authenticating -> Subscribing
 - **重连成功不直接回 Healthy**，必须重新走 Buffering → SnapshotReconciling（断线窗口可能已发生成交，否则永久丢失）；
 - 与 [production-runtime §3.2/§9](../production-runtime.md) 中 Account 专属的“先订阅缓冲、再合并快照、闭合前 NotReady”同构；这不是所有 App 的共同启动要求。
 
-#### 2.1 `AccountRecoveryClosedV1` 必须可证明闭合
+#### 2.1 `AccountRecoveryCheckpointV1` 必须可证明闭合
 
-`Healthy` 与新增风险 admission 只能消费 Account owner 发布的 `AccountRecoveryClosedV1`。该 Contract 至少包含 `ExchangeAccountRef`、`account_session_generation`、每个 private stream/source 的 sequence/cursor 或明确替代比较器、signed snapshot 的 scope/observed time、历史 query overlap window、closed account/order/fill watermarks、projection revision、session readiness、证据 expiry 与比较器版本。无可靠 sequence 的交易所不能只写“时间相近”：必须声明以何种 order/fill identity、查询范围和重叠窗口证明快照与缓冲流闭合；任何来源无法比较、query 覆盖不足、evidence 到期或 generation 不匹配时都不得发布 `AccountAdmissionReady`。
+`Healthy` 与新增风险 admission 只能消费 Account owner 发布的 `AccountRecoveryCheckpointV1`。该 Contract 至少包含 `ExchangeAccountRef`、`account_session_generation`、每个 private stream/source 的 sequence/cursor 或明确替代比较器、signed snapshot 的 scope/observed time、历史 query overlap window、account/order/fill coverage checkpoints、projection revision、session status、validity window 与比较器版本。无可靠 sequence 的交易所不能只写“时间相近”：必须声明以何种 order/fill identity、查询范围和重叠窗口证明快照与缓冲流闭合；任何来源无法比较、query 覆盖不足、checkpoint 到期或 generation 不匹配时都不得发布 `AccountTradingEligible`。
 
-私有流和 signed query 的原始事实只由 Account 消费。Account 先以当前 generation 写入投影，再发布 `AccountFactV1 { source_event_or_query_id, cursor_or_comparator, generation, projection_revision, related_watermark }`；Execution 只经 Inbox 消费该 Contract 更新 OMS，绝不直接持有 User Stream 或重建 AccountProjection。
+私有流和 signed query 的原始事实只由 Account 消费。Account 先以当前 generation 写入投影，再发布 `AccountFactV1 { source_event_or_query_id, cursor_or_comparator, generation, projection_revision, related_checkpoint }`；Execution 只经 Inbox 消费该 Contract 更新 OMS，绝不直接持有 User Stream 或重建 AccountProjection。
 
 ### 3. 心跳、listenKey 续期、lease 续约一律用 WallClock
 
@@ -103,7 +103,7 @@ AccountSession Phase 1 虽为单实例，也不能把“单实例”当作 fenci
 
 - **进入 degraded 的条件（全部满足）**：私有流断；该会话仍有 `ManagedExposure`、受管挂单或未结 `SafetyObligation`（仅 `ObservedExternalPosition` 的账户直接 stale）；REST 配额有余量；未超降级最大时长（默认 10 分钟）；
 - degraded 下每 `poll_interval`（默认 30 秒）拉 signed 快照，投影标记 `account_data_source=degraded`；
-- **degraded 禁止新开仓和加仓**：不得把动态会话状态写入不可变 `ExecutionDecisionContextSnapshot`，也不得通过“保守系数”放行。当前新鲜度、数据源与 polling watermark 只能作为 `AccountSnapshot`/`PreTradeSnapshot`/最终门禁 evidence；
+- **degraded 禁止新开仓和加仓**：不得把动态会话状态写入不可变 `ExecutionDecisionContextSnapshot`，也不得通过“保守系数”放行。当前 `AccountStateVerification`、数据源与 polling cursor 只能作为 `AccountSnapshot`/`PreTradeSnapshot`/最终门禁 inputs；
 - 仅允许 signed query 对账、持续 Risk、撤单、保护和可证明的 reduce-only（减仓/平仓）。RiskAction 必须经 Execution 的正常 planning/幂等路径，不能直接修改投影或调用 SDK；
 - **私有配额协调**：同一 `PrivateQuotaKey` 内 mutation > 对账 > degraded polling；配额紧张时 polling 可退避（30→60→120 秒），但 polling 不得挤占 mutation 预算。大量账户同时 degraded 时按既有受管义务优先级（有 `ManagedExposure` > 有受管挂单 > 仅对账）分配有限 polling 名额；
 - **降为 stale 的条件（任一）**：超降级时长；polling 连续失败；配额耗尽且优先级不足；signed query 出现无法自动和解的差异（交 reconciliation 人工处置）。
@@ -127,8 +127,8 @@ AccountSession Phase 1 虽为单实例，也不能把“单实例”当作 fenci
 | --- | --- | --- | --- |
 | `account_shard_assignment(exchange_account_ref, shard_id, topology_version, ...)` | Account | Account Postgres 表 | 无 TTL；版本化静态拓扑，显式运维变更，不能由 Redis 或环境变量覆盖。 |
 | `account_lease(exchange_account_ref, instance_id, lease_until, generation, ...)` | Account | Redis 原子脚本 / lease | AccountSession Phase 2 默认 30 秒 TTL；到期才可接管，接管后必须重新 Buffering → SnapshotReconciling。不得双写为 Postgres 的第二个权威 lease。 |
-| `ExchangeSession` readiness、最后消息墙钟时间、水位闭合、listenKey 续期与重连 metadata | Account | Redis 运行态键 | 短 TTL，不能超过 session 新鲜度预算；键丢失、Redis 重启或进程重启即 `stale`，必须由私有流 + signed snapshot 重建。它不是 Postgres 长期账户事实。 |
-| `AccountProjectionWriteFence` / 已接受最大 `account_session_generation` | Account | 与 AccountProjection 相同的 Account Postgres 写事务 | 这是投影写 fencing receipt，不是第二个 lease 真相；旧 generation 的事件/快照写入拒绝或隔离。AccountSnapshot 与 AccountRecoveryClosed evidence 必须携带已应用 generation 与 closed watermark。 |
+| `ExchangeSession` status、最后消息墙钟时间、recovery checkpoint 闭合、listenKey 续期与重连 metadata | Account | Redis 运行态键 | 短 TTL，不能超过 session 最大允许年龄；键丢失、Redis 重启或进程重启即 `stale`，必须由私有流 + signed snapshot 重建。它不是 Postgres 长期账户事实。 |
+| `AccountProjectionWriteFence` / 已接受最大 `account_session_generation` | Account | 与 AccountProjection 相同的 Account Postgres 写事务 | 这是投影写 fencing receipt，不是第二个 lease 真相；旧 generation 的事件/快照写入拒绝或隔离。AccountSnapshot 与 AccountRecoveryCheckpoint 必须携带已应用 generation 与 closed checkpoint。 |
 | `SafetyMonitoringV1` consumer receipt / 最大 `monitoring_fence` | Account | Account Postgres Inbox/receipt | 只消费 Execution 发布的 Contract；Add/Update 立即纳入会话集合，Remove 必须有匹配 Ack 与闭合谓词。事件缺失后通过全量 snapshot/replay 重建，不能把空缓存解释为无义务。 |
 | live `StrategyEvaluationState` / evaluator checkpoint | Strategy | Redis，按 `EvaluationScopeId + RuntimeSnapshotId + MarketStreamPartition` 分键 | TTL 覆盖策略预热窗口；丢失后从 Market 已确认输入回放/预热，完成前 Signal lane NotReady。 |
 | `RunCheckpoint`、`SimulationLedger` | Research | Research Postgres | 无 TTL 的研究事实；通过 Research Run 重放恢复，绝不进入 live session/lease 或生产 Account/Order/Fill 事实。 |
@@ -145,7 +145,7 @@ lease 与分片是“谁持有连接”的协调机制，**不替代业务唯一
 4. 运行时时效判定用 WallClock，不用注入 Clock；
 5. degraded polling 仅纳入对应用户的 `PrivateQuotaKey` 协调，不挤占 mutation 预算；公共 `PublicQuotaKey` 与用户账户容量无关；
 6. 商业资格移除会冻结新风险增加，但不会在未结 SafetyObligation 存在时移除安全监测会话；credential capability 缺失则进入 SafetyBlocked/人工处置，不能旁路；
-7. AccountSession Phase 间迁移不改变 execution-worker / Risk / Execution 的 owner 边界——它们只消费 Account evidence、AccountAdmissionReady 与版本化安全监测 Contract，不关心连接池内部实现。
+7. AccountSession Phase 间迁移不改变 execution-worker / Risk / Execution 的 owner 边界——它们只消费 Account facts、AccountTradingEligible 与版本化安全监测 Contract，不关心连接池内部实现。
 
 ## 后果
 
@@ -154,7 +154,7 @@ lease 与分片是“谁持有连接”的协调机制，**不替代业务唯一
 - 平台可支持的 monitored session 规模有明确的分阶段容量模型与迁移触发条件；
 - 连接异常有分级处理（fail-closed / degraded），但 degraded 只守住既有敞口，不放宽新风险增加；
 - 多实例脑裂、迁移风暴、断线丢事件等典型事故有显式护栏；
-- ExchangeSession readiness 有可落地的实现，与既有 fail-closed、配额、时钟约束一致。
+- ExchangeSession status 有可落地的实现，与既有 fail-closed、配额、时钟约束一致。
 
 **代价**：
 
@@ -180,5 +180,5 @@ lease 与分片是“谁持有连接”的协调机制，**不替代业务唯一
 6. （AccountSession Phase 3）配额紧张时 polling 退避而非 fail-closed；mutation 优先级不被 polling 挤占；
 7. （AccountSession Phase 3）新实例加入触发最小迁移、限速、先停止/断流/停写/释放再接管；交接期默认 stale，只有满足 degraded 全部条件才转 degraded；rebalance 全局并发不超上限；
 8. 退订或会员/claim 到期后，未结 SafetyObligation 仍保留安全监测会话并冻结新风险；`SafetyMonitoringV1` Add/Update/Remove 的乱序、重放、漏收和 Account 重启不能形成监测空窗；credential 撤销导致安全能力不可用时产生 `SafetyBlocked`/人工处置，而不是使用平台公共数据材料。
-9. `AccountRecoveryClosedV1` 在有 sequence 与无 sequence 的交易所都能展示逐来源 cursor/comparator、snapshot scope、overlap/query 覆盖和 evidence expiry；任一证明不完整时 AccountAdmissionReady 保持拒绝。
+9. `AccountRecoveryCheckpointV1` 在有 sequence 与无 sequence 的交易所都能展示逐来源 cursor/comparator、snapshot scope、overlap/query 覆盖和 validity window；任一闭合条件不完整时 AccountTradingEligible 保持拒绝。
 10. 容量压测、冷启动、rebalance 和告警按 `monitored_exchange_account_sessions` 统计，包含仅因 SafetyObligation 留存的会话；达到 Phase 触发阈值前不启用下一阶段能力。

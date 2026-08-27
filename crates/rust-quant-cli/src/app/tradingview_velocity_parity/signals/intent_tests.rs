@@ -38,6 +38,7 @@ fn strict_visual_signal(
             upper_drift_ratio: 0.1,
             lower_drift_ratio: 0.1,
         },
+        execution_boundary: 100.0,
         direction: Direction::Long,
         breakout_index: 2,
         signal_index: 3,

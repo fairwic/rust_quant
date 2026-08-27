@@ -30,7 +30,12 @@ use super::model::{
     StrictVisualBreakoutResearchVariant,
 };
 use super::ranges::{confirmed_anchor_range, nearest_sideways_zone, ConfirmedRange};
-use super::strict_visual_breakout::{StrictVisualBreakoutSignal, StrictVisualLongEntryState};
+use super::strict_visual_breakout::{
+    strict_visual_short_signal_gates_pass, StrictVisualBreakoutSignal,
+};
+use super::strict_visual_breakout_experiments::is_opposing_sweep_reclaimed;
+use super::strict_visual_post_confirmation_hold::StrictVisualPostConfirmationHoldState;
+use super::strict_visual_prior_range_clearance::StrictVisualPriorRangeClearanceState;
 use anchor_failed_acceptance::{
     arm_recent_horizontal_first_break, evaluate_failed_acceptance_only,
     evaluate_pending as evaluate_false_breakout_pending, FalseBreakoutPending, FalseBreakoutSignal,
@@ -149,7 +154,8 @@ pub struct SignalState {
     ema_short_ablation: EmaShortAblationState,
     ema_trend_long_research_variant: EmaTrendLongResearchVariant,
     sell_climax_base_reclaim_variant: SellClimaxBaseReclaimResearchVariant,
-    strict_visual_breakout: StrictVisualLongEntryState,
+    strict_visual_breakout: StrictVisualPriorRangeClearanceState,
+    strict_visual_post_confirmation_hold: StrictVisualPostConfirmationHoldState,
     strict_visual_breakout_variant: StrictVisualBreakoutResearchVariant,
 }
 impl SignalState {
@@ -213,29 +219,77 @@ impl SignalState {
         };
         let candle = candles[index];
         let take_profit_atr = point.filtered_volume_ratio.and_then(take_profit_tier);
+        let strict_visual_prior_range_update =
+            self.strict_visual_breakout_variant.is_enabled().then(|| {
+                self.strict_visual_breakout.update(
+                    candles,
+                    index,
+                    tick_size,
+                    point.atr14,
+                    point.volume_event,
+                    point.filtered_volume_ratio,
+                    take_profit_atr,
+                    self.strict_visual_breakout_variant,
+                )
+            });
+        if let Some((signal, _)) = strict_visual_prior_range_update
+            .as_ref()
+            .and_then(|update| update.rejected)
+        {
+            result.blocked.push(blocked(
+                candle.timestamp_ms,
+                signal.direction,
+                "V30_PRIOR_VALID_RANGE_CLEARANCE_NOT_ABOVE_ONE_HEIGHT",
+            ));
+        }
+        if let Some((signal, _)) = strict_visual_prior_range_update
+            .as_ref()
+            .and_then(|update| update.trade_boundary_rejected)
+        {
+            result.blocked.push(blocked(
+                candle.timestamp_ms,
+                signal.direction,
+                "V36_BREAKOUT_CLOSE_DID_NOT_CLEAR_TRADE_BOUNDARY",
+            ));
+        }
+        let raw_strict_visual_breakout =
+            strict_visual_prior_range_update.and_then(|update| update.confirmed);
         let strict_visual_breakout = self
-            .strict_visual_breakout_variant
-            .is_enabled()
-            .then(|| {
-                self.strict_visual_breakout
-                    .update(
-                        candles,
-                        index,
-                        tick_size,
-                        point.atr14,
-                        point.volume_event,
-                        point.filtered_volume_ratio,
-                        take_profit_atr,
-                        self.strict_visual_breakout_variant,
-                    )
-                    .and_then(|event| event.entry_signal())
-            })
-            .flatten();
+            .strict_visual_post_confirmation_hold
+            .update(
+                index,
+                candle,
+                raw_strict_visual_breakout,
+                self.strict_visual_breakout_variant,
+            )
+            .confirmed;
+        let strict_visual_breakout = strict_visual_breakout.filter(|signal| {
+            let rejected = self
+                .strict_visual_breakout_variant
+                .rejects_opposing_confirmation_sweep()
+                && is_opposing_sweep_reclaimed(candle, signal.direction, signal.source_atr);
+            if rejected {
+                result.blocked.push(blocked(
+                    candle.timestamp_ms,
+                    signal.direction,
+                    "V33_OPPOSING_CONFIRMATION_SWEEP_RECLAIMED",
+                ));
+            }
+            !rejected
+        });
         let strict_visual_long =
             strict_visual_breakout.filter(|signal| signal.direction == Direction::Long);
-        let strict_visual_short =
-            strict_visual_breakout.filter(|signal| signal.direction == Direction::Short);
-        let strict_visual_breakout_line = strict_visual_long.map(|signal| signal.range.upper);
+        let strict_visual_short = strict_visual_breakout
+            .filter(|signal| signal.direction == Direction::Short)
+            .filter(|signal| {
+                strict_visual_short_signal_gates_pass(
+                    signal,
+                    indicators.points[signal.breakout_index].ema144,
+                    self.strict_visual_breakout_variant,
+                )
+            });
+        let strict_visual_breakout_line =
+            strict_visual_long.map(|signal| signal.execution_boundary);
         let patterns = candle_patterns(candles, index);
         let mut divergence = divergence_at(candles, indicators, index);
         if rule_version.includes_v4_guards()

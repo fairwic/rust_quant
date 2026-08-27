@@ -67,7 +67,7 @@ Message Contract
 | 始终必须成立的不变量 | `domains/<owner>/model` | 已 Filled 订单不能回到 Acknowledged；订单数量必须为正 |
 | 基于完整输入作纯决策 | `domains/<owner>/policies` | 资本分配、风险缩减、执行算法选择 |
 | 一个完整业务动作的顺序 | `domains/<owner>/use_cases/commands` | 创建 OrderIntent、申请撤单、发布策略版本 |
-| 一个只读业务问题 | `domains/<owner>/use_cases/queries` | 查询未保护敞口、查询账户 readiness |
+| 一个只读业务问题 | `domains/<owner>/use_cases/queries` | 查询未保护敞口、查询账户交易资格 |
 | 消费事件后的业务动作 | `domains/<owner>/use_cases/consumers` | FillEvent 更新订单并触发账户投影 |
 | 用例需要的外部能力接口 | `domains/<owner>/ports` | OrderStore、ExchangePort、Clock、OutboxPort |
 | SQL、Row、数据库锁与事务 | `adapters/postgres/<owner>` | `SELECT ... FOR UPDATE`、批量 upsert |
@@ -202,14 +202,14 @@ RiskPolicySnapshot                  -> Risk policy
 ExecutionPlanningPolicySnapshot     -> Order/Protection planning
               \                         /
                -> DecisionContextCoreV1
-                  + 动态 MarketDecisionReadiness/Market/Account/Instrument Evidence
+                  + 动态 DecisionMarketDataStatus/Market/Account/Instrument Inputs
                   + live: ExecutionDecisionContextSnapshot(ExecutionRequest subject)
                   + research: ResearchDecisionContextSnapshot(ResearchScenario subject)
 ```
 
 Owner 边界固定为：
 
-- Strategy 输出候选失效价、退出意图/候选止盈计划和 Signal evidence；
+- Strategy 输出候选失效价、退出意图/候选止盈计划和 SignalDecisionRecord；
 - Portfolio 决定资本预算、净额和目标仓位；
 - Risk 选择不可放宽的最终止损与风险边界、批准数量并生成 `RiskDecision`，不替 Strategy 发明盈利目标；
 - Execution 根据 Strategy exit intent、RiskDecision 和 instrument capability 先生成纯、规范化的 `ExecutionPlanningValue`（内含有序 child `OrderPlan` 与 `ProtectionPlanningValue`）；只有 live intake 的单一事务才能由该值初始化持久 `ExecutionPlan` aggregate 与 `ProtectionPlan`；
@@ -222,11 +222,11 @@ Owner 边界固定为：
 完整配置边界固定为：
 
 - `StrategyRuntimeSnapshot` 不包含账户、用户、凭证、risk profile 或其他 owner 的政策内容；
-- `ActivationEligibilityV1` 由 Strategy owner 随 immutable RuntimeSnapshot、Release generation、Completed Evidence、allowed deployment channel、eligibility generation 与撤销状态发布；Control 的 `ActivationPointer` 只能消费该资格，且必须满足 channel×stage，不能从“已发布”或可变 Release 状态自行推断；
+- `ActivationEligibilityV1` 由 Strategy owner 随 immutable RuntimeSnapshot、Release generation、Completed ResearchResultArtifact、allowed deployment channel、eligibility generation 与撤销状态发布；Control 的 `ActivationPointer` 只能消费该资格，且必须满足 channel×stage，不能从“已发布”或可变 Release 状态自行推断；
 - Web risk profile 只能作为 `ExecutionRequest` 中的精确来源/授权引用，由 Core Risk 校验并解析为 Published `RiskPolicySnapshot`；
 - Execution 在自己的事务中把四个 Published Policy Snapshot 绑定成 `ExecutionDecisionContextSnapshot`，并与请求 intake/幂等身份一起持久化；Research 使用 `ResearchScenarioRef`/`ResearchDecisionContextSnapshot`，不得伪造 Web execution fields；
-- `MarketDecisionReadiness`、MarketSnapshot、AccountSnapshot、InstrumentRulesSnapshot 和 observed time 是动态决策证据，不得塞进 Policy Snapshot；非 `ReadyForNewRisk` 时只允许已声明且可证明的 reduce-only 路径，不能新增/加仓；
-- 连续 `RiskAction` 必须按 `risk_action_decision_id = subject_binding_hash + trigger_event/evidence_hash + risk_policy_snapshot_hash + action_generation` 幂等；同一 identity 只能产生一次同语义 action/outcome，避免事件重放重复减仓/平仓；
+- `DecisionMarketDataStatus`、MarketSnapshot、AccountSnapshot、InstrumentRulesSnapshot 和 observed time 是动态决策输入，不得塞进 Policy Snapshot；非 `UsableForNewRisk` 时只允许已声明且可证明的 reduce-only 路径，不能新增/加仓；
+- 连续 `RiskAction` 必须按 `risk_action_decision_id = subject_binding_hash + trigger_input_hash + risk_policy_snapshot_hash + action_generation` 幂等；同一 identity 只能产生一次同语义 action/outcome，避免事件重放重复减仓/平仓；
 - Research 取得历史 Market 输入只能使用 Market historical API/Contract，禁止直读 Market Storage、触发 backfill、使用生产 Adapter 或持有 `MarketDataAccessCredential`；
 - Research 用 `ResearchRunSpec` 冻结 DatasetManifest、四个 Policy Snapshot、SimulationProfile、模拟账户初态和 Clock/Seed，再以同一 `DecisionContextCoreV1` builder 构造 ResearchScenario binding；
 - 任一默认值只能由字段 owner 在发布 Snapshot 时展开；App、Research 和 Dispatcher 禁止自行补业务默认值或选择“当前最新配置”。
@@ -414,7 +414,7 @@ Adapter 使用乐观版本、唯一约束、状态条件或行锁防止丢失更
 
 交易事实默认不做业务硬删除：
 
-- Order、Fill、RiskDecision、Release 和 Reconciliation Evidence 使用状态迁移或保留策略；
+- Order、Fill、RiskDecision、Release 和 ReconciliationReport 使用状态迁移或保留策略；
 - 真正物理删除只用于已定义生命周期的缓存、临时数据、幂等记录或合规清理；
 - 删除必须是 owner Command，并记录范围、保留期、审计和恢复/不可恢复说明；
 - Admin 不得直接执行跨 owner `DELETE`。
@@ -437,9 +437,9 @@ Use case 不接收 `sqlx::Transaction`，而是调用一个表达原子业务动
 - Outbox Event；
 - 同 owner 的审计事实。
 
-Execution 的 live 下单准备是该规则的严格实例：`RiskDecision` 由 Risk owner 先行持久化；Execution 不建立跨 owner 事务，只在自己的单一事务中取得 `AccountOpeningSlot`，保存不可变审批引用与 `ExecutionPlanningValue` hash，并原子保存由其初始化的 `SubmitPending + OrderIntent + ExecutionPlan（含 child OrderPlan snapshot）+ ProtectionPlan + Idempotency + Outbox`。该事务提交前禁止确认上游或发生外部 I/O；提交后由 Dispatcher 复核 `MarketDecisionReadiness`、账户新鲜度、资格与保护门禁并签发 permit，再由 Fenced Gateway 消费 current permit 后调用交易所。
+Execution 的 live 下单准备是该规则的严格实例：`RiskDecision` 由 Risk owner 先行持久化；Execution 不建立跨 owner 事务，只在自己的单一事务中取得 `AccountOpeningSlot`，保存不可变审批引用与 `ExecutionPlanningValue` hash，并原子保存由其初始化的 `SubmitPending + OrderIntent + ExecutionPlan（含 child OrderPlan snapshot）+ ProtectionPlan + Idempotency + Outbox`。该事务提交前禁止确认上游或发生外部 I/O；提交后由 Dispatcher 复核 `DecisionMarketDataStatus`、账户状态核验、交易资格与保护门禁并签发 permit，再由 Fenced Gateway 消费 current permit 后调用交易所。
 
-Opening slot 也是 Execution owner 事实，不由 worker lease 代替。释放必须由业务用例验证全部 child mutation 已确定、没有 attempt/Unknown、Account owner typed watermark 已覆盖 cumulative fill，且剩余敞口保护满足政策；Adapter 只原子执行该决定。
+Opening slot 也是 Execution owner 事实，不由 worker lease 代替。释放必须由业务用例验证全部 child mutation 已确定、没有 attempt/Unknown、Account owner typed checkpoint 已覆盖 cumulative fill，且剩余敞口保护满足政策；Adapter 只原子执行该决定。
 
 ### 6.3 跨 Owner 一致性
 
@@ -454,25 +454,25 @@ Owner A 本地事务：State A + Outbox
 
 Reconciliation 不能直接修改 Owner B 的表，只能发送 Owner B 的 typed command。
 
-### 6.4 ResearchEvidence 的原子可见发布
+### 6.4 ResearchResultArtifact 的原子可见发布
 
-ResearchEvidence 由 Research Domain 拥有，不是 Strategy 表的附件，也不能由 `quant/backtest` 直接写数据库。新增研究写入使用固定链路：
+ResearchResultArtifact 由 Research Domain 拥有，不是 Strategy 表的附件，也不能由 `quant/backtest` 直接写数据库。新增研究写入使用固定链路：
 
 ```text
 Research complete/publish use case
-  -> ResearchEvidenceStore / ResearchRunStore
+  -> ResearchResultArtifactStore / ResearchRunStore
   -> adapters/object-store/research 先上传不可变内容寻址对象
   -> adapters/postgres/research 在单个数据库事务中写：
-       EvidenceManifest + Metrics/EvidenceObjectRef + Idempotency + Run.Completed
+       ResultArtifactManifest + Metrics/ResultObjectRef + Idempotency + Run.Completed
 ```
 
 这里保证的是“原子可见”，不是对象存储与 PostgreSQL 的全局原子事务：
 
-- 查询、晋级和 StrategyRelease 只能引用 `Completed` evidence；
+- 查询、晋级和 StrategyRelease 只能引用 `Completed` ResearchResultArtifact；
 - 数据库事务失败时，已上传但未被 Completed manifest 引用的对象属于 orphan，由 Research GC 按保留期清理；
-- 同一 `BacktestRunId + evidence kind + content hash` 必须幂等；
+- 同一 `BacktestRunId + result kind + content hash` 必须幂等；
 - Research Adapter 不得写生产 Order、Fill、Position 或 AccountProjection 表；
-- Strategy 发布用例只能保存已完成 EvidenceManifest 的稳定引用，不能复制或改写证据内容。
+- Strategy 发布用例只能保存已完成 ResultArtifactManifest 的稳定引用，不能复制或改写研究结果内容。
 
 ### 6.5 Outbox、幂等、投递与恢复的 Owner
 
@@ -576,7 +576,7 @@ migrations/
 - Web/Admin 读取 Core 交易事实必须使用 Core API、Event 或只读投影；
 - 禁止新增跨库 SQL、共享 ORM Model 或让 Admin 直写业务表。
 - 跨仓库业务 payload 随其唯一 owner 仓库发布：Core `crates/contracts` 只保存 Core owner payload 和 owner-neutral `ContractEnvelopeV1` primitive；Web/News payload 由各自 owner 发布，Core 仅在 Adapter 显式映射固定版本 binding。Envelope 只放传输 identity，不能携带业务字段；Envelope/payload 均须独立 N/N-1 兼容测试。
-- `NewsInsightV1` 由 News owner 发布且带 version、`published_at`、不可变 `available_at` 与 evidence ref；它只可作为 `StrategyRuntimeSnapshot` 声明可消费的已发布 evaluator 输入，且仅当 `available_at <= DecisionTime` 时可消费为 `StrategySignal`，不得直接形成 Web `ExecutionRequest`。
+- `NewsInsightV1` 由 News owner 发布且带 version、`published_at`、不可变 `available_at` 与 analysis result ref；它只可作为 `StrategyRuntimeSnapshot` 声明可消费的已发布 evaluator 输入，且仅当 `available_at <= DecisionTime` 时可消费为 `StrategySignal`，不得直接形成 Web `ExecutionRequest`。
 
 ### 10.2 Execution Request 与订单事实
 

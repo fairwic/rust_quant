@@ -885,6 +885,8 @@ mod tests {
             evaluation_end_ms: 10_000_000,
             fee_bps_per_side: 0.0,
             slippage_bps_per_side: 0.0,
+            exit_fee_bps_per_side: None,
+            exit_slippage_bps_per_side: None,
             metrics: Metrics {
                 trades: trades.len(),
                 wins: trades.iter().filter(|trade| trade.net_pnl > 0.0).count(),

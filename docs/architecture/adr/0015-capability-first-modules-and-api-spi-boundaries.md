@@ -16,7 +16,7 @@ Owner、crate 和五类物理目录已经解决“业务属于谁”和“依赖
 - 先写 Trait 和 Fake、后补业务的“空 Port 架构”，长期没有生产 Adapter；
 - Use Case 持有越来越多 Port，重新变成万能 Service；
 - App、Outbox publisher、Reconciliation 和数据库 Adapter 之间没有明确恢复责任；
-- 文件虽然没有达到仓库 2000 行硬上限，但在 600～1000 行时已经失去单一修改理由。
+- 文件即使没有达到仓库 800 行硬上限，也可能在 500 行提醒区间内已经失去单一修改理由。
 
 目标不是追求更多目录，而是让一个真实业务能力能够被局部理解、局部验证和局部替换，并让机器在代码变成大文件之前阻止继续堆积。
 
@@ -172,7 +172,7 @@ crates/adapters/exchange-gateway/src/
 - 其他 Domain、Adapter 和 App 的可见面被物理分开；
 - Port、Use Case、Outbox 和恢复责任能被逐 capability 和 Domain Wave 验收；
 - provider/枚举/错误不再自然汇聚成单文件；
-- 大文件在 600 行生产代码前触发拆分，而不是等到仓库 2000 行硬上限。
+- 大文件从 500 行起触发可读性检查，存在清晰职责边界时拆分，且不得越过仓库 800 行硬上限。
 
 ### 代价
 

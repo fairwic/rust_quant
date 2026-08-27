@@ -80,8 +80,8 @@ L1 不宣称已逐函数证明行为一致，也不把目录、trait、README、
 - market.reference.instrument_rules
 - market.reference.lifecycle
 - market.reference.source_profiles
-- market.reference.readiness
-- market.reference.dataset_facts
+- market.reference.dataset_check
+- market.reference.dataset_usage
 - market.stream.bars
 - market.stream.bars.history
 - market.stream.bars.sync
@@ -97,7 +97,7 @@ L1 不宣称已逐函数证明行为一致，也不把目录、trait、README、
 
 - 保留标的、K 线、成交、资金费和标记价格业务事实；
 - 优化同步游标、确认 K 线、来源能力、数据质量和 InstrumentRules 生效时间；
-- 新增明确的数据 readiness 与 dataset identity；
+- 新增明确的 dataset check 与 dataset identity；
 - 退役 market_candles 单表概念；
 - W1 完成前不迁移 Strategy 扫描或实盘执行。
 
@@ -149,7 +149,7 @@ Research 目标能力：
 - research.dataset
 - research.simulation
 - research.evaluation
-- research.evidence
+- research.result_artifact
 - research.qualification
 
 Quant 目标能力：
@@ -296,13 +296,13 @@ Quant 目标能力：
 - reconciliation.detection
 - reconciliation.case
 - reconciliation.recovery
-- reconciliation.evidence
+- reconciliation.report
 
 处置：
 
 - 从 execution worker 的大型文件中抽取为独立闭环；
 - Reconciliation 不直接覆盖 owner 数据；
-- 差异必须形成案例、严重度、恢复 owner 和关闭证据。
+- 差异必须形成案例、严重度、恢复 owner 和关闭报告。
 
 ### 3.9 Control、Platform 与运行入口
 
@@ -390,7 +390,7 @@ Contract 按 Market、Strategy、Research、Portfolio、Account、Risk、Executi
 - confirmed、未确认、修正、缺口和重复语义；
 - Decimal 存储、f64 计算边界；
 - source profile、固定 API Key 与 secret handle；
-- 数据 readiness 和分表生命周期。
+- dataset check 和分表生命周期。
 
 ### W2 Strategy、Research、Quant
 
@@ -421,7 +421,7 @@ Contract 按 Market、Strategy、Research、Portfolio、Account、Risk、Executi
 ### W5 Control 与统一切换
 
 - 运行角色和唯一入口；
-- readiness、kill switch、发布和回滚；
+- process health、kill switch、发布和回滚；
 - 全链路 shadow、parity 和首个差异层；
 - 数据库与消息积压；
 - operator 证据和告警；

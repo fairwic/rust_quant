@@ -2,15 +2,20 @@
 //!
 //! 该模块只读取 OKX 公共历史行情，不注册策略目录、Paper、Live、调度器或数据库写入。
 
+mod acceptance_retention;
 mod engine;
 mod indicators;
 mod model;
 mod ranges;
+mod replay_config;
 mod signals;
 pub mod strict_static_report;
 pub mod strict_static_universe;
 pub mod strict_static_universe_io;
 mod strict_visual_breakout;
+mod strict_visual_breakout_experiments;
+mod strict_visual_post_confirmation_hold;
+mod strict_visual_prior_range_clearance;
 mod universe;
 
 use anyhow::{bail, Context, Result};
@@ -61,20 +66,43 @@ pub use strict_static_report::{
     STRICT_STATIC_SLIPPAGE_BPS_PER_SIDE,
 };
 pub use strict_visual_breakout::{
+    audit_strict_visual_body_wick_candidate_for_research,
+    evaluate_strict_visual_body_wick_candidate_for_research,
+    evaluate_strict_visual_dual_boundary_candidate_for_research,
+    evaluate_strict_visual_percentile_candidate_for_research, strict_visual_body_wick_envelope,
     strict_visual_breakout_body_strength, strict_visual_breakout_body_strength_for_variant,
-    StrictVisualBreakoutBodyStrength, StrictVisualBreakoutSignal, StrictVisualConsolidationState,
-    StrictVisualDepartureSide, StrictVisualLongEntryEvent, StrictVisualLongEntryState,
-    StrictVisualRangeEvent, StrictVisualRangeEvidence, StrictVisualWeakDepartureEvidence,
+    strict_visual_breakout_body_to_range_height, strict_visual_breakout_qualifies_for_range,
+    strict_visual_short_signal_gates_pass, StrictVisualBodyWickEnvelope,
+    StrictVisualBreakoutBodyStrength, StrictVisualBreakoutSignal,
+    StrictVisualCandidateQualityAudit, StrictVisualConsolidationState, StrictVisualDepartureSide,
+    StrictVisualDualBoundaryEvidence, StrictVisualInternalImpulseEvidence,
+    StrictVisualLongEntryEvent, StrictVisualLongEntryState, StrictVisualRangeEvent,
+    StrictVisualRangeEvidence, StrictVisualWeakDepartureEvidence,
     STRICT_VISUAL_BREAKOUT_MIN_BODY_RATIO, STRICT_VISUAL_BREAKOUT_MIN_DIRECTIONAL_MOVE_RATIO,
-    STRICT_VISUAL_RETAINED_ACCEPTANCE_WINDOW_BARS, STRICT_VISUAL_RETAINED_BREAKOUT_EXCESS_RATIO,
-    STRICT_VISUAL_RETAINED_BREAKOUT_MIN_BODY_RATIO,
+    STRICT_VISUAL_CANDIDATE_LENGTHS, STRICT_VISUAL_DYNAMIC_ANCHOR_MIN_BODY_RATIO,
+    STRICT_VISUAL_DYNAMIC_ANCHOR_MIN_BODY_TO_RANGE_HEIGHT,
+    STRICT_VISUAL_MAX_INTERNAL_BODY_TO_RANGE_HEIGHT, STRICT_VISUAL_RETAINED_ACCEPTANCE_WINDOW_BARS,
+    STRICT_VISUAL_RETAINED_BREAKOUT_EXCESS_RATIO, STRICT_VISUAL_RETAINED_BREAKOUT_MIN_BODY_RATIO,
     STRICT_VISUAL_RETAINED_BREAKOUT_MIN_DIRECTIONAL_MOVE_RATIO,
     STRICT_VISUAL_SHORT_RANGE_ONE_R_MAX_BARS,
 };
+pub use strict_visual_breakout_experiments::{
+    cost_covered_break_even_price, has_minimum_remaining_net_reward, is_opposing_sweep_reclaimed,
+    prior_three_bars_have_supporting_wick, remaining_net_reward_r, MIN_REMAINING_NET_REWARD_R,
+    MIN_WICK_TO_SOURCE_ATR, OPPOSING_SWEEP_CLOSE_LOCATION, PRIOR_WICK_LOOKBACK_BARS,
+};
+pub use strict_visual_post_confirmation_hold::strict_visual_next_bar_hold_required_close;
+pub use strict_visual_prior_range_clearance::{
+    StrictVisualCompletedRange, StrictVisualPriorRangeClearanceState,
+    StrictVisualPriorRangeObstruction, StrictVisualPriorRangeUpdate,
+    StrictVisualTradeBoundaryEvidence, STRICT_VISUAL_PRIOR_RANGE_LOOKBACK_BARS,
+};
 pub use universe::{
-    load_frozen_top60_from_quant_core, load_frozen_universe_spec, FrozenSymbolCandles,
-    FrozenUniverseData, FrozenUniverseSpec, SymbolCoverageDiagnostic, UniverseCoverageDiagnostic,
-    FROZEN_UNIVERSE_MANIFEST_SHA256, FROZEN_UNIVERSE_VERSION, FROZEN_WARMUP_DAYS,
+    load_frozen_top60_from_quant_core, load_frozen_universe_spec,
+    load_research_window_symbols_from_quant_core, FrozenSymbolCandles, FrozenUniverseData,
+    FrozenUniverseSpec, ResearchWindowSymbolCandles, SymbolCoverageDiagnostic,
+    UniverseCoverageDiagnostic, FROZEN_UNIVERSE_MANIFEST_SHA256, FROZEN_UNIVERSE_VERSION,
+    FROZEN_WARMUP_DAYS,
 };
 
 use super::market_velocity_backfill::fetch_okx_history_candles;

@@ -537,6 +537,10 @@ async fn main() -> Result<()> {
                         weak_departure_consumed_opposite_side += 1;
                     }
                 }
+                // V31 冲击重置不属于突破或弱离区来源；专项 L1 入口单独统计其证据。
+                StrictVisualLongEntryEvent::Range(
+                    StrictVisualRangeEvent::InternalImpulseReset(_),
+                ) => {}
                 StrictVisualLongEntryEvent::DirectSignal(signal) => {
                     upper_breaks += 1;
                     baseline_qualified_breakout_sources += 1;
@@ -665,6 +669,41 @@ async fn main() -> Result<()> {
             | StrictVisualBreakoutResearchVariant::V11BreakoutCandleExtremeStop
             | StrictVisualBreakoutResearchVariant::V12ExtremeStopMinOneAtr => {
                 StrictVisualBreakoutResearchVariant::V9ExternalStructureClearance
+                    .strategy_version(ParityRuleVersion::CandidateV20)
+            }
+            StrictVisualBreakoutResearchVariant::V23AcceptanceRetention75CostReplay => {
+                StrictVisualBreakoutResearchVariant::V23UnifiedRetestNoShortGates
+                    .strategy_version(ParityRuleVersion::CandidateV20)
+            }
+            StrictVisualBreakoutResearchVariant::V28AcceptanceRetention75NextBarHold
+            | StrictVisualBreakoutResearchVariant::V29BoundaryP96P04
+            | StrictVisualBreakoutResearchVariant::V30PriorValidRangeClearance
+            | StrictVisualBreakoutResearchVariant::V31InternalImpulseBodyGuard => {
+                StrictVisualBreakoutResearchVariant::V23AcceptanceRetention75CostReplay
+                    .strategy_version(ParityRuleVersion::CandidateV20)
+            }
+            StrictVisualBreakoutResearchVariant::V32PriorThreeWickDirectChase
+            | StrictVisualBreakoutResearchVariant::V33OpposingConfirmationWickGuard
+            | StrictVisualBreakoutResearchVariant::V34VolumeProfitProtection
+            | StrictVisualBreakoutResearchVariant::V35RemainingNetReward50
+            | StrictVisualBreakoutResearchVariant::V36PreRangeExtremeTradeBoundary96
+            | StrictVisualBreakoutResearchVariant::V40VisualParentExecutionBoundary => {
+                StrictVisualBreakoutResearchVariant::V31InternalImpulseBodyGuard
+                    .strategy_version(ParityRuleVersion::CandidateV20)
+            }
+            StrictVisualBreakoutResearchVariant::V13RawRangeGuard
+            | StrictVisualBreakoutResearchVariant::V14DirectionalMove50Bps
+            | StrictVisualBreakoutResearchVariant::V15DirectionalMove75Bps
+            | StrictVisualBreakoutResearchVariant::V16DirectionalMove100Bps
+            | StrictVisualBreakoutResearchVariant::V17SoftBreakoutShort
+            | StrictVisualBreakoutResearchVariant::V18SoftBreakoutShortDirectEntry
+            | StrictVisualBreakoutResearchVariant::V19SoftBreakoutShortEmaGate
+            | StrictVisualBreakoutResearchVariant::V20SoftBreakoutShortBodyGate
+            | StrictVisualBreakoutResearchVariant::V22UnifiedRetestExecutionCost
+            | StrictVisualBreakoutResearchVariant::V23UnifiedRetestNoShortGates
+            | StrictVisualBreakoutResearchVariant::V25ImmediateWeakDepartureConsume
+            | StrictVisualBreakoutResearchVariant::V26NarrowRangeDynamicAnchor => {
+                StrictVisualBreakoutResearchVariant::V12ExtremeStopMinOneAtr
                     .strategy_version(ParityRuleVersion::CandidateV20)
             }
             StrictVisualBreakoutResearchVariant::V1

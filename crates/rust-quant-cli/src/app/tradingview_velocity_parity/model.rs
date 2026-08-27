@@ -148,16 +148,13 @@ pub const V24_STRATEGY_VERSION: &str =
     "volume_recent_horizontal_first_break_close_back_short_15m_research_v24";
 
 /// V25A 在 V24 上把 8 根横盘收盘方向效率限制为 0.30。
-pub const V25A_STRATEGY_VERSION: &str =
-    "volume_recent_horizontal_direction_efficiency_30_first_break_close_back_short_15m_research_v25a";
+pub const V25A_STRATEGY_VERSION: &str = "volume_recent_horizontal_direction_efficiency_30_first_break_close_back_short_15m_research_v25a";
 
 /// V25B 是预注册主候选，把 8 根横盘收盘方向效率限制为 0.35。
-pub const V25B_STRATEGY_VERSION: &str =
-    "volume_recent_horizontal_direction_efficiency_35_first_break_close_back_short_15m_research_v25b";
+pub const V25B_STRATEGY_VERSION: &str = "volume_recent_horizontal_direction_efficiency_35_first_break_close_back_short_15m_research_v25b";
 
 /// V25C 是同一变量的邻域上界，把方向效率限制为 0.40。
-pub const V25C_STRATEGY_VERSION: &str =
-    "volume_recent_horizontal_direction_efficiency_40_first_break_close_back_short_15m_research_v25c";
+pub const V25C_STRATEGY_VERSION: &str = "volume_recent_horizontal_direction_efficiency_40_first_break_close_back_short_15m_research_v25c";
 
 /// V26 以 V25B 为基线，只把固定 8 根旧窗口替换为紧贴突破前的最长有效父横盘。
 pub const V26_STRATEGY_VERSION: &str =
@@ -176,8 +173,7 @@ pub const V29_STRATEGY_VERSION: &str =
     "volume_active_parent_horizontal_shallow_breakout_excess_10pct_short_15m_research_v29";
 
 /// V30 保留 V29，并要求父横盘在突破前至少完成三次上下边界交替。
-pub const V30_STRATEGY_VERSION: &str =
-    "volume_active_parent_horizontal_edge_transitions_3_shallow_breakout_excess_10pct_short_15m_research_v30";
+pub const V30_STRATEGY_VERSION: &str = "volume_active_parent_horizontal_edge_transitions_3_shallow_breakout_excess_10pct_short_15m_research_v30";
 
 /// 严格视觉横盘首次放量收盘上破的独立 Research 身份；不覆盖 V20 或 V29。
 pub const STRICT_VISUAL_BREAKOUT_STRATEGY_VERSION: &str =
@@ -192,16 +188,13 @@ pub const STRICT_VISUAL_BREAKOUT_BODY_MIDPOINT_HOLD_STRATEGY_VERSION: &str =
     "volume_strict_visual_consolidation_breakout_body_midpoint_hold_long_15m_research_v3";
 
 /// V4 保留 V3 信号，只把不超过 32 根的冻结横盘 Fixed 目标缩短为 1R。
-pub const STRICT_VISUAL_BREAKOUT_SHORT_RANGE_ONE_R_STRATEGY_VERSION: &str =
-    "volume_strict_visual_consolidation_breakout_body_midpoint_hold_short_range_32_one_r_long_15m_research_v4";
+pub const STRICT_VISUAL_BREAKOUT_SHORT_RANGE_ONE_R_STRATEGY_VERSION: &str = "volume_strict_visual_consolidation_breakout_body_midpoint_hold_short_range_32_one_r_long_15m_research_v4";
 
 /// V5 回到 V3 的退出合同，只新增突破源实体占比与方向位移强度门禁。
-pub const STRICT_VISUAL_BREAKOUT_BODY_STRENGTH_STRATEGY_VERSION: &str =
-    "volume_strict_visual_consolidation_breakout_body_strength_60pct_25bps_body_midpoint_hold_long_15m_research_v5";
+pub const STRICT_VISUAL_BREAKOUT_BODY_STRENGTH_STRATEGY_VERSION: &str = "volume_strict_visual_consolidation_breakout_body_strength_60pct_25bps_body_midpoint_hold_long_15m_research_v5";
 
 /// V6 保留 V5 强突破门禁，只把弱离区立即消费改为紧邻一根完成棒观察期。
-pub const STRICT_VISUAL_BREAKOUT_WEAK_DEPARTURE_PROBATION_STRATEGY_VERSION: &str =
-    "volume_strict_visual_consolidation_weak_departure_one_bar_probation_body_strength_long_15m_research_v6";
+pub const STRICT_VISUAL_BREAKOUT_WEAK_DEPARTURE_PROBATION_STRATEGY_VERSION: &str = "volume_strict_visual_consolidation_weak_departure_one_bar_probation_body_strength_long_15m_research_v6";
 
 /// V8 保留 V6 全部合同，只要求首次合法确认收盘至少高出冻结上沿 0.40 个来源 ATR。
 pub const STRICT_VISUAL_BREAKOUT_ACCEPTANCE_MARGIN_STRATEGY_VERSION: &str =
@@ -218,181 +211,8 @@ pub const STRICT_VISUAL_SYMMETRIC_RETAINED_BREAKOUT_STRATEGY_VERSION: &str =
 pub const STRICT_VISUAL_BREAKOUT_CANDLE_EXTREME_STOP_STRATEGY_VERSION: &str =
     "strict_visual_consolidation_symmetric_breakout_candle_extreme_stop_15m_research_v1";
 
-/// Candidate V20 上严格视觉横盘做多家族的独立入场时序；不对应新的 Pine 快照。
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum StrictVisualBreakoutResearchVariant {
-    /// 原样回放 Candidate V20，不计算或追加严格视觉横盘交易。
-    #[default]
-    Baseline,
-    /// 活动横盘首次放量阳线收盘上破时，沿用主策略下一开盘与 ATR 风险合同做多。
-    V1,
-    /// 冻结 V1 突破证据，等待后三根内回踩上沿并收盘守稳后再生成做多意图。
-    V2RetestAcceptance,
-    /// 在 V2 首次确认棒上要求收盘守住冻结突破实体中点；失败后不得等待补开。
-    V3BodyMidpointHold,
-    /// 保留 V3 入场；冻结横盘不超过 32 根时，既有 Fixed 目标改为初始止损对应的 1R。
-    V4ShortRangeOneR,
-    /// 直接继承 V3，并要求突破源实体占比至少 60%、方向实体位移至少 25 bps。
-    V5BreakoutBodyStrength,
-    /// 保留 V5；弱离区等待紧邻下一根完成棒，回区则恢复，否则消费且不补锚点。
-    V6WeakDepartureProbation,
-    /// 保留 V6；首次合法确认收盘距冻结上沿不足 0.40 个来源 ATR 时消费来源。
-    V8AcceptanceMargin40Atr,
-    /// 保留 V8；突破收盘还必须越过横盘前自适应窗口内尚未解决的结构高点。
-    V9ExternalStructureClearance,
-    /// 双向镜像；弱离区观察一棒，强突破后五棒内首次回踩须保留 25% 越界幅度。
-    V10SymmetricRetainedBreakout,
-    /// 保留 V10 全部信号与目标，只把初始止损冻结在突破棒整根极值外一 tick。
-    V11BreakoutCandleExtremeStop,
-    /// 保留 V11 结构止损，并在实际开盘时保证最终风险距离至少为一个确认信号 ATR。
-    V12ExtremeStopMinOneAtr,
-}
-
-impl StrictVisualBreakoutResearchVariant {
-    /// 返回稳定 CLI/报告名称，避免用布尔值丢失候选身份。
-    pub const fn slug(self) -> &'static str {
-        match self {
-            Self::Baseline => "baseline",
-            Self::V1 => "v1",
-            Self::V2RetestAcceptance => "v2_retest_acceptance",
-            Self::V3BodyMidpointHold => "v3_body_midpoint_hold",
-            Self::V4ShortRangeOneR => "v4_short_range_32_one_r",
-            Self::V5BreakoutBodyStrength => "v5_breakout_body_strength_60pct_25bps",
-            Self::V6WeakDepartureProbation => "v6_weak_departure_one_bar_probation",
-            Self::V8AcceptanceMargin40Atr => "v8_acceptance_margin_0_40_atr",
-            Self::V9ExternalStructureClearance => "v9_external_structure_clearance",
-            Self::V10SymmetricRetainedBreakout => "v10_symmetric_retained_breakout_25pct",
-            Self::V11BreakoutCandleExtremeStop => "v11_breakout_candle_extreme_stop",
-            Self::V12ExtremeStopMinOneAtr => "v12_breakout_candle_extreme_stop_min_1atr",
-        }
-    }
-    /// `true` 只表示启用严格横盘 Research 家族；不会注册生产或模拟运行入口。
-    pub const fn is_enabled(self) -> bool {
-        !matches!(self, Self::Baseline)
-    }
-    /// `true` 表示突破棒只冻结来源，必须等待后续完成棒验证价格接受。
-    pub const fn requires_retest_acceptance(self) -> bool {
-        matches!(
-            self,
-            Self::V2RetestAcceptance
-                | Self::V3BodyMidpointHold
-                | Self::V4ShortRangeOneR
-                | Self::V5BreakoutBodyStrength
-                | Self::V6WeakDepartureProbation
-                | Self::V8AcceptanceMargin40Atr
-                | Self::V9ExternalStructureClearance
-                | Self::V10SymmetricRetainedBreakout
-                | Self::V11BreakoutCandleExtremeStop
-                | Self::V12ExtremeStopMinOneAtr
-        )
-    }
-
-    /// `true` 表示 V2 首次可确认棒还必须守住突破实体中点，失败即消费来源。
-    pub const fn requires_breakout_body_midpoint_hold(self) -> bool {
-        matches!(
-            self,
-            Self::V3BodyMidpointHold
-                | Self::V4ShortRangeOneR
-                | Self::V5BreakoutBodyStrength
-                | Self::V6WeakDepartureProbation
-                | Self::V8AcceptanceMargin40Atr
-                | Self::V9ExternalStructureClearance
-        )
-    }
-
-    /// `true` 表示只启用 V4 的冻结短区间 1R 退出变量，不改变 V3 信号状态机。
-    pub const fn uses_short_range_one_r_target(self) -> bool {
-        matches!(self, Self::V4ShortRangeOneR)
-    }
-    /// `true` 表示突破源必须同时通过冻结的 60% 实体占比与 25 bps 方向位移。
-    pub const fn requires_breakout_body_strength(self) -> bool {
-        matches!(
-            self,
-            Self::V5BreakoutBodyStrength
-                | Self::V6WeakDepartureProbation
-                | Self::V8AcceptanceMargin40Atr
-                | Self::V9ExternalStructureClearance
-                | Self::V10SymmetricRetainedBreakout
-                | Self::V11BreakoutCandleExtremeStop
-                | Self::V12ExtremeStopMinOneAtr
-        )
-    }
-
-    /// `true` 表示弱离区只等待紧邻下一根完成棒决定恢复或消费旧横盘。
-    pub const fn uses_weak_departure_probation(self) -> bool {
-        matches!(
-            self,
-            Self::V6WeakDepartureProbation
-                | Self::V8AcceptanceMargin40Atr
-                | Self::V9ExternalStructureClearance
-                | Self::V10SymmetricRetainedBreakout
-                | Self::V11BreakoutCandleExtremeStop
-                | Self::V12ExtremeStopMinOneAtr
-        )
-    }
-
-    /// `true` 表示在 V6 首次合法确认棒上执行冻结来源 ATR 的 0.40 接受余量门禁。
-    pub const fn requires_acceptance_margin_40_atr(self) -> bool {
-        matches!(
-            self,
-            Self::V8AcceptanceMargin40Atr | Self::V9ExternalStructureClearance
-        )
-    }
-
-    /// `true` 表示 V8 原本确认信号时还要检查突破棒冻结的外部结构上沿。
-    pub const fn requires_external_structure_clearance(self) -> bool {
-        matches!(self, Self::V9ExternalStructureClearance)
-    }
-
-    /// `true` 表示使用本轮双向、五棒、25% 越界保留且无量能门禁的完整新合同。
-    pub const fn uses_symmetric_retained_breakout_contract(self) -> bool {
-        matches!(
-            self,
-            Self::V10SymmetricRetainedBreakout
-                | Self::V11BreakoutCandleExtremeStop
-                | Self::V12ExtremeStopMinOneAtr
-        )
-    }
-
-    /// `true` 时突破棒完成即冻结整根极值外一 tick，确认等待期间不得重算。
-    pub const fn uses_breakout_candle_extreme_stop(self) -> bool {
-        matches!(
-            self,
-            Self::V11BreakoutCandleExtremeStop | Self::V12ExtremeStopMinOneAtr
-        )
-    }
-
-    /// 候选使用独立策略身份；基线继续返回所选冻结 Pine/Rust 版本。
-    pub const fn strategy_version(self, base: ParityRuleVersion) -> &'static str {
-        match self {
-            Self::Baseline => base.strategy_version(),
-            Self::V1 => STRICT_VISUAL_BREAKOUT_STRATEGY_VERSION,
-            Self::V2RetestAcceptance => STRICT_VISUAL_BREAKOUT_RETEST_ACCEPTANCE_STRATEGY_VERSION,
-            Self::V3BodyMidpointHold => STRICT_VISUAL_BREAKOUT_BODY_MIDPOINT_HOLD_STRATEGY_VERSION,
-            Self::V4ShortRangeOneR => STRICT_VISUAL_BREAKOUT_SHORT_RANGE_ONE_R_STRATEGY_VERSION,
-            Self::V5BreakoutBodyStrength => STRICT_VISUAL_BREAKOUT_BODY_STRENGTH_STRATEGY_VERSION,
-            Self::V6WeakDepartureProbation => {
-                STRICT_VISUAL_BREAKOUT_WEAK_DEPARTURE_PROBATION_STRATEGY_VERSION
-            }
-            Self::V8AcceptanceMargin40Atr => {
-                STRICT_VISUAL_BREAKOUT_ACCEPTANCE_MARGIN_STRATEGY_VERSION
-            }
-            Self::V9ExternalStructureClearance => {
-                STRICT_VISUAL_BREAKOUT_EXTERNAL_STRUCTURE_CLEARANCE_STRATEGY_VERSION
-            }
-            Self::V10SymmetricRetainedBreakout => {
-                STRICT_VISUAL_SYMMETRIC_RETAINED_BREAKOUT_STRATEGY_VERSION
-            }
-            Self::V11BreakoutCandleExtremeStop => {
-                STRICT_VISUAL_BREAKOUT_CANDLE_EXTREME_STOP_STRATEGY_VERSION
-            }
-            Self::V12ExtremeStopMinOneAtr => {
-                "strict_visual_consolidation_symmetric_breakout_candle_extreme_stop_min_1atr_15m_research_v1"
-            }
-        }
-    }
-}
+mod strict_visual_breakout_variant;
+pub use strict_visual_breakout_variant::StrictVisualBreakoutResearchVariant;
 
 /// V20 扫高失败家族的单变量锚区或入场时序实验；不对应新的 Pine 快照。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
@@ -1325,6 +1145,8 @@ pub enum SignalFamily {
 pub enum ExitPolicy {
     /// 固定止损与固定 ATR/tick 目标。
     Fixed,
+    /// V34 已由盈利放量完成棒激活净保本，最终目标仍保持固定。
+    StrictVisualVolumeProtected,
     /// 逆势交易只使用信号时已确认的横盘结构目标。
     CounterTrendStructure,
     /// V4 逆势结构交易保留冻结目标，并在实际成交后以初始风险启动单向移动保护。
@@ -1501,6 +1323,8 @@ pub struct Position {
 #[serde(rename_all = "snake_case")]
 pub enum ExitReason {
     StopLoss,
+    /// 盈利放量完成棒激活保护后，在覆盖双边成本的价格退出。
+    StrictVisualVolumeNetBreakEven,
     CounterTrendTrailingStop,
     TakeProfit,
     StructureTakeProfit,
@@ -1591,408 +1415,4 @@ pub struct Metrics {
     pub max_drawdown: f64,
 }
 
-/// Rust Research 回放结果。
-#[derive(Debug, Clone, Serialize)]
-pub struct ReplayReport {
-    pub strategy_version: &'static str,
-    pub pine_source_fnv1a32: &'static str,
-    pub symbol: String,
-    pub tick_size: f64,
-    pub evaluation_start_ms: i64,
-    pub evaluation_end_ms: i64,
-    pub fee_bps_per_side: f64,
-    pub slippage_bps_per_side: f64,
-    pub metrics: Metrics,
-    /// 信号收盘时冻结的全部可执行意图；后续候选账本只能从这里读取当时可见特征。
-    pub entry_candidates: Vec<EntryIntent>,
-    pub trades: Vec<Trade>,
-    pub blocked_signals: Vec<BlockedSignal>,
-    /// 评价窗口结束时仍持有的仓位；TradingView closed-trade 指标不强制结算它。
-    pub open_position_at_end: bool,
-    /// 最后一根信号已确认但评价窗口内尚无下一根开盘时保留的待成交意图。
-    pub pending_entry_at_end: bool,
-}
-
-/// 只影响模拟成交成本和样本范围，不改变冻结 Pine 信号规则。
-#[derive(Debug, Clone)]
-pub struct ReplayConfig {
-    pub symbol: String,
-    pub tick_size: f64,
-    pub evaluation_start_ms: i64,
-    pub evaluation_end_ms: i64,
-    pub fee_bps_per_side: f64,
-    pub slippage_bps_per_side: f64,
-    pub rule_version: ParityRuleVersion,
-}
-
-impl ReplayConfig {
-    /// 历史 TradingView V1 对照基线：固定 1 单位、零手续费、零滑点。
-    pub fn tradingview_baseline(
-        symbol: impl Into<String>,
-        tick_size: f64,
-        evaluation_start_ms: i64,
-        evaluation_end_ms: i64,
-    ) -> Self {
-        Self {
-            symbol: symbol.into(),
-            tick_size,
-            evaluation_start_ms,
-            evaluation_end_ms,
-            fee_bps_per_side: 0.0,
-            slippage_bps_per_side: 0.0,
-            rule_version: ParityRuleVersion::Frozen66d3937e,
-        }
-    }
-
-    /// 历史兼容入口固定指向 V2，禁止主 Pine 升级后让既有调用方静默切换规则。
-    pub fn current_pine(
-        symbol: impl Into<String>,
-        tick_size: f64,
-        evaluation_start_ms: i64,
-        evaluation_end_ms: i64,
-    ) -> Self {
-        Self::current_pine_v2(symbol, tick_size, evaluation_start_ms, evaluation_end_ms)
-    }
-
-    /// 冻结 Pine V2 对照基线：固定 1 单位、零手续费、零滑点。
-    pub fn current_pine_v2(
-        symbol: impl Into<String>,
-        tick_size: f64,
-        evaluation_start_ms: i64,
-        evaluation_end_ms: i64,
-    ) -> Self {
-        Self {
-            symbol: symbol.into(),
-            tick_size,
-            evaluation_start_ms,
-            evaluation_end_ms,
-            fee_bps_per_side: 0.0,
-            slippage_bps_per_side: 0.0,
-            rule_version: ParityRuleVersion::Current3cbbc9d8,
-        }
-    }
-
-    /// 当前 Pine V3 候选基线：必须显式选择，固定 1 单位、零手续费、零滑点。
-    pub fn current_pine_v3(
-        symbol: impl Into<String>,
-        tick_size: f64,
-        evaluation_start_ms: i64,
-        evaluation_end_ms: i64,
-    ) -> Self {
-        Self {
-            symbol: symbol.into(),
-            tick_size,
-            evaluation_start_ms,
-            evaluation_end_ms,
-            fee_bps_per_side: 0.0,
-            slippage_bps_per_side: 0.0,
-            rule_version: ParityRuleVersion::CandidateV3,
-        }
-    }
-
-    /// 当前 Pine V4 候选基线：必须显式选择，固定 1 单位、零手续费、零滑点。
-    pub fn current_pine_v4(
-        symbol: impl Into<String>,
-        tick_size: f64,
-        evaluation_start_ms: i64,
-        evaluation_end_ms: i64,
-    ) -> Self {
-        Self {
-            symbol: symbol.into(),
-            tick_size,
-            evaluation_start_ms,
-            evaluation_end_ms,
-            fee_bps_per_side: 0.0,
-            slippage_bps_per_side: 0.0,
-            rule_version: ParityRuleVersion::CandidateV4,
-        }
-    }
-
-    /// 当前 Pine V5 候选基线：必须显式选择，固定 1 单位、零手续费、零滑点。
-    pub fn current_pine_v5(
-        symbol: impl Into<String>,
-        tick_size: f64,
-        evaluation_start_ms: i64,
-        evaluation_end_ms: i64,
-    ) -> Self {
-        Self {
-            symbol: symbol.into(),
-            tick_size,
-            evaluation_start_ms,
-            evaluation_end_ms,
-            fee_bps_per_side: 0.0,
-            slippage_bps_per_side: 0.0,
-            rule_version: ParityRuleVersion::CandidateV5,
-        }
-    }
-
-    /// 当前 Pine V6 候选基线：EMA 趋势多等待突破接受，其他规则继承 V5。
-    pub fn current_pine_v6(
-        symbol: impl Into<String>,
-        tick_size: f64,
-        evaluation_start_ms: i64,
-        evaluation_end_ms: i64,
-    ) -> Self {
-        Self {
-            symbol: symbol.into(),
-            tick_size,
-            evaluation_start_ms,
-            evaluation_end_ms,
-            fee_bps_per_side: 0.0,
-            slippage_bps_per_side: 0.0,
-            rule_version: ParityRuleVersion::CandidateV6,
-        }
-    }
-
-    /// 当前 Pine V7 候选基线：继承 V5，只增加 RSI 反向长影门禁。
-    pub fn current_pine_v7(
-        symbol: impl Into<String>,
-        tick_size: f64,
-        evaluation_start_ms: i64,
-        evaluation_end_ms: i64,
-    ) -> Self {
-        Self {
-            symbol: symbol.into(),
-            tick_size,
-            evaluation_start_ms,
-            evaluation_end_ms,
-            fee_bps_per_side: 0.0,
-            slippage_bps_per_side: 0.0,
-            rule_version: ParityRuleVersion::CandidateV7,
-        }
-    }
-
-    /// 当前 Pine V8 候选基线：继承 V5，只增加慢均线带收复后的定向空单门禁。
-    pub fn current_pine_v8(
-        symbol: impl Into<String>,
-        tick_size: f64,
-        evaluation_start_ms: i64,
-        evaluation_end_ms: i64,
-    ) -> Self {
-        Self {
-            symbol: symbol.into(),
-            tick_size,
-            evaluation_start_ms,
-            evaluation_end_ms,
-            fee_bps_per_side: 0.0,
-            slippage_bps_per_side: 0.0,
-            rule_version: ParityRuleVersion::CandidateV8,
-        }
-    }
-
-    /// 当前 Pine V9 候选基线：继承 V8，仅同步 EMA 576/676 与布林 20/2.5 默认值。
-    pub fn current_pine_v9(
-        symbol: impl Into<String>,
-        tick_size: f64,
-        evaluation_start_ms: i64,
-        evaluation_end_ms: i64,
-    ) -> Self {
-        Self {
-            symbol: symbol.into(),
-            tick_size,
-            evaluation_start_ms,
-            evaluation_end_ms,
-            fee_bps_per_side: 0.0,
-            slippage_bps_per_side: 0.0,
-            rule_version: ParityRuleVersion::CandidateV9,
-        }
-    }
-
-    /// 当前 Pine V10 候选基线：继承 V9 参数，只启用预注册的五类入场质量门禁。
-    pub fn current_pine_v10(
-        symbol: impl Into<String>,
-        tick_size: f64,
-        evaluation_start_ms: i64,
-        evaluation_end_ms: i64,
-    ) -> Self {
-        Self {
-            symbol: symbol.into(),
-            tick_size,
-            evaluation_start_ms,
-            evaluation_end_ms,
-            fee_bps_per_side: 0.0,
-            slippage_bps_per_side: 0.0,
-            rule_version: ParityRuleVersion::CandidateV10,
-        }
-    }
-
-    /// 当前 Pine V11 候选：继承 V10，仅追加预注册的四项残差门禁。
-    pub fn current_pine_v11(
-        symbol: impl Into<String>,
-        tick_size: f64,
-        evaluation_start_ms: i64,
-        evaluation_end_ms: i64,
-    ) -> Self {
-        Self {
-            symbol: symbol.into(),
-            tick_size,
-            evaluation_start_ms,
-            evaluation_end_ms,
-            fee_bps_per_side: 0.0,
-            slippage_bps_per_side: 0.0,
-            rule_version: ParityRuleVersion::CandidateV11,
-        }
-    }
-
-    /// 当前 Pine V12 候选：继承 V11 退出与保护，只替换五类入场确认时序。
-    pub fn current_pine_v12(
-        symbol: impl Into<String>,
-        tick_size: f64,
-        evaluation_start_ms: i64,
-        evaluation_end_ms: i64,
-    ) -> Self {
-        Self {
-            symbol: symbol.into(),
-            tick_size,
-            evaluation_start_ms,
-            evaluation_end_ms,
-            fee_bps_per_side: 0.0,
-            slippage_bps_per_side: 0.0,
-            rule_version: ParityRuleVersion::CandidateV12,
-        }
-    }
-
-    /// 当前 Pine V13 候选：冻结 V11 其他家族，只替换压缩扩张接受时序。
-    pub fn current_pine_v13(
-        symbol: impl Into<String>,
-        tick_size: f64,
-        evaluation_start_ms: i64,
-        evaluation_end_ms: i64,
-    ) -> Self {
-        Self {
-            symbol: symbol.into(),
-            tick_size,
-            evaluation_start_ms,
-            evaluation_end_ms,
-            fee_bps_per_side: 0.0,
-            slippage_bps_per_side: 0.0,
-            rule_version: ParityRuleVersion::CandidateV13,
-        }
-    }
-
-    /// 当前 Pine V14 候选：冻结 V11 其他家族，只使用无方向压缩制度状态机。
-    pub fn current_pine_v14(
-        symbol: impl Into<String>,
-        tick_size: f64,
-        evaluation_start_ms: i64,
-        evaluation_end_ms: i64,
-    ) -> Self {
-        Self {
-            symbol: symbol.into(),
-            tick_size,
-            evaluation_start_ms,
-            evaluation_end_ms,
-            fee_bps_per_side: 0.0,
-            slippage_bps_per_side: 0.0,
-            rule_version: ParityRuleVersion::CandidateV14,
-        }
-    }
-
-    /// V15 独立真实箱体突破接受 Research；不包含 V11 的其他信号家族。
-    pub fn current_pine_v15(
-        symbol: impl Into<String>,
-        tick_size: f64,
-        evaluation_start_ms: i64,
-        evaluation_end_ms: i64,
-    ) -> Self {
-        Self {
-            symbol: symbol.into(),
-            tick_size,
-            evaluation_start_ms,
-            evaluation_end_ms,
-            fee_bps_per_side: 0.0,
-            slippage_bps_per_side: 0.0,
-            rule_version: ParityRuleVersion::CandidateV15,
-        }
-    }
-
-    /// V16 独立右侧触发 Research；V15 退出合同保持不变。
-    pub fn current_pine_v16(
-        symbol: impl Into<String>,
-        tick_size: f64,
-        evaluation_start_ms: i64,
-        evaluation_end_ms: i64,
-    ) -> Self {
-        Self {
-            symbol: symbol.into(),
-            tick_size,
-            evaluation_start_ms,
-            evaluation_end_ms,
-            fee_bps_per_side: 0.0,
-            slippage_bps_per_side: 0.0,
-            rule_version: ParityRuleVersion::CandidateV16,
-        }
-    }
-
-    /// V17 纯右侧触发消融 Research；只移除 V16 新增的三项经济门禁。
-    pub fn current_pine_v17(
-        symbol: impl Into<String>,
-        tick_size: f64,
-        evaluation_start_ms: i64,
-        evaluation_end_ms: i64,
-    ) -> Self {
-        Self {
-            symbol: symbol.into(),
-            tick_size,
-            evaluation_start_ms,
-            evaluation_end_ms,
-            fee_bps_per_side: 0.0,
-            slippage_bps_per_side: 0.0,
-            rule_version: ParityRuleVersion::CandidateV17,
-        }
-    }
-
-    /// V18 组合 Research；V11 同棒优先，V17 只补充未被占用的机会。
-    pub fn current_pine_v18(
-        symbol: impl Into<String>,
-        tick_size: f64,
-        evaluation_start_ms: i64,
-        evaluation_end_ms: i64,
-    ) -> Self {
-        Self {
-            symbol: symbol.into(),
-            tick_size,
-            evaluation_start_ms,
-            evaluation_end_ms,
-            fee_bps_per_side: 0.0,
-            slippage_bps_per_side: 0.0,
-            rule_version: ParityRuleVersion::CandidateV18,
-        }
-    }
-
-    /// V19 组合 Research；冻结 V18，只拒绝长下影假突破空单。
-    pub fn current_pine_v19(
-        symbol: impl Into<String>,
-        tick_size: f64,
-        evaluation_start_ms: i64,
-        evaluation_end_ms: i64,
-    ) -> Self {
-        Self {
-            symbol: symbol.into(),
-            tick_size,
-            evaluation_start_ms,
-            evaluation_end_ms,
-            fee_bps_per_side: 0.0,
-            slippage_bps_per_side: 0.0,
-            rule_version: ParityRuleVersion::CandidateV19,
-        }
-    }
-
-    /// V20 组合 Research；冻结 V19，并启用扫高后快速失败接受空单。
-    pub fn current_pine_v20(
-        symbol: impl Into<String>,
-        tick_size: f64,
-        evaluation_start_ms: i64,
-        evaluation_end_ms: i64,
-    ) -> Self {
-        Self {
-            symbol: symbol.into(),
-            tick_size,
-            evaluation_start_ms,
-            evaluation_end_ms,
-            fee_bps_per_side: 0.0,
-            slippage_bps_per_side: 0.0,
-            rule_version: ParityRuleVersion::CandidateV20,
-        }
-    }
-}
+pub use super::replay_config::{ReplayConfig, ReplayReport};

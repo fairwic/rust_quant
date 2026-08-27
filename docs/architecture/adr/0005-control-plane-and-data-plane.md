@@ -25,12 +25,12 @@
 
 - **Strategy**：StrategyDefinition、StrategyArtifact、StrategyRelease 生命周期、StrategyRuntimeSnapshot 及其发布，以及面向 Control 的不可变 `ActivationEligibilityV1`；
 - **Control**：`ActivationPointer`、activation scope 的单调 `activation_generation`、`KillSwitchSnapshot`、全局 `kill_switch_catalog_generation`、每 scope 的 `scope_generation`、发布控制审计；Control 只消费 Strategy 发布的激活资格，不自行推断资格；
-- **各业务 owner**：自己的 Policy Snapshot、运行时 readiness 与 typed control request；
+- **各业务 owner**：自己的 Policy Snapshot、运行状态与 typed control request；
 - `control-api`：Worker desired state、运营查询、Control command，以及向 Strategy/Risk/Account 等 owner 转发的显式命令；不得通过管理入口绕过 owner 状态机。
 
-`ActivationPointer` 只选择哪个已发布 RuntimeSnapshot 在明确运行范围生效；它不修改 Release，不是“当前 readiness”，也不等于 Kill Switch。它只能消费 Strategy owner 为该不可变 Snapshot 发布且尚未撤销的 `ActivationEligibilityV1`：资格必须同时绑定 `runtime_snapshot_id/hash`、`strategy_release_id/generation`、Completed Evidence 引用、`release_stage`、允许的 deployment channel、eligibility generation 和撤销状态。stage 与 channel 的最小矩阵固定为：`Research`/`Retired` 不允许任何 Pointer，`Paper -> paper`、`Shadow -> shadow`、`Canary -> canary`、`Live -> live`；Canary 仍需其额外范围与授权。Pointer 写入必须记录所消费资格的 identity/hash/generation；资格撤销、stage/channel 不匹配、Evidence 缺失或已撤销时拒绝写入，并让现有 Pointer 失效。Control 不得以“已发布”或可变 Release 状态自行猜测资格。Kill Switch 的 scope 固定为 `global`、`exchange`、`execution_account_ref`、`strategy_key@version` 或 Web combo identity；请求可来自运营、RiskAction、Account 故障或 Web 商业停用，但唯一可写入/发布的 owner 是 Control。Release/activation/kill 三类 generation 必须分开，不能通过同一个无 scope generation 判断。
+`ActivationPointer` 只选择哪个已发布 RuntimeSnapshot 在明确运行范围生效；它不修改 Release，不是“当前运行状态”，也不等于 Kill Switch。它只能消费 Strategy owner 为该不可变 Snapshot 发布且尚未撤销的 `ActivationEligibilityV1`：资格必须同时绑定 `runtime_snapshot_id/hash`、`strategy_release_id/generation`、Completed ResearchResultArtifact 引用、`release_stage`、允许的 deployment channel、eligibility generation 和撤销状态。stage 与 channel 的最小矩阵固定为：`Research`/`Retired` 不允许任何 Pointer，`Paper -> paper`、`Shadow -> shadow`、`Canary -> canary`、`Live -> live`；Canary 仍需其额外范围与授权。Pointer 写入必须记录所消费资格的 identity/hash/generation；资格撤销、stage/channel 不匹配、ResearchResultArtifact 缺失或已撤销时拒绝写入，并让现有 Pointer 失效。Control 不得以“已发布”或可变 Release 状态自行猜测资格。Kill Switch 的 scope 固定为 `global`、`exchange`、`execution_account_ref`、`strategy_key@version` 或 Web combo identity；请求可来自运营、RiskAction、Account 故障或 Web 商业停用，但唯一可写入/发布的 owner 是 Control。Release/activation/kill 三类 generation 必须分开，不能通过同一个无 scope generation 判断。
 
-这里的 Release/激活资格不是泛化的运行时 `Readiness` owner。Market 拥有行情/参考数据新鲜度，Account 拥有账户投影与 ExchangeSession，Execution 拥有执行链路可用性；控制面可以展示这些证据的只读聚合，但不得覆盖它们的事实、替它们在热路径放行，或把“控制 API 可用”当成交易可用。
+这里的 Release/激活资格不是泛化的业务状态 owner。Market 拥有行情/参考数据年龄状态，Account 拥有账户投影与 ExchangeSession，Execution 拥有执行链路可用性；控制面可以展示这些状态的只读聚合，但不得覆盖它们的事实、替它们在热路径放行，或把“控制 API 可用”当成交易可用。
 
 ### 数据面
 
@@ -47,7 +47,7 @@ Market、Strategy、Portfolio、Account、Risk、Execution 和 Reconciliation Do
 - preparation 时的 `kill_switch_catalog_generation` 和命中 scope generation；
 - live Context 的 `subject_binding_hash`，或 Research Scenario binding identity。
 
-Market、Account 和 InstrumentRules 是本次决策的动态 Evidence，不是假装稳定的配置；它们与 Context 一起记录后才能重放决策。完整分层见 [ADR-0011](0011-layered-runtime-snapshots-and-decision-context.md)。
+Market、Account 和 InstrumentRules 是本次决策的动态 Inputs，不是假装稳定的配置；它们与 Context 一起记录后才能重放决策。完整分层见 [ADR-0011](0011-layered-runtime-snapshots-and-decision-context.md)。
 
 控制面不可用时，数据面按已发布策略选择：
 

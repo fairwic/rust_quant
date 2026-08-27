@@ -512,6 +512,8 @@ pub struct ExchangeAccountSnapshotReportRequest {
     pub buyer_email: String,
     /// 交易所名称。
     pub exchange: String,
+    /// 产生本次只读账户事实的 Web API 凭证 ID。
+    pub api_credential_id: i64,
     /// 交易对或资产符号。
     pub symbol: String,
     /// 来源引用标识。

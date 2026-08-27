@@ -56,6 +56,8 @@ impl OrderPlacementRequest {
             reduce_only: self.reduce_only,
             time_in_force: self.time_in_force,
             attached_stop_loss_price: self.attached_stop_loss_price,
+            attached_take_profit_price: None,
+            attached_stop_loss_client_order_id: None,
         }
     }
 }
@@ -586,6 +588,8 @@ mod tests {
             mapped.attached_stop_loss_price,
             request.attached_stop_loss_price
         );
+        assert_eq!(mapped.attached_take_profit_price, None);
+        assert_eq!(mapped.attached_stop_loss_client_order_id, None);
     }
     #[tokio::test]
     async fn dry_run_place_order_returns_simulated_ack_without_credentials() {

@@ -35,7 +35,7 @@ Research 与 live 的同名术语不得混用：ResearchBar 以 `ResearchDecisio
 | ADR | 状态 | 决策 |
 | --- | --- | --- |
 | [ADR-0001](adr/0001-modular-monolith-and-business-modules.md) | 已接受 | 采用模块化单体与 domains/quant/contracts/adapters/platform 五类目录 |
-| [ADR-0002](adr/0002-versioned-strategy-manifest-and-contracts.md) | 已接受 | 分离 Strategy 技术制品、ResearchEvidence、Release、RuntimeSnapshot 与 Wire Contract |
+| [ADR-0002](adr/0002-versioned-strategy-manifest-and-contracts.md) | 已接受 | 分离 Strategy 技术制品、ResearchResultArtifact、Release、RuntimeSnapshot 与 Wire Contract |
 | [ADR-0003](adr/0003-explicit-runtime-composition-roots.md) | 已接受 | 将 API、Worker、工具拆成明确的运行入口和组合根 |
 | [ADR-0004](adr/0004-portfolio-and-trading-domain-boundaries.md) | 已接受 | 分离 Strategy、Portfolio、Account、Risk 与 Execution |
 | [ADR-0005](adr/0005-control-plane-and-data-plane.md) | 已接受 | 分离控制面与交易数据面 |

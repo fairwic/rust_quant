@@ -78,6 +78,24 @@ pub struct FrozenSymbolCandles {
     pub coverage: SymbolCoverageDiagnostic,
 }
 
+/// 显式研究窗口内的单币行情与覆盖诊断。
+///
+/// 该结构只读取 `quant_core` 已确认 K 线，不冻结币池或时间身份；调用方必须把
+/// 成员列表和窗口写入自己的 Research-only 报告，不能冒充正式静态 Top60。
+#[derive(Debug, Clone)]
+pub struct ResearchWindowSymbolCandles {
+    /// OKX USDT 永续交易对。
+    pub symbol: String,
+    /// 当前 `exchange_symbols` 记录的最小价格变动单位。
+    pub tick_size: f64,
+    /// 预热段和评价段合并后的已确认 15m K 线。
+    pub candles: Vec<Candle>,
+    /// `[warmup_start_ms, evaluation_start_ms)` 的逐根覆盖诊断。
+    pub warmup_coverage: SymbolCoverageDiagnostic,
+    /// `[evaluation_start_ms, evaluation_end_exclusive_ms)` 的逐根覆盖诊断。
+    pub evaluation_coverage: SymbolCoverageDiagnostic,
+}
+
 /// 整个 Top60 加载结果的聚合覆盖诊断，供调用方在回放前显式 fail-close。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UniverseCoverageDiagnostic {
@@ -121,6 +139,35 @@ pub async fn load_frozen_top60_from_quant_core() -> Result<FrozenUniverseData> {
     let spec = load_frozen_universe_spec()?;
     let pool = connect_quant_core_from_env().await?;
     let result = load_from_pool(&pool, &spec).await;
+    pool.close().await;
+    result
+}
+
+/// 从 `quant_core` 加载调用方显式声明的 Research-only 成员和半开时间窗口。
+///
+/// 只接受严格的 OKX USDT SWAP 标识，并只返回 `confirm='1'` 的 15m K 线。
+/// 本入口不选择币种、不推导评价起点，也不允许回退到通用 `DATABASE_URL`。
+pub async fn load_research_window_symbols_from_quant_core(
+    symbols: &[String],
+    warmup_start_ms: i64,
+    evaluation_start_ms: i64,
+    evaluation_end_exclusive_ms: i64,
+) -> Result<Vec<ResearchWindowSymbolCandles>> {
+    validate_research_window(
+        symbols,
+        warmup_start_ms,
+        evaluation_start_ms,
+        evaluation_end_exclusive_ms,
+    )?;
+    let pool = connect_quant_core_from_env().await?;
+    let result = load_research_window_from_pool(
+        &pool,
+        symbols,
+        warmup_start_ms,
+        evaluation_start_ms,
+        evaluation_end_exclusive_ms,
+    )
+    .await;
     pool.close().await;
     result
 }
@@ -233,50 +280,36 @@ async fn connect_quant_core_from_env() -> Result<PgPool> {
 
 /// 按 manifest 顺序加载每个成员，避免数据库行顺序改变下游同时点决策顺序。
 async fn load_from_pool(pool: &PgPool, spec: &FrozenUniverseSpec) -> Result<FrozenUniverseData> {
-    let tick_sizes = load_tick_sizes(pool, &spec.symbols).await?;
     let warmup_start_ms = spec
         .window_start_ms
         .checked_sub(FROZEN_WARMUP_DAYS * DAY_MS)
         .context("计算冻结币池预热起点时溢出")?;
+    let evaluation_end_exclusive_ms = spec
+        .window_end_ms
+        .checked_add(CANDLE_INTERVAL_MS - 1)
+        .context("转换冻结评价上界时溢出")?;
+    let research_symbols = load_research_window_from_pool(
+        pool,
+        &spec.symbols,
+        warmup_start_ms,
+        spec.window_start_ms,
+        evaluation_end_exclusive_ms,
+    )
+    .await?;
+    let loaded_symbols = research_symbols
+        .into_iter()
+        .map(|symbol| FrozenSymbolCandles {
+            symbol: symbol.symbol,
+            tick_size: symbol.tick_size,
+            candles: symbol.candles,
+            warmup_expected_candle_count: symbol.warmup_coverage.expected_candle_count,
+            warmup_loaded_candle_count: symbol.warmup_coverage.loaded_candle_count,
+            warmup_is_complete: symbol.warmup_coverage.is_complete,
+            coverage: symbol.evaluation_coverage,
+        })
+        .collect::<Vec<_>>();
     let warmup_expected_candle_count =
         exact_exclusive_candle_count(warmup_start_ms, spec.window_start_ms)?;
-    let mut loaded_symbols = Vec::with_capacity(spec.symbols.len());
-    for symbol in &spec.symbols {
-        let tick_size = *tick_sizes
-            .get(symbol)
-            .with_context(|| format!("冻结成员缺少有效 tick_size：{symbol}"))?;
-        let candles =
-            load_symbol_candles(pool, symbol, warmup_start_ms, spec.window_end_ms).await?;
-        let warmup_candles = candles
-            .iter()
-            .copied()
-            .take_while(|candle| candle.timestamp_ms < spec.window_start_ms)
-            .collect::<Vec<_>>();
-        let evaluation_candles = candles
-            .iter()
-            .copied()
-            .filter(|candle| candle.timestamp_ms >= spec.window_start_ms)
-            .collect::<Vec<_>>();
-        let warmup_coverage = build_symbol_coverage(
-            warmup_start_ms,
-            spec.window_start_ms - CANDLE_INTERVAL_MS + 1,
-            &warmup_candles,
-        )?;
-        let coverage = build_symbol_coverage(
-            spec.window_start_ms,
-            spec.window_end_ms,
-            &evaluation_candles,
-        )?;
-        loaded_symbols.push(FrozenSymbolCandles {
-            symbol: symbol.clone(),
-            tick_size,
-            candles,
-            warmup_expected_candle_count,
-            warmup_loaded_candle_count: warmup_candles.len(),
-            warmup_is_complete: warmup_coverage.is_complete,
-            coverage,
-        });
-    }
 
     let expected_candles_per_symbol =
         expected_candle_count(spec.window_start_ms, spec.window_end_ms)?;
@@ -326,10 +359,93 @@ async fn load_from_pool(pool: &PgPool, spec: &FrozenUniverseSpec) -> Result<Froz
     })
 }
 
-/// 从 `exchange_symbols` 读取冻结成员的 linear perpetual 价格步长，并要求 60 个成员全覆盖。
+/// 共用显式窗口加载主链路，保证冻结 Top60 和最新延伸回放读取完全相同的字段与确认状态。
+async fn load_research_window_from_pool(
+    pool: &PgPool,
+    symbols: &[String],
+    warmup_start_ms: i64,
+    evaluation_start_ms: i64,
+    evaluation_end_exclusive_ms: i64,
+) -> Result<Vec<ResearchWindowSymbolCandles>> {
+    let tick_sizes = load_tick_sizes(pool, symbols).await?;
+    let warmup_end_ms = evaluation_start_ms
+        .checked_sub(CANDLE_INTERVAL_MS - 1)
+        .context("转换预热覆盖上界时下溢")?;
+    let evaluation_end_ms = evaluation_end_exclusive_ms
+        .checked_sub(CANDLE_INTERVAL_MS - 1)
+        .context("转换评价覆盖上界时下溢")?;
+    let mut loaded_symbols = Vec::with_capacity(symbols.len());
+
+    for symbol in symbols {
+        let tick_size = *tick_sizes
+            .get(symbol)
+            .with_context(|| format!("研究成员缺少有效 tick_size：{symbol}"))?;
+        let candles =
+            load_symbol_candles(pool, symbol, warmup_start_ms, evaluation_end_exclusive_ms).await?;
+        let warmup_candles = candles
+            .iter()
+            .copied()
+            .take_while(|candle| candle.timestamp_ms < evaluation_start_ms)
+            .collect::<Vec<_>>();
+        let evaluation_candles = candles
+            .iter()
+            .copied()
+            .filter(|candle| candle.timestamp_ms >= evaluation_start_ms)
+            .collect::<Vec<_>>();
+        loaded_symbols.push(ResearchWindowSymbolCandles {
+            symbol: symbol.clone(),
+            tick_size,
+            candles,
+            warmup_coverage: build_symbol_coverage(
+                warmup_start_ms,
+                warmup_end_ms,
+                &warmup_candles,
+            )?,
+            evaluation_coverage: build_symbol_coverage(
+                evaluation_start_ms,
+                evaluation_end_ms,
+                &evaluation_candles,
+            )?,
+        });
+    }
+    Ok(loaded_symbols)
+}
+
+/// 研究窗口必须是连续的 15m 半开区间，成员也必须显式且唯一。
+fn validate_research_window(
+    symbols: &[String],
+    warmup_start_ms: i64,
+    evaluation_start_ms: i64,
+    evaluation_end_exclusive_ms: i64,
+) -> Result<()> {
+    if symbols.is_empty() {
+        bail!("Research-only 当前窗口至少需要一个显式成员");
+    }
+    if warmup_start_ms >= evaluation_start_ms
+        || evaluation_start_ms >= evaluation_end_exclusive_ms
+        || warmup_start_ms.rem_euclid(CANDLE_INTERVAL_MS) != 0
+        || evaluation_start_ms.rem_euclid(CANDLE_INTERVAL_MS) != 0
+        || evaluation_end_exclusive_ms.rem_euclid(CANDLE_INTERVAL_MS) != 0
+    {
+        bail!("Research-only 预热和评价窗口必须是严格对齐的 15m 半开区间");
+    }
+    exact_exclusive_candle_count(warmup_start_ms, evaluation_start_ms)?;
+    exact_exclusive_candle_count(evaluation_start_ms, evaluation_end_exclusive_ms)?;
+
+    let mut unique = BTreeSet::new();
+    for symbol in symbols {
+        validate_swap_symbol(symbol)?;
+        if !unique.insert(symbol.as_str()) {
+            bail!("Research-only 当前窗口包含重复成员：{symbol}");
+        }
+    }
+    Ok(())
+}
+
+/// 从 `exchange_symbols` 读取显式研究成员的 linear perpetual 价格步长，并要求全部覆盖。
 ///
-/// 币池已经由 manifest 锁定生成时的 live 状态，因此这里不按运行日的 `status` 再筛选，
-/// 避免成员后来退市后历史回放无法重现；tick_size 本身仍属于运行时元数据缺口。
+/// 调用方已经显式锁定成员列表，因此这里不按运行日的 `status` 再筛选，避免成员后来
+/// 退市后历史回放无法重现；tick_size 本身仍属于运行时元数据缺口。
 async fn load_tick_sizes(pool: &PgPool, symbols: &[String]) -> Result<BTreeMap<String, f64>> {
     let rows = sqlx::query(
         r#"
@@ -377,7 +493,7 @@ async fn load_tick_sizes(pool: &PgPool, symbols: &[String]) -> Result<BTreeMap<S
         .collect::<Vec<_>>();
     if !missing.is_empty() {
         bail!(
-            "冻结币池有 {} 个成员缺少 linear perpetual tick_size：{}",
+            "研究币池有 {} 个成员缺少 linear perpetual tick_size：{}",
             missing.len(),
             missing.join(",")
         );
@@ -689,5 +805,27 @@ mod tests {
         assert!(coverage.is_complete);
         assert_eq!(coverage.missing_candle_count, 0);
         assert!(coverage.missing_ranges.is_empty());
+    }
+
+    #[test]
+    fn research_window_requires_unique_symbols_and_aligned_half_open_bounds() {
+        let symbols = vec!["BTC-USDT-SWAP".to_owned(), "ETH-USDT-SWAP".to_owned()];
+
+        validate_research_window(&symbols, 0, 2 * CANDLE_INTERVAL_MS, 4 * CANDLE_INTERVAL_MS)
+            .unwrap();
+        assert!(validate_research_window(
+            &["BTC-USDT-SWAP".to_owned(), "BTC-USDT-SWAP".to_owned()],
+            0,
+            2 * CANDLE_INTERVAL_MS,
+            4 * CANDLE_INTERVAL_MS,
+        )
+        .is_err());
+        assert!(validate_research_window(
+            &symbols,
+            1,
+            2 * CANDLE_INTERVAL_MS,
+            4 * CANDLE_INTERVAL_MS,
+        )
+        .is_err());
     }
 }

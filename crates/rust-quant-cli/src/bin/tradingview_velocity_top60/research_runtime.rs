@@ -548,6 +548,8 @@ mod tests {
             evaluation_end_ms: signal_time_ms + 10 * CANDLE_INTERVAL_MS,
             fee_bps_per_side: 0.0,
             slippage_bps_per_side: 0.0,
+            exit_fee_bps_per_side: None,
+            exit_slippage_bps_per_side: None,
             metrics: Metrics::default(),
             entry_candidates: vec![intent(signal_time_ms)],
             trades: vec![trade(signal_time_ms, net_r)],

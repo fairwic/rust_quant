@@ -58,6 +58,9 @@ use trade_anatomy::{build_ema_short_trade_anatomy, AnatomyInput, EmaShortTradeAn
 
 const COST_FEE_BPS_PER_SIDE: f64 = 5.0;
 const COST_SLIPPAGE_BPS_PER_SIDE: f64 = 3.0;
+const UNIFIED_RETEST_ENTRY_MAKER_FEE_BPS: f64 = 2.0;
+const UNIFIED_RETEST_EXIT_TAKER_FEE_BPS: f64 = 5.0;
+const UNIFIED_RETEST_SLIPPAGE_BPS_PER_SIDE: f64 = 1.0;
 const EFFECTIVE_EVENT_CLUSTER_MS: i64 = 60 * 60 * 1_000;
 const CANDLE_INTERVAL_MS: i64 = 15 * 60 * 1_000;
 
@@ -73,6 +76,7 @@ struct Top60ResearchReport {
     sell_climax_base_reclaim_research_variant: &'static str,
     anchor_upthrust_research_variant: &'static str,
     strict_visual_breakout_research_variant: &'static str,
+    execution_cost_contract: ExecutionCostContract,
     universe_version: &'static str,
     universe_manifest_sha256: &'static str,
     dataset_fingerprint_sha256: String,
@@ -113,6 +117,15 @@ struct Top60ResearchReport {
     per_symbol: Vec<SymbolResult>,
     research_runtime: ResearchRuntimeDiagnostics,
     interpretation_limits: Vec<&'static str>,
+}
+
+/// 回放报告显式记录入场与退出成本，避免把 maker/taker 非对称合同压成“每边平均值”。
+#[derive(Debug, Clone, Copy, Serialize)]
+struct ExecutionCostContract {
+    entry_fee_bps: f64,
+    entry_slippage_bps: f64,
+    exit_fee_bps: f64,
+    exit_slippage_bps: f64,
 }
 
 /// 同一数据加载中按声明顺序执行的单变量批次；每个元素仍是完整单变体报告。
@@ -465,11 +478,10 @@ fn build_variant_report(
         ));
         cost_adjusted_reports.push(replay_selected_variant(
             &symbol.candles,
-            ReplayConfig {
-                fee_bps_per_side: COST_FEE_BPS_PER_SIDE,
-                slippage_bps_per_side: COST_SLIPPAGE_BPS_PER_SIDE,
-                ..baseline_config
-            },
+            cost_adjusted_replay_config(
+                baseline_config,
+                context.args.strict_visual_breakout_variant,
+            ),
             context.args.ema_short_variant,
             context.args.ema_trend_long_variant,
             context.args.sell_climax_base_reclaim_variant,
@@ -631,6 +643,9 @@ fn build_variant_report(
             .args
             .strict_visual_breakout_variant
             .slug(),
+        execution_cost_contract: execution_cost_contract(
+            context.args.strict_visual_breakout_variant,
+        ),
         universe_version: FROZEN_UNIVERSE_VERSION,
         universe_manifest_sha256: FROZEN_UNIVERSE_MANIFEST_SHA256,
         dataset_fingerprint_sha256: context.dataset_fingerprint_sha256.to_owned(),
@@ -672,7 +687,7 @@ fn build_variant_report(
             "fixed 1 unit per symbol; aggregate is not a capacity/correlation constrained portfolio",
             "tick_size comes from the current exchange_symbols row because the manifest did not freeze it",
             "when the local database snapshot ends before the manifest boundary, all symbols use the modal common end and the report marks the window as clipped",
-            "cost mode is a post-hoc 5 bps fee plus 3 bps slippage-equivalent stress on each side; it does not move fills or protective levels",
+            execution_cost_interpretation(context.args.strict_visual_breakout_variant),
             "60m time-direction clusters are not the formal correlation/sector/market-state effective-event metric",
             "EMA short trade anatomy covers executed closed trades only; blocked raw candidates are outside the sample",
             "trade-anatomy forward bars are outcome labels only and never alter replay entry or exit behavior",
@@ -716,10 +731,64 @@ fn baseline_cache_key(
         "full_universe_complete": context.full_universe_complete,
         "expected_symbols": context.expected_symbols,
         "included_symbols": context.eligible_symbols.len(),
-        "fee_bps_per_side": COST_FEE_BPS_PER_SIDE,
-        "slippage_bps_per_side": COST_SLIPPAGE_BPS_PER_SIDE,
+        "execution_cost_contract": execution_cost_contract(
+            context.args.strict_visual_breakout_variant,
+        ),
     });
     Ok(cache_key(&serde_json::to_string(&identity)?))
+}
+
+/// 统一回踩版本替换成本合同；旧研究版本继续使用冻结的双边 5+3 bps 压力口径。
+fn cost_adjusted_replay_config(
+    baseline: ReplayConfig,
+    variant: StrictVisualBreakoutResearchVariant,
+) -> ReplayConfig {
+    if variant.uses_unified_retest_execution_cost() {
+        ReplayConfig {
+            fee_bps_per_side: UNIFIED_RETEST_ENTRY_MAKER_FEE_BPS,
+            slippage_bps_per_side: UNIFIED_RETEST_SLIPPAGE_BPS_PER_SIDE,
+            exit_fee_bps_per_side: Some(UNIFIED_RETEST_EXIT_TAKER_FEE_BPS),
+            exit_slippage_bps_per_side: Some(UNIFIED_RETEST_SLIPPAGE_BPS_PER_SIDE),
+            ..baseline
+        }
+    } else {
+        ReplayConfig {
+            fee_bps_per_side: COST_FEE_BPS_PER_SIDE,
+            slippage_bps_per_side: COST_SLIPPAGE_BPS_PER_SIDE,
+            ..baseline
+        }
+    }
+}
+
+/// 返回本次报告实际采用的四腿成本字段，供缓存身份和结果审计共用。
+const fn execution_cost_contract(
+    variant: StrictVisualBreakoutResearchVariant,
+) -> ExecutionCostContract {
+    if variant.uses_unified_retest_execution_cost() {
+        ExecutionCostContract {
+            entry_fee_bps: UNIFIED_RETEST_ENTRY_MAKER_FEE_BPS,
+            entry_slippage_bps: UNIFIED_RETEST_SLIPPAGE_BPS_PER_SIDE,
+            exit_fee_bps: UNIFIED_RETEST_EXIT_TAKER_FEE_BPS,
+            exit_slippage_bps: UNIFIED_RETEST_SLIPPAGE_BPS_PER_SIDE,
+        }
+    } else {
+        ExecutionCostContract {
+            entry_fee_bps: COST_FEE_BPS_PER_SIDE,
+            entry_slippage_bps: COST_SLIPPAGE_BPS_PER_SIDE,
+            exit_fee_bps: COST_FEE_BPS_PER_SIDE,
+            exit_slippage_bps: COST_SLIPPAGE_BPS_PER_SIDE,
+        }
+    }
+}
+
+const fn execution_cost_interpretation(
+    variant: StrictVisualBreakoutResearchVariant,
+) -> &'static str {
+    if variant.uses_unified_retest_execution_cost() {
+        "unified retest cost mode is post-hoc maker entry 2 bps plus taker exit 5 bps, with 1 bps slippage-equivalent on each side; it does not move fills or protective levels"
+    } else {
+        "cost mode is a post-hoc 5 bps fee plus 3 bps slippage-equivalent stress on each side; it does not move fills or protective levels"
+    }
 }
 
 /// 缓存命中只替换运行诊断，历史计算时间与交易结果保持原样可审计。

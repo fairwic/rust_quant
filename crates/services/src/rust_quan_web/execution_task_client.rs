@@ -776,6 +776,7 @@ mod tests {
             combo_id: 85,
             buyer_email: "buyer@example.com".to_string(),
             exchange: "okx".to_string(),
+            api_credential_id: 41,
             symbol: "BTC-USDT-SWAP".to_string(),
             source_ref: "rq:acct:v1:ex=okx:combo=85:sym=BTC-USDT-SWAP".to_string(),
             snapshot_at: Some("2026-06-18T02:30:00".to_string()),

@@ -129,7 +129,7 @@ Path filter 只允许作为“是否启动 impact job”的粗粒度优化，不
 
 | 变更 | 必须验证 | 可以构建/部署 |
 | --- | --- | --- |
-| quant-lab、Research、Backtest、Analytics | quant-lab tests、replay、Evidence | 只构建 quant-lab 工件；不得部署生产 |
+| quant-lab、Research、Backtest、Analytics | quant-lab tests、replay、ResearchResultArtifact | 只构建 quant-lab 工件；不得部署生产 |
 | strategy-candidates | candidates、quant-lab、Research parity | 不构建 core-runtime |
 | strategy-released、Strategy API | Strategy、quant-lab、受影响生产 App、parity | 构建 core-runtime；主分支可部署 |
 | 共享 Market/Portfolio/Risk/Execution/Contract/Platform | 受影响生产 App、Research、parity、contract/recovery | 构建受影响生产工件 |
@@ -153,7 +153,7 @@ Research job 不得获得 production environment、SSH deploy Secret、生产交
 
 Deploy contract 必须验证镜像中 binary 集合与 allowlist 完全一致：缺少必需 binary 或出现 Research/Backtest/Paper/候选 binary 都失败。
 
-Research 每次可用于正式 Evidence 的运行必须把实际执行工件固定为 `ResearchExecutionArtifactRef`，至少包含：
+Research 每次可用于正式 ResearchResultArtifact 的运行必须把实际执行工件固定为 `ResearchExecutionArtifactRef`，至少包含：
 
 - Git revision；若使用未提交补丁，还包括精确 patch hash；
 - Cargo.lock、toolchain、target triple、build profile、启用的 Cargo features；
@@ -166,12 +166,12 @@ Research 每次可用于正式 Evidence 的运行必须把实际执行工件固�
 候选策略进入 `strategy-released` 时会产生新的生产构建，不能假设它与被研究的 candidate binary 自动等价。Strategy owner 必须发布不可变 `PromotionReceiptV1`，串联：
 
 - candidate Definition/Artifact 与 `ResearchExecutionArtifactRef`；
-- Completed ResearchEvidence 及其评价门结果；
+- Completed ResearchResultArtifact 及其评价门结果；
 - released Definition/Artifact、source revision、binary/image digest；
 - candidate 与 released 构建之间的公开业务 API、规范 planning 输出和允许数值容差 parity；
 - 批准身份、时间、目标 release stage/channel 与回滚引用。
 
-缺少该 receipt、跨构建首次差异未解释，或 released 工件无法追溯到被研究源码时，不得发布 `ActivationEligibilityV1`。`Completed ResearchEvidence` 只表示运行与工件完整可见，不自动表示通过评价门或具备 promotion eligibility。
+缺少该 receipt、跨构建首次差异未解释，或 released 工件无法追溯到被研究源码时，不得发布 `ActivationEligibilityV1`。`Completed ResearchResultArtifact` 只表示运行与工件完整可见，不自动表示通过评价门或具备 promotion eligibility。
 
 ## 结果
 

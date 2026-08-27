@@ -85,11 +85,11 @@ reference/
 
 使用以下拆分触发条件：
 
-- 单文件接近 400 行：检查是否存在多个业务概念；
-- 单文件超过 600 行：Domain 或 Adapter 生产代码必须拆分；
+- 单文件接近 800 行：检查是否存在多个业务概念；
+- 单文件超过 1000 行：作可读性提醒，存在清晰业务职责边界时再拆分；
 - facade 超过 100 行：检查是否承载业务逻辑；
 - facade 超过 150 行：必须拆分；
-- 任意 Rust 文件不得超过 1000 行；
+- 任意 Rust 文件不得超过 800 行；
 - 同一文件同时出现状态枚举、外部 DTO、SQL、流程编排和错误映射时，不等到行数上限，立即按职责拆分。
 
 ### 2.1 阅读成本优先于文件行数
@@ -101,7 +101,7 @@ reference/
 - 一条 SQL 的列、占位符和 bind 顺序超过人工可安全核对的范围时，由 owner-scoped Adapter Row 统一完成 Domain 到持久化值和 bind 的映射，并用真实 PostgreSQL 集成测试逐字段回读；
 - App 运行时同时包含监督、live loop、重试和时间策略时，按这些运行职责拆文件，但保留唯一监督入口；错误分类、恢复决策和状态迁移仍归 Domain；
 - 多版本配置只允许在 `raw -> canonical plan` 转换边界兼容；canonical plan 和后续业务链路不得继续分支解释旧版本；
-- 多条 readiness/validation 规则不得分别维护 blocker、degradation 和最终状态；使用 capability 私有收集器统一去重与归约，规则函数只表达单条业务判断；
+- 多条 check/validation 规则不得分别维护 blocker、degradation 和最终状态；使用 capability 私有收集器统一去重与归约，规则函数只表达单条业务判断；
 - `api`/`spi` 必须按 capability 提供可导航子模块，不得成为几十个无分组 re-export 的类型袋；没有真实调用方、存量数据、外部契约或迁移窗口时，不保留旧平铺出口或类型别名；
 - 历史类型只有存在可验证的生产数据或契约消费者时才能进入 `legacy/`；否则调用方原子迁移到 canonical 类型后删除旧实现，不制造永久兼容层。
 
@@ -110,7 +110,7 @@ reference/
 枚举必须跟随它约束的业务事实：
 
 - OrderStatus 放在 execution/order_lifecycle；
-- CredentialStatus 放在 account/session 或 account/admission；
+- CredentialStatus 放在 account/session 或 account/trading_eligibility；
 - RiskDecision 放在 risk/pre_trade；
 - ExchangeOrderType 属于 adapter 的协议 DTO；
 - 仅用于跨服务传输的枚举放在对应版本的 contract。
@@ -144,8 +144,8 @@ crates/domains/market/src/
     instrument_rules/     # 精度、步长、最小数量、状态和生效时间
     lifecycle/            # 标的发现、变更、退市和来源摄取
     source_profiles/      # OKX、Binance 公共数据源能力与限额配置
-    readiness/            # 数据可用性和新鲜度事实
-    dataset_facts/        # point-in-time 数据身份和指纹事实
+    dataset_check/        # 数据是否满足指定用途的检查结果
+    dataset_usage/        # point-in-time 数据使用批准和指纹事实
   stream/
     bars/
       history/            # 分表历史读取、分页和版本
@@ -259,7 +259,7 @@ crates/domains/reconciliation/src/
   detection/              # 内部事实与交易所事实差异检测
   case/                   # ReconciliationCase 状态机
   recovery/               # 补拉、重放、人工确认和关闭
-  evidence/               # 差异、来源时间和处置证据
+  report/                 # 差异、来源时间和处置报告
   api.rs
   spi.rs
 ~~~
@@ -274,7 +274,7 @@ crates/domains/research/src/
   dataset/                # point-in-time 数据集和 universe 身份
   simulation/             # Research 对回测引擎的实验请求
   evaluation/             # L0 至 L3 gate 与晋级资格
-  evidence/               # 研究制品、指纹和结论证据
+  result_artifact/        # 研究制品、指纹和结论结果
   qualification/          # 生成可供 Strategy release 审查的候选资格
   api.rs
   spi.rs
@@ -304,7 +304,7 @@ crates/quant/
 以下内容不能下沉 Quant：
 
 - Vegas 或其他具体策略的入场条件；
-- 会员、订阅、用户 readiness；
+- 会员、订阅、用户交易资格；
 - 账户余额是否足够；
 - 是否允许实盘；
 - 强制止损；
@@ -368,7 +368,7 @@ crates/adapters/
     execution_request/
     result_writeback/
   object-storage/src/
-    research_evidence/
+    research_results/
   notification/src/
     execution_alert/
     risk_alert/
@@ -422,7 +422,7 @@ App 只允许：
 - 处理进程生命周期、健康检查和观测上下文；
 - 把已分类错误映射为退出码或运行状态。
 
-App 中长时运行链路按 `supervisor`、`live_loop`、`retry`、`timing` 等真实运行职责组织；对外只保留一个监督入口。该拆分只改善生命周期可读性，不得把业务错误分类、账户 freshness、恢复谓词或交易决策搬入 App。
+App 中长时运行链路按 `supervisor`、`live_loop`、`retry`、`timing` 等真实运行职责组织；对外只保留一个监督入口。该拆分只改善生命周期可读性，不得把业务错误分类、账户状态核验、恢复谓词或交易决策搬入 App。
 
 App 禁止：
 

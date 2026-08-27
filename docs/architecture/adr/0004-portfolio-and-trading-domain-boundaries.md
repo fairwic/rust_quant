@@ -31,9 +31,9 @@
 
 #### `PortfolioEvaluationBatch`
 
-`PortfolioEvaluationBatch` 是 Portfolio 的账户级、确定性输入单位：它只由已经取得有效 Web claim 的一个或多个 `ExecutionRequest` 构成，且全部属于同一 `execution_account_ref`、冻结的 `ExecutionAccountBindingV1` identity/version、`ExchangeAccountRef` 与 credential revision/revocation generation，以及明确的 decision window；单请求同样是 size=1 batch。Execution 向 Portfolio 交付稳定的 source request/claim receipt/context identity 与动态 evidence 引用，Portfolio 不读取 Web 表，也不创建或补造请求。
+`PortfolioEvaluationBatch` 是 Portfolio 的账户级、确定性输入单位：它只由已经取得有效 Web claim 的一个或多个 `ExecutionRequest` 构成，且全部属于同一 `execution_account_ref`、冻结的 `ExecutionAccountBindingV1` identity/version、`ExchangeAccountRef` 与 credential revision/revocation generation，以及明确的 decision window；单请求同样是 size=1 batch。Execution 向 Portfolio 交付稳定的 source request/claim receipt/context identity 与动态 input 引用，Portfolio 不读取 Web 表，也不创建或补造请求。
 
-batch 至少固定账户/绑定/credential revision/revocation generation 引用、decision time/window、按规范排序的 source request identity、各请求 Context identity、Account/Market evidence 引用和 `batch_hash`。Portfolio 负责 batch 内排序、净额、容量分配和目标状态；它必须把每个来源请求的贡献、被净额抵消或 Blocked 原因映射回 source request。batch 不是新业务请求、不会获得 credential，也不能作为 Core 自营执行入口。
+batch 至少固定账户/绑定/credential revision/revocation generation 引用、decision time/window、按规范排序的 source request identity、各请求 Context identity、Account/Market input 引用和 `batch_hash`。Portfolio 负责 batch 内排序、净额、容量分配和目标状态；它必须把每个来源请求的贡献、被净额抵消或 Blocked 原因映射回 source request。batch 不是新业务请求、不会获得 credential，也不能作为 Core 自营执行入口。
 
 ##### 窗口、claim 与结果协议
 
@@ -41,7 +41,7 @@ batch 至少固定账户/绑定/credential revision/revocation generation 引用
 
 每个窗口使用稳定 `batch_window_key = execution_account_ref + execution_account_binding_version + credential_revision + credential_revocation_generation + portfolio_policy_snapshot_id + decision_window_id`。`decision_window_id` 由已冻结 Policy 与 `DecisionTime` 决定；`close_deadline_wall_clock` 只用于运行时活性，不参与 Portfolio 决策或 `batch_hash`。admission 必须把 source request identity、当前 Web claim receipt/fence 和单调 `admission_sequence` 原子绑定到一个未关闭窗口；同一有效 claim 不得同时进入两个窗口。
 
-窗口达到已发布 Policy 的关闭条件或 `close_deadline_wall_clock` 后，Execution 原子写入 `close_watermark = last_admission_sequence` 并冻结 source identity、claim receipt、Context 与动态 Evidence 引用，生成不可变 `batch_hash`。关闭后的窗口不得重新打开、插入成员或修改 membership；在 watermark 之后取得的 claim、迟到信号或重新可用请求只能进入下一窗口，不能为了“凑满 batch”回填已关闭结果。
+窗口达到已发布 Policy 的关闭条件或 `close_deadline_wall_clock` 后，Execution 原子写入 `close_watermark = last_admission_sequence` 并冻结 source identity、claim receipt、Context 与动态 input 引用，生成不可变 `batch_hash`。关闭后的窗口不得重新打开、插入成员或修改 membership；在 watermark 之后取得的 claim、迟到信号或重新可用请求只能进入下一窗口，不能为了“凑满 batch”回填已关闭结果。
 
 Execution 必须在开始 Portfolio/Risk 评估前续约并校验所有 source claim，并在 live OMS 初始化前再次校验所有实际贡献该目标的 claim。任一成员在此之前被 Web 取消、撤销或过期时，原 closed batch 整体失效：该成员以 `Cancelled` 或 `ClaimLost` 结束，其他仍有效成员释放或重排进下一窗口；不得在旧 `batch_hash` 上删成员后继续执行。已经形成 `SafetyObligation` 的既有敞口仍按其安全尾部处理，不因 Web claim 失效而被中断。
 
@@ -130,6 +130,6 @@ Execution 负责如何成交，不负责为什么分配这些资金。
 - 每个 source request 都能从 `PortfolioBatchResult` 追溯到 `Allocated`、`Netted`、`Blocked`、`Deferred`、`Cancelled` 或 `ClaimLost` 的唯一结果，且跨用户回写不泄露其他成员信息；
 - Risk 可以使用固定 PreTradeSnapshot 重放；
 - Execution 只接收有效批准后的目标变化，并在纯 `ExecutionPlanningValue` 与 live `OrderIntent`/`ExecutionPlan`/`ProtectionPlan` 初始化之间保持 hash 一致；
-- 原始 private event/signed query 只能由 Account owner 以 current generation 幂等重建 AccountProjection，再发布至少带 source event/query identity、cursor/替代比较器、session generation、projection revision 与相关 watermark 的 `AccountFactV1`；Execution 只经 Inbox 更新 OMS；
+- 原始 private event/signed query 只能由 Account owner 以 current generation 幂等重建 AccountProjection，再发布至少带 source event/query identity、cursor/替代比较器、session generation、projection revision 与 related checkpoint 的 `AccountFactV1`；Execution 只经 Inbox 更新 OMS；
 - Web ExecutionRequest 与 Core OrderIntent 使用不同身份且能通过 correlation/idempotency 链关联；
 - Reconciliation 只能触发 owner command，不能直接修表。

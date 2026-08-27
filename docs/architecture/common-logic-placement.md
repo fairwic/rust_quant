@@ -28,7 +28,7 @@
 | 技术指标 | `crates/quant/indicators` | EMA、RSI、MACD、ATR、布林带、形态 primitives | 策略入场结论、仓位和下单 |
 | 确定性回测内核 | `crates/quant/backtest` | 时间推进、事件调度、Replay、撮合、费用、滑点、资金费 | Domain 编排、Experiment、某策略规则、promote 结论 |
 | 绩效分析 | `crates/quant/analytics` | PnL 序列、回撤、Sharpe、Sortino、胜率 | 用户展示文案、生产发布状态 |
-| 研究业务 | `crates/domains/research` | DatasetManifest、EvaluationManifest、Experiment、Run、Checkpoint、SimulationProfile、Evidence、OOF/OOS | 原始行情、Strategy Definition、生产订单/账户事实 |
+| 研究业务 | `crates/domains/research` | DatasetManifest、EvaluationManifest、Experiment、Run、Checkpoint、SimulationProfile、ResearchResultArtifact、OOF/OOS | 原始行情、Strategy Definition、生产订单/账户事实 |
 | 业务内部复用 | `crates/domains/<owner>` | 同一 owner 下多个用例稳定共用的模型和规则 | 无 owner 的万能 helpers |
 | 跨服务数据 | owner 仓库发布的 `contracts/<owner>/<version>` | 带 owner 和版本的 payload；Core `crates/contracts` 只放 Core payload 与 owner-neutral Envelope | SQLx Model、页面 DTO、SDK 原始类型、复制到 Core 的 Web/News DTO |
 | 外部系统实现 | `crates/adapters` | Postgres、Redis、HTTP、交易所、通知实现 | 策略、风控和订单状态机 |
@@ -147,7 +147,7 @@ Research 的 `SimulationLedger` 保存模拟现金、仓位、费用和权益，
 - exposure、turnover；
 - 交易频率和持仓时长。
 
-Research Domain 负责组织实验和证据：
+Research Domain 负责组织实验和结果：
 
 - 带 point-in-time universe、`available_at`/revision、历史 InstrumentRules、缺口/修订政策的数据集和样本窗口；
 - 在查看结果前冻结的 `EvaluationManifest`：训练/验证/OOS 窗口、purge/embargo、参数空间、优化算法/Seed/预算、候选选择规则、holdout 重用次数与收益集中度审计；
@@ -156,7 +156,7 @@ Research Domain 负责组织实验和证据：
 - candidate 比较；
 - promote 建议和拒绝理由。
 
-Analytics 不决定是否发布策略；Research 不直接修改 live 默认版本。Research 通过自己的 Port 持久化 Evidence，并分别记录“运行/工件完整可见”和“评价门是否通过”；亏损、过拟合或被拒绝的实验也可以是完整 Evidence，但不因此具备 promotion eligibility。Strategy Release 只引用已完成 Evidence identity 与明确的评价门结果；candidate 重新构建进入 released catalog 时还必须有 `PromotionReceiptV1` 证明被研究工件与 released 工件的可追溯性和业务 parity。Control 的 ActivationPointer 才决定某个已发布且具备 `ActivationEligibilityV1` 的 RuntimeSnapshot 是否被当前运行范围选用。
+Analytics 不决定是否发布策略；Research 不直接修改 live 默认版本。Research 通过自己的 Port 持久化 ResearchResultArtifact，并分别记录“运行/工件完整可见”和“评价门是否通过”；亏损、过拟合或被拒绝的实验也可以形成完整 ResearchResultArtifact，但不因此具备 promotion eligibility。Strategy Release 只引用已完成 ResearchResultArtifact identity 与明确的评价门结果；candidate 重新构建进入 released catalog 时还必须有 `PromotionReceiptV1` 证明被研究工件与 released 工件的可追溯性和业务 parity。Control 的 ActivationPointer 才决定某个已发布且具备 `ActivationEligibilityV1` 的 RuntimeSnapshot 是否被当前运行范围选用。
 
 ## 8. 业务模块内部的通用逻辑
 
@@ -197,7 +197,7 @@ Analytics 不决定是否发布策略；Research 不直接修改 live 默认版�
 | 订单与交易所结果差异 | `domains/reconciliation` | 对账事实 |
 | fee/slippage/funding 模拟机制 | `quant/backtest` | owner 无关回测机制 |
 | Sharpe/max drawdown | `quant/analytics` | 绩效计算 |
-| 参数实验、数据指纹、Run/Checkpoint/Evidence | `domains/research` | 有独立身份、生命周期和持久化 owner |
+| 参数实验、数据指纹、Run/Checkpoint/ResearchResultArtifact | `domains/research` | 有独立身份、生命周期和持久化 owner |
 | 模拟现金、仓位、working orders 与权益 | `domains/research/simulation/` 内的明确 ledger 模块 | 研究模拟事实，不是生产 AccountProjection |
 | 同时点多币信号收集与决策屏障 | `domains/research/simulation/` 的组合回放 capability | 防止 symbol 遍历顺序改变资金分配 |
 | StrategySignalV1 JSON | `contracts/strategy/v1` | 跨进程协议 |

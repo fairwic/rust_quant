@@ -85,7 +85,7 @@ pub(super) fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Args>
                     &args
                         .next()
                         .context(
-                            "--strict-visual-breakout-variant requires baseline, v1, v2-retest-acceptance, v3-body-midpoint-hold, v4-short-range-32-one-r, v5-breakout-body-strength-60pct-25bps, v6-weak-departure-one-bar-probation, v8-acceptance-margin-0-40-atr, v9-external-structure-clearance, v10-symmetric-retained-breakout-25pct, v11-breakout-candle-extreme-stop, or v12-breakout-candle-extreme-stop-min-1atr",
+                            "--strict-visual-breakout-variant requires a registered strict-visual Research variant, including v41-nested-child-range",
                         )?,
                 )?;
             }
@@ -123,7 +123,7 @@ pub(super) fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Args>
             }
             "--help" | "-h" => {
                 println!(
-                    "Usage: tradingview_velocity_top60 [--rule-version current-v2|candidate-v8..candidate-v20] [--ema-short-variant baseline|slope-spread|structure-break|structure-break-depth-0-10-atr|structure-break-depth-0-20-atr|structure-break-ema676-falling-20|right-side-retest|distance-guard|extreme-volume-acceptance] [--ema-trend-long-variant baseline|weekly-volume-p80|weekly-p80-tp-floor-2-5|weekly-p80-tp-floor-2-5-body-0-003|weekly-p80-tp-floor-2-5-body-0-003-break-depth-0-2-atr|weekly-p80-tp-floor-2-5-body-0-003-break-depth-0-3-atr|weekly-p80-tp-floor-2-5-body-0-003-break-depth-0-3-atr-bullish-acceptance|weekly-p80-tp-floor-2-5-body-0-003-break-depth-0-3-atr-distance-1-35-atr|weekly-p80-tp-floor-2-5-body-0-003-break-depth-0-3-atr-distance-1-5-atr|weekly-p80-tp-floor-2-5-body-0-003-break-depth-0-4-atr|weekly-p80-tp-floor-2-5-body-0-003-distance-1-5-atr|conservative-target-gap] [--sell-climax-base-reclaim-variant baseline|v1] [--anchor-upthrust-variant baseline|right-side-confirmation|target-consumption-cap-25|target-consumption-cap-33|target-consumption-cap-50|recent-horizontal-first-break|recent-horizontal-first-break-close-back|recent-horizontal-direction-efficiency-30|recent-horizontal-direction-efficiency-35|recent-horizontal-direction-efficiency-40|active-parent-horizontal|active-parent-horizontal-breakout-body-rejection|active-parent-horizontal-normalized-body-rejection-10pct|active-parent-horizontal-shallow-breakout-excess-10pct|active-parent-horizontal-edge-transitions-3-shallow-breakout-excess-10pct]... [--strict-visual-breakout-variant baseline|v1|v2-retest-acceptance|v3-body-midpoint-hold|v4-short-range-32-one-r|v5-breakout-body-strength-60pct-25bps|v6-weak-departure-one-bar-probation|v8-acceptance-margin-0-40-atr|v9-external-structure-clearance|v10-symmetric-retained-breakout-25pct|v11-breakout-candle-extreme-stop|v12-breakout-candle-extreme-stop-min-1atr] [--baseline-cache-dir DIR] [--no-baseline-cache] [--output PATH] [--allow-partial-diagnostic]"
+                    "Usage: tradingview_velocity_top60 [--rule-version current-v2|candidate-v8..candidate-v20] [--ema-short-variant baseline|slope-spread|structure-break|structure-break-depth-0-10-atr|structure-break-depth-0-20-atr|structure-break-ema676-falling-20|right-side-retest|distance-guard|extreme-volume-acceptance] [--ema-trend-long-variant baseline|weekly-volume-p80|weekly-p80-tp-floor-2-5|weekly-p80-tp-floor-2-5-body-0-003|weekly-p80-tp-floor-2-5-body-0-003-break-depth-0-2-atr|weekly-p80-tp-floor-2-5-body-0-003-break-depth-0-3-atr|weekly-p80-tp-floor-2-5-body-0-003-break-depth-0-3-atr-bullish-acceptance|weekly-p80-tp-floor-2-5-body-0-003-break-depth-0-3-atr-distance-1-35-atr|weekly-p80-tp-floor-2-5-body-0-003-break-depth-0-3-atr-distance-1-5-atr|weekly-p80-tp-floor-2-5-body-0-003-break-depth-0-4-atr|weekly-p80-tp-floor-2-5-body-0-003-distance-1-5-atr|conservative-target-gap] [--sell-climax-base-reclaim-variant baseline|v1] [--anchor-upthrust-variant baseline|right-side-confirmation|target-consumption-cap-25|target-consumption-cap-33|target-consumption-cap-50|recent-horizontal-first-break|recent-horizontal-first-break-close-back|recent-horizontal-direction-efficiency-30|recent-horizontal-direction-efficiency-35|recent-horizontal-direction-efficiency-40|active-parent-horizontal|active-parent-horizontal-breakout-body-rejection|active-parent-horizontal-normalized-body-rejection-10pct|active-parent-horizontal-shallow-breakout-excess-10pct|active-parent-horizontal-edge-transitions-3-shallow-breakout-excess-10pct]... [--strict-visual-breakout-variant baseline|v1|v2-retest-acceptance|v3-body-midpoint-hold|v4-short-range-32-one-r|v5-breakout-body-strength-60pct-25bps|v6-weak-departure-one-bar-probation|v8-acceptance-margin-0-40-atr|v9-external-structure-clearance|v10-symmetric-retained-breakout-25pct|v11-breakout-candle-extreme-stop|v12-breakout-candle-extreme-stop-min-1atr|v22-unified-retest-maker2-taker5-slippage1|v23-unified-retest-no-short-gates-maker2-taker5-slippage1|v23-acceptance-retention-75pct-maker2-taker5-slippage1|v25-immediate-weak-departure-consume-maker2-taker5-slippage1|v26-narrow-range-dynamic-anchor-body45-range25-maker2-taker5-slippage1|v40-visual-parent-execution-boundary] [--baseline-cache-dir DIR] [--no-baseline-cache] [--output PATH] [--allow-partial-diagnostic]"
                 );
                 std::process::exit(0);
             }
@@ -229,6 +229,51 @@ fn parse_strict_visual_breakout_variant(
         }
         "v12-breakout-candle-extreme-stop-min-1atr" => {
             Ok(StrictVisualBreakoutResearchVariant::V12ExtremeStopMinOneAtr)
+        }
+        "v13-raw-range-guard" => Ok(StrictVisualBreakoutResearchVariant::V13RawRangeGuard),
+        "v14-directional-move-50bps" => {
+            Ok(StrictVisualBreakoutResearchVariant::V14DirectionalMove50Bps)
+        }
+        "v15-directional-move-75bps" => {
+            Ok(StrictVisualBreakoutResearchVariant::V15DirectionalMove75Bps)
+        }
+        "v16-directional-move-100bps" => {
+            Ok(StrictVisualBreakoutResearchVariant::V16DirectionalMove100Bps)
+        }
+        "v17-soft-breakout-short" => Ok(StrictVisualBreakoutResearchVariant::V17SoftBreakoutShort),
+        "v18-soft-breakout-short-direct-entry" => {
+            Ok(StrictVisualBreakoutResearchVariant::V18SoftBreakoutShortDirectEntry)
+        }
+        "v19-soft-breakout-short-ema-gate" => {
+            Ok(StrictVisualBreakoutResearchVariant::V19SoftBreakoutShortEmaGate)
+        }
+        "v20-soft-breakout-short-body-gate" => {
+            Ok(StrictVisualBreakoutResearchVariant::V20SoftBreakoutShortBodyGate)
+        }
+        "v22-unified-retest-maker2-taker5-slippage1" => {
+            Ok(StrictVisualBreakoutResearchVariant::V22UnifiedRetestExecutionCost)
+        }
+        "v23-unified-retest-no-short-gates-maker2-taker5-slippage1" => {
+            Ok(StrictVisualBreakoutResearchVariant::V23UnifiedRetestNoShortGates)
+        }
+        "v23-acceptance-retention-75pct-maker2-taker5-slippage1" => {
+            Ok(StrictVisualBreakoutResearchVariant::V23AcceptanceRetention75CostReplay)
+        }
+        "v25-immediate-weak-departure-consume-maker2-taker5-slippage1" => {
+            Ok(StrictVisualBreakoutResearchVariant::V25ImmediateWeakDepartureConsume)
+        }
+        "v26-narrow-range-dynamic-anchor-body45-range25-maker2-taker5-slippage1" => {
+            Ok(StrictVisualBreakoutResearchVariant::V26NarrowRangeDynamicAnchor)
+        }
+        "v40-visual-parent-execution-boundary" => {
+            Ok(StrictVisualBreakoutResearchVariant::V40VisualParentExecutionBoundary)
+        }
+        "v41-nested-child-range" => Ok(StrictVisualBreakoutResearchVariant::V41NestedChildRange),
+        "v42-contained-internal-body-exemption" => {
+            Ok(StrictVisualBreakoutResearchVariant::V42ContainedInternalBodyExemption)
+        }
+        "v43-balanced-parent-upgrade" => {
+            Ok(StrictVisualBreakoutResearchVariant::V43BalancedParentUpgrade)
         }
         other => bail!("unsupported --strict-visual-breakout-variant: {other}"),
     }
@@ -541,6 +586,66 @@ mod tests {
         assert_eq!(
             parsed_v12.strict_visual_breakout_variant,
             StrictVisualBreakoutResearchVariant::V12ExtremeStopMinOneAtr
+        );
+
+        let parsed_v23 = parse_args([
+            "--rule-version".to_owned(),
+            "candidate-v20".to_owned(),
+            "--strict-visual-breakout-variant".to_owned(),
+            "v23-unified-retest-no-short-gates-maker2-taker5-slippage1".to_owned(),
+        ])
+        .expect("registered strict visual V23 no-short-gates contract");
+        assert_eq!(
+            parsed_v23.strict_visual_breakout_variant,
+            StrictVisualBreakoutResearchVariant::V23UnifiedRetestNoShortGates
+        );
+
+        let parsed_retention_75 = parse_args([
+            "--rule-version".to_owned(),
+            "candidate-v20".to_owned(),
+            "--strict-visual-breakout-variant".to_owned(),
+            "v23-acceptance-retention-75pct-maker2-taker5-slippage1".to_owned(),
+        ])
+        .expect("registered V23 acceptance-retention 75% cost replay");
+        assert_eq!(
+            parsed_retention_75.strict_visual_breakout_variant,
+            StrictVisualBreakoutResearchVariant::V23AcceptanceRetention75CostReplay
+        );
+
+        let parsed_v25 = parse_args([
+            "--rule-version".to_owned(),
+            "candidate-v20".to_owned(),
+            "--strict-visual-breakout-variant".to_owned(),
+            "v25-immediate-weak-departure-consume-maker2-taker5-slippage1".to_owned(),
+        ])
+        .expect("registered strict visual V25 immediate-consume contract");
+        assert_eq!(
+            parsed_v25.strict_visual_breakout_variant,
+            StrictVisualBreakoutResearchVariant::V25ImmediateWeakDepartureConsume
+        );
+
+        let parsed_v26 = parse_args([
+            "--rule-version".to_owned(),
+            "candidate-v20".to_owned(),
+            "--strict-visual-breakout-variant".to_owned(),
+            "v26-narrow-range-dynamic-anchor-body45-range25-maker2-taker5-slippage1".to_owned(),
+        ])
+        .expect("registered strict visual V26 dynamic-anchor contract");
+        assert_eq!(
+            parsed_v26.strict_visual_breakout_variant,
+            StrictVisualBreakoutResearchVariant::V26NarrowRangeDynamicAnchor
+        );
+
+        let parsed_v40 = parse_args([
+            "--rule-version".to_owned(),
+            "candidate-v20".to_owned(),
+            "--strict-visual-breakout-variant".to_owned(),
+            "v40-visual-parent-execution-boundary".to_owned(),
+        ])
+        .expect("registered strict visual V40 execution-boundary contract");
+        assert_eq!(
+            parsed_v40.strict_visual_breakout_variant,
+            StrictVisualBreakoutResearchVariant::V40VisualParentExecutionBoundary
         );
 
         let error = parse_args([

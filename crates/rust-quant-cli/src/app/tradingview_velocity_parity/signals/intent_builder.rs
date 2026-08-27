@@ -315,10 +315,7 @@ pub(super) fn build_intent(
 
     let strict_visual_boundary = context
         .strict_visual_breakout
-        .map(|signal| match direction {
-            Direction::Long => signal.range.upper,
-            Direction::Short => signal.range.lower,
-        });
+        .map(|signal| signal.execution_boundary);
     let breakout_line = [
         context.accepted_range.map(|signal| signal.raw_high),
         context.large_horizontal_line,

@@ -45,7 +45,7 @@
   ResearchExecutionArtifactRef
 ```
 
-重放一次业务决策还必须记录动态 Evidence：
+重放一次业务决策还必须记录动态 Inputs：
 
 ```text
 MarketSnapshotRef
@@ -54,7 +54,7 @@ InstrumentRulesSnapshotRef
 Clock / observed_at
 ```
 
-动态 Evidence 不是配置，不进入 Policy Snapshot；它与 `DecisionContextCoreV1`、相应 subject binding 一起构成完整可重放输入。原始固定公共行情配置称 `MarketDataAccessCredential`，只在 Market/Gateway 的公共 read-only Adapter 配置内存中存在；其非敏感 `MarketDataAccessCredentialRef` 或 `market_data_source_profile_id` 可用于公共配额、市场采集 provenance Evidence 或必要 Market Contract，但既不是**决策** Evidence，也不是 subject。
+动态 Inputs 不是配置，不进入 Policy Snapshot；它与 `DecisionContextCoreV1`、相应 subject binding 一起构成完整可重放输入。原始固定公共行情配置称 `MarketDataAccessCredential`，只在 Market/Gateway 的公共 read-only Adapter 配置内存中存在；其非敏感 `MarketDataAccessCredentialRef` 或 `market_data_source_profile_id` 可用于公共配额、市场采集 `SourceInfo` 或必要 Market Contract，但既不是**决策输入**，也不是 subject。
 
 ### 2. Domain Policy Snapshot 的唯一 Owner
 
@@ -107,9 +107,9 @@ DecisionSubjectRef
   | ResearchScenarioRef { research_run_id, scenario_id, simulated_account_id }
 ```
 
-`ExecutionRequestRef` 只能由 Web 创建的 canonical `ExecutionRequest` 提供；Research 不得制造 synthetic `execution_request_id`、combo、credential、风险配置或用户账户字段来复用 live 类型。Research 如需回放已发生的 live 决策，只能把原 request 记为可选的只读 Evidence link，当前 subject 仍是 `ResearchScenarioRef`，不获得执行授权。
+`ExecutionRequestRef` 只能由 Web 创建的 canonical `ExecutionRequest` 提供；Research 不得制造 synthetic `execution_request_id`、combo、credential、风险配置或用户账户字段来复用 live 类型。Research 如需回放已发生的 live 决策，只能把原 request 记为可选的只读 source link，当前 subject 仍是 `ResearchScenarioRef`，不获得执行授权。
 
-`PortfolioEvaluationBatchRef` 不是第三种 `DecisionSubjectRef`，也不创建新的执行授权。它只在账户级 Portfolio 评估时引用一组已经各自形成 `ExecutionRequestRef`/live Context 的 source request；单请求 batch 仍保持该 request 为唯一 subject。batch hash 与 source mapping 进入 Portfolio/Risk/Execution evidence，用于重放净额与结果归因，不能替代任一 source request 的 claim、credential 或商业资格。
+`PortfolioEvaluationBatchRef` 不是第三种 `DecisionSubjectRef`，也不创建新的执行授权。它只在账户级 Portfolio 评估时引用一组已经各自形成 `ExecutionRequestRef`/live Context 的 source request；单请求 batch 仍保持该 request 为唯一 subject。batch hash 与 source mapping 进入 Portfolio/Risk/Execution decision inputs，用于重放净额与结果归因，不能替代任一 source request 的 claim、credential 或商业资格。
 
 `DecisionContextCoreV1` 是 Execution 对外暴露的纯、稳定 API 值：它固定所有 owner 已发布的政策语义，但不表示一笔 Web 执行任务。至少包含：
 
@@ -153,18 +153,18 @@ ResearchDecisionContextSnapshot (Research owner)
 1. 只引用 Published、未撤销且 schema/capability 兼容的快照；
 2. 所有默认值必须在各 owner 发布快照时展开，Core/binding 不补业务默认值；
 3. Execution 只能在通过 Web `ClaimExecutionRequestV1` 获得有效 claim 后，在自己的 owner transaction 中持久化 live binding；Research 只在自己的 Run transaction 中持久化 Research binding；
-4. `PortfolioEvaluationBatch` 只可引用仍能验证为有效的 source claim 与各自 live Context。它固定 source request/claim receipt/context 的规范排序、account、decision window、动态 evidence 与 `batch_hash`；PortfolioTarget、RiskDecision 与计划结果必须保留对 batch 和逐 source outcome 的可审计引用；
-5. RiskDecision、OrderIntent、aggregate `ExecutionPlan`（含 child OrderPlan）、ProtectionPlan、attempt 与审计事件都引用相同 live `context_id + context_hash + subject_binding_hash`，以及适用的 batch/source mapping；Research Evidence 引用相同的 Research binding identity；
+4. `PortfolioEvaluationBatch` 只可引用仍能验证为有效的 source claim 与各自 live Context。它固定 source request/claim receipt/context 的规范排序、account、decision window、动态 inputs 与 `batch_hash`；PortfolioTarget、RiskDecision 与计划结果必须保留对 batch 和逐 source outcome 的可审计引用；
+5. RiskDecision、OrderIntent、aggregate `ExecutionPlan`（含 child OrderPlan）、ProtectionPlan、attempt 与审计事件都引用相同 live `context_id + context_hash + subject_binding_hash`，以及适用的 batch/source mapping；ResearchResultArtifact 引用相同的 Research binding identity；
 6. Policy 引用撤销、最新 Kill Switch 命中、当前 capability 不满足、claim/permit/运行时有效期失效时对**新风险增加** fail-closed；Dispatcher 可以拒绝提交，但不能静默替换 Core 内的政策或重算另一版本计划。已形成的 `SafetyObligation` 仍只能沿原 request/context 执行 Query、Reconciliation、Cancel、Protect、Reduce、Close 等受限安全动作，绝不由此获得新开仓权限。
 
 跨 Domain 不需要全局事务：各 Policy Snapshot 已不可变且先 Published，Execution 或 Research 只在各自 owner transaction 中原子发布对这些稳定引用的 binding。引用校验失败时 binding 不可见。
 
-### 5. 动态 Evidence 与配置分离
+### 5. 动态 Inputs 与配置分离
 
-以下对象在每次决策时变化，必须作为输入证据记录：
+以下对象在每次决策时变化，必须作为输入记录：
 
-- confirmed MarketSnapshot、sequence、evidence cutoff；
-- AccountSnapshot、余额/持仓/保证金与 freshness；
+- confirmed MarketSnapshot、sequence、input cutoff；
+- AccountSnapshot、余额/持仓/保证金与 AccountStateVerification；
 - InstrumentRulesSnapshot、精度、最小数量和交易能力；
 - `DecisionTime`、Clock identity 与 Market event/source identity；
 - credential/instrument capability verification reference（仅验证结果与 revision，绝不包含 credential material/capability）。
@@ -173,12 +173,12 @@ ResearchDecisionContextSnapshot (Research owner)
 
 | 项 | 来源 | 可用于 | 是否进入 hash |
 | --- | --- | --- | --- |
-| `DecisionTime` | 注入 Clock + 已确认 Market 事件时间 | Strategy/Portfolio/Risk/Execution planning、评估状态、Research replay | 进入 `decision_evidence_hash`，不进入 `context_hash` |
+| `DecisionTime` | 注入 Clock + 已确认 Market 事件时间 | Strategy/Portfolio/Risk/Execution planning、评估状态、Research replay | 进入 `decision_inputs_hash`，不进入 `context_hash` |
 | `WallClock` | 真实运行时墙钟 | Web claim、lease、permit、stale、调度、`prepared_at_wall_clock` | 不进入 `context_hash` 或 parity hash |
 | 相对 TTL 规则 | 已发布 Policy Snapshot | 最大信号年龄、计划时效、保护窗口的业务规则 | 经 Snapshot hash 间接进入 `context_hash` |
 | 绝对 `valid_until_wall_clock` | `prepared_at_wall_clock +` 已发布 TTL 规则 | 当前 live binding 的运行时 liveness/final gate | 不进入 `context_hash` 或 `subject_binding_hash` |
 
-`decision_evidence_hash` 规范哈希 Market/Account/Instrument evidence 与 `DecisionTime`；它与 `context_hash`、`subject_binding_hash` 分开保存。WallClock 记录可以用于审计和恢复时效判断，但不能让相同业务输入因为机器时间不同而产生 parity 差异。
+`decision_inputs_hash` 规范哈希 Market/Account/Instrument inputs 与 `DecisionTime`；它与 `context_hash`、`subject_binding_hash` 分开保存。WallClock 记录可以用于审计和恢复时效判断，但不能让相同业务输入因为机器时间不同而产生 parity 差异。
 
 `RiskDecision` identity 至少覆盖：
 
@@ -187,11 +187,11 @@ context_hash
 + subject_binding_hash
 + PortfolioEvaluationBatchHash + source request mapping
 + PortfolioTargetHash
-+ decision_evidence_hash
++ decision_inputs_hash
 + risk evaluation generation
 ```
 
-同一 Context 在不同 AccountSnapshot/DecisionTime 下产生不同 RiskDecision 是正确行为，不属于 parity 漂移。`MarketDataAccessCredentialRef` 不是动态 Evidence，永远不得进入 Context、subject binding 或任何上述 hash。
+同一 Context 在不同 AccountSnapshot/DecisionTime 下产生不同 RiskDecision 是正确行为，不属于 parity 漂移。`MarketDataAccessCredentialRef` 不是动态 Input，永远不得进入 Context、subject binding 或任何上述 hash。
 
 ### 6. ResearchRunSpec
 
@@ -218,30 +218,30 @@ canonical spec hash
 
 `ResearchExecutionArtifactRef` 至少固定 Git revision、被评估 Strategy candidate artifact、quant-lab/quant-backtest/analytics 工件 digest、Release Unit Manifest、Cargo.lock、toolchain、target/profile/features 与依赖图 hash。`RngSpec` 固定 PRNG algorithm/version、master seed 和 substream 分区；`SchedulerSpec` 固定同时间事件 tie-breaker、partition ordering、并行 reduction 顺序和版本。只写一个裸 `Seed` 或“当前 binary”不能生成可重放 RunSpec。
 
-Research 对每个模拟账户/场景以同一个 `DecisionContextCoreV1` builder 和 Domain API 构造 `ResearchDecisionContextSnapshot { ResearchScenarioRef }`，不创建或要求 Web `ExecutionRequest`、`strategy_signal_id`、combo、用户 credential、风险 profile 或真实执行账户字段。验证某个 live 配置时，RunSpec 必须引用与目标 live Context 相同的四个 Policy Snapshot hash 与可公开的动态 Evidence；若需要关联历史 live 请求，只能记录一个非授权的 Evidence link。一般策略研究必须明确声明 reference Portfolio/Risk/Execution policy，不能把结果冒充所有用户配置；Research 只生成并持久化 `ExecutionPlanningValue`、其 child `OrderPlan` 与 `ProtectionPlanningValue` 作为 Evidence，并将保护规划落实为 Research-owned `SimulationProtectionState`，不创建 live `OrderIntent`、`ExecutionPlan` 或 `ProtectionPlan` OMS Aggregate。只有 PaperEvent 的 simulated OMS 或 live Execution 可以从相同 planning value 初始化这些 Aggregate。
+Research 对每个模拟账户/场景以同一个 `DecisionContextCoreV1` builder 和 Domain API 构造 `ResearchDecisionContextSnapshot { ResearchScenarioRef }`，不创建或要求 Web `ExecutionRequest`、`strategy_signal_id`、combo、用户 credential、风险 profile 或真实执行账户字段。验证某个 live 配置时，RunSpec 必须引用与目标 live Context 相同的四个 Policy Snapshot hash 与可公开的动态 Inputs；若需要关联历史 live 请求，只能记录一个非授权的 source link。一般策略研究必须明确声明 reference Portfolio/Risk/Execution policy，不能把结果冒充所有用户配置；Research 只生成并持久化 `ExecutionPlanningValue`、其 child `OrderPlan` 与 `ProtectionPlanningValue` 到 ResearchResultArtifact，并将保护规划落实为 Research-owned `SimulationProtectionState`，不创建 live `OrderIntent`、`ExecutionPlan` 或 `ProtectionPlan` OMS Aggregate。只有 PaperEvent 的 simulated OMS 或 live Execution 可以从相同 planning value 初始化这些 Aggregate。
 
-`SimulationProfile` 不进入 `ExecutionDecisionContextSnapshot`，也不得作为 Strategy、Portfolio、Risk 或 Execution planning API 的隐藏输入。其不变量限定为**相同单步输入**：当 Policy、Context Core、Market/Account/Instrument Evidence、EvaluationState before 与 DecisionTime 完全相同时，改变 SimulationProfile 不得改变该单步业务输出。
+`SimulationProfile` 不进入 `ExecutionDecisionContextSnapshot`，也不得作为 Strategy、Portfolio、Risk 或 Execution planning API 的隐藏输入。其不变量限定为**相同单步输入**：当 Policy、Context Core、Market/Account/Instrument Inputs、EvaluationState before 与 DecisionTime 完全相同时，改变 SimulationProfile 不得改变该单步业务输出。
 
-完整多事件模拟中，SimulationProfile 改变 Fill、费用、funding、latency 或 candle path 后会改变 SimulationLedger，并可能从下一时点开始改变 AccountSnapshot、RiskDecision 与 planning output。这是 `scenario divergence`，不是业务 parity 漂移。报告必须在首次 Ledger/Evidence hash 分歧处停止 exact parity，记录 event identity、差异原因和两侧状态 hash；只有动态 Evidence 仍相同的前缀继续要求逐层 exact parity。
+完整多事件模拟中，SimulationProfile 改变 Fill、费用、funding、latency 或 candle path 后会改变 SimulationLedger，并可能从下一时点开始改变 AccountSnapshot、RiskDecision 与 planning output。这是 `scenario divergence`，不是业务 parity 漂移。报告必须在首次 Ledger/ResultArtifact hash 分歧处停止 exact parity，记录 event identity、差异原因和两侧状态 hash；只有动态 Inputs 仍相同的前缀继续要求逐层 exact parity。
 
-### 6.1 Evidence 完整性、评价与 Promotion Receipt
+### 6.1 ResearchResultArtifact 完整性、评价与 Promotion Receipt
 
 Research 的状态必须分开：
 
 ```text
 BacktestRun.status
-EvidenceManifest.artifact_status
+ResultArtifactManifest.artifact_status
 EvaluationGateResult.status
 ```
 
-`EvidenceManifest.artifact_status = Completed` 只表示对象引用完整且原子可见；它可以对应失败、亏损、过拟合或样本不足的结果。只有按 RunSpec 引用的预先冻结 `EvaluationManifest` 计算出的 `EvaluationGateResult.status = eligible`，才可进入 Strategy promote 候选。
+`ResultArtifactManifest.artifact_status = Completed` 只表示对象引用完整且原子可见；它可以对应失败、亏损、过拟合或样本不足的结果。只有按 RunSpec 引用的预先冻结 `EvaluationManifest` 计算出的 `EvaluationGateResult.status = eligible`，才可进入 Strategy promote 候选。
 
 Strategy promote 必须创建不可变 `PromotionReceipt`，至少固定：
 
-- Completed Evidence 与 eligible EvaluationGateResult identity/hash；
+- Completed ResearchResultArtifact 与 eligible EvaluationGateResult identity/hash；
 - 被 ResearchExecutionArtifactRef 评估的 candidate artifact/source tree hash；
 - 目标 released Definition/Artifact/RuntimeSnapshot identity 与构建 digest；
-- candidate 与 released 构建使用同一业务 symbol、同一快照/输入的逐层 parity Evidence；
+- candidate 与 released 构建使用同一业务 symbol、同一快照/输入的逐层 parity result；
 - 批准人、批准时间和允许的 deployment channel。
 
 重新构建后的 released artifact 没有上述等价链时不得激活；PromotionReceipt 只引用 Research 事实，不修改或接管 Research 表。
@@ -252,7 +252,7 @@ Strategy promote 必须创建不可变 `PromotionReceipt`，至少固定：
 
 - 四个 Domain Policy Snapshot 的 id/version/hash；
 - `DecisionContextCoreV1` schema/`context_hash`；
-- Market、Account、Instrument evidence 与 `decision_evidence_hash`；
+- Market、Account、Instrument inputs 与 `decision_inputs_hash`；
 - EvaluationState before；
 - Clock/DecisionTime；
 - 相同业务 symbol/API。
@@ -271,7 +271,7 @@ ProtectionPlanningValue
 decision trace
 ```
 
-如果 Policy Snapshot、`context_hash`、`decision_evidence_hash` 或 DecisionTime 不同，只能称为 scenario comparison，不得标记 parity failure/success。完整模拟在首次 SimulationLedger/动态 Evidence 分歧之后同样进入 scenario divergence。WallClock、claim/lease 与绝对 TTL 记录不参与业务 parity 比较。live/Paper fixture 另验证相同 planning value 无损初始化的 `OrderIntent`、`ExecutionPlan`、`ProtectionPlan` 与其状态迁移；这不是 Research 创建 OMS Aggregate 的理由。
+如果 Policy Snapshot、`context_hash`、`decision_inputs_hash` 或 DecisionTime 不同，只能称为 scenario comparison，不得标记 parity failure/success。完整模拟在首次 SimulationLedger/动态 Inputs 分歧之后同样进入 scenario divergence。WallClock、claim/lease 与绝对 TTL 记录不参与业务 parity 比较。live/Paper fixture 另验证相同 planning value 无损初始化的 `OrderIntent`、`ExecutionPlan`、`ProtectionPlan` 与其状态迁移；这不是 Research 创建 OMS Aggregate 的理由。
 
 `RecoveryHarness` 不是第三种 Context 或 Aggregate 创建者。它只是 CI-only ephemeral integration-test artifact，在 disposable adapters 上驱动 live Execution intake/recovery 路径；不进入 deployable Release Unit、生产镜像或部署图，也不读取生产环境、Secret、数据库或真实交易所。
 
@@ -289,7 +289,7 @@ Fill、费用和 PnL 只有在相同 SimulationProfile 下要求确定性重放�
 - 时间戳精度与时区；
 - `context_hash` 不包含 subject、数据库自增 ID、WallClock、绝对 TTL、claim/lease、日志时间或进程随机值；
 - `subject_binding_hash` 只在相应 live/research binding 内规范包含 `context_hash + DecisionSubjectRef` 与稳定来源引用；
-- `decision_evidence_hash` 只规范包含动态 evidence 与 DecisionTime；
+- `decision_inputs_hash` 只规范包含动态 inputs 与 DecisionTime；
 - SHA-256 或批准的内容 hash；
 - golden serialization snapshot 与 N/N-1 解析测试。
 
@@ -348,15 +348,15 @@ ResearchRunSpec 的 canonical hash 还必须覆盖 Dataset/Evaluation/ExecutionA
 - 不同用户可以在同一 StrategyRuntimeSnapshot 下绑定不同 RiskPolicySnapshot；
 - Context Core 只引用 Published 且兼容的 Policy Snapshot；live binding 只能来自有效 Web claim，Research binding 只能来自 ResearchScenario；
 - 多个已 claim live binding 只能以规范 source ordering 形成同账户 `PortfolioEvaluationBatch`；batch 不改变任一 request 的 subject、claim 或 credential 语义；
-- 任一语义引用 hash、默认值或单位变化都会改变 `context_hash`；subject 变化只改变 `subject_binding_hash`，动态 Evidence/DecisionTime 变化只改变 `decision_evidence_hash`；
+- 任一语义引用 hash、默认值或单位变化都会改变 `context_hash`；subject 变化只改变 `subject_binding_hash`，动态 Inputs/DecisionTime 变化只改变 `decision_inputs_hash`；
 - WallClock、绝对 TTL、claim/lease 与日志时间不会改变上述业务语义 hash；
 - live binding 的 Policy 撤销、claim/permit 失效、命中 kill switch 或当前能力不足后禁止新开仓；
-- 退订、会员/claim 到期或 credential 撤销不会把已形成的安全收敛责任伪造成新 request：前者保留受限 `SafetyObligation`，后者无可用安全 capability 时留下 `SafetyBlocked`/人工处置证据；
-- RiskDecision、live OrderIntent、ExecutionPlan（含 child snapshot）、ProtectionPlan、Attempt 和恢复证据均可追溯到同一 `ExecutionDecisionContextSnapshot`；Research Evidence 可追溯到 `ResearchDecisionContextSnapshot`，并只保存 `ExecutionPlanningValue`/child `OrderPlan`/`ProtectionPlanningValue`，不伪造 Web 请求或 OMS Aggregate；
-- exact parity fixture 同时证明 Policy hash、Context hash、动态 Evidence/DecisionTime 和逐层输出一致；
+- 退订、会员/claim 到期或 credential 撤销不会把已形成的安全收敛责任伪造成新 request：前者保留受限 `SafetyObligation`，后者无可用安全 capability 时留下 `SafetyBlocked`/人工处置记录；
+- RiskDecision、live OrderIntent、ExecutionPlan（含 child snapshot）、ProtectionPlan、Attempt 和恢复验证均可追溯到同一 `ExecutionDecisionContextSnapshot`；ResearchResultArtifact 可追溯到 `ResearchDecisionContextSnapshot`，并只保存 `ExecutionPlanningValue`/child `OrderPlan`/`ProtectionPlanningValue`，不伪造 Web 请求或 OMS Aggregate；
+- exact parity fixture 同时证明 Policy hash、Context hash、动态 Inputs/DecisionTime 和逐层输出一致；
 - 相同单步输入下，SimulationProfile 变化不改变 Signal、Target、RiskDecision、`ExecutionPlanningValue`、child `OrderPlan` 或 `ProtectionPlanningValue`；由相同 planning value 初始化的 live Aggregate 语义 hash 也必须保持不变；
-- 完整运行在首次 Fill/Ledger/Evidence 分歧后标记 scenario divergence，不错误要求后续 RiskDecision/Planning 保持一致；
+- 完整运行在首次 Fill/Ledger/ResultArtifact 分歧后标记 scenario divergence，不错误要求后续 RiskDecision/Planning 保持一致；
 - DatasetManifest 能重建 point-in-time universe、数据 revision、InstrumentRules 与可见时间边界，EvaluationManifest 能证明 OOS/walk-forward 规则先于结果冻结；
 - 相同 RunSpec 必须解析到相同 ResearchExecutionArtifact、PRNG substream 和 scheduler ordering；
-- Completed Evidence 不自动成为 eligible；Strategy Release 必须存在可追溯 candidate -> released 的 PromotionReceipt；
+- Completed ResearchResultArtifact 不自动成为 eligible；Strategy Release 必须存在可追溯 candidate -> released 的 PromotionReceipt；
 - RecoveryHarness 在生产 Release Unit/镜像/部署图中不可达，且不能读取生产环境、Secret、数据库或真实交易所。

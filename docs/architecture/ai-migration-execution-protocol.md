@@ -278,7 +278,7 @@ Use Case 只协调一个明确业务结果。出现以下情况必须拆分：
 - shadow；
 - signed read-only。
 
-真实 mutation 需要用户单独授权，并且仍必须具备 credential readiness、symbol filters、Decimal rounding、RiskApproval、lease、fence、保护单计划、最小数量、回滚和平仓计划。
+真实 mutation 需要用户单独授权，并且仍必须具备 credential verification、symbol filters、Decimal rounding、RiskApproval、lease、fence、保护单计划、最小数量、回滚和平仓计划。
 
 没有止损计划不得下单。
 
@@ -308,7 +308,7 @@ cargo xtask arch-check
 - package role、依赖方向和 Release Unit；
 - façade、文件预算、Port 完整性和可静态判定的源码规则。
 
-### 9.2 Wave readiness 与测试
+### 9.2 Wave completion check 与测试
 
 ~~~text
 cargo xtask wave-check --wave W1

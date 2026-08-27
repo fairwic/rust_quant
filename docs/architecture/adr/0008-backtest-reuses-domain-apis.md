@@ -47,7 +47,7 @@ Apps/quant-lab
 2. Simulation Tooling 只能依赖 Domain 的稳定公开 API，不能访问私有 module、Port、Adapter、数据库 Row 或环境变量；
 3. Backtest 必须调用与 paper/live 相同的 Strategy Evaluator、Portfolio Policy、Risk Policy 和 Execution 状态机；
 4. 运行模式只替换 Clock、Market、Account 与 Exchange Adapter；
-5. 模拟订单、成交和账户状态不写生产事实表，只形成 ResearchEvidence；
+5. 模拟订单、成交和账户状态不写生产事实表，只形成 ResearchResultArtifact；
 6. Quant Tooling 不直接持久化，完成结果通过 Strategy owner command 保存；
 7. `quant-lab` 只负责配置映射、装配、调用和生命周期，不实现策略、资金或风险规则。
 

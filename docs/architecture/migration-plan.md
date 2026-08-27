@@ -29,7 +29,7 @@
 
 - rust_quant 在统一切换前仍是现有生产行为事实源。
 - rust_quant_alpha 是唯一目标实现仓库。
-- rust_quan_web 继续拥有用户、会员、strategy x symbol combo、用户凭证和商业 readiness。
+- rust_quan_web 继续拥有用户、会员、strategy x symbol combo、用户凭证和商业资格。
 - crypto_exc_all 继续拥有交易所协议、签名、DTO、精度字段和错误归一。
 - Core 不新增直连 quant_web 数据库。
 - 第一版只完成 OKX 与 Binance。
@@ -86,7 +86,7 @@ W0 不创建空 Domain、App、Port 或 Adapter。
 - OKX、Binance 公共 K 线、成交、盘口、资金费、标记价和指数价；
 - fixed service API Key 的只读 source profile；
 - ConfirmedCandle、修正、乱序、重复和缺口；
-- K 线历史、增量同步、point-in-time snapshot 和 readiness；
+- K 线历史、增量同步、point-in-time snapshot 和 dataset check；
 - 既有 K 线分表、schema-tool 和独立数据库角色；
 - Market contract、Market worker 和可观测性。
 
@@ -117,7 +117,7 @@ W1 未完成前，不继续扩展 Strategy、Research 或 Execution 的迁移。
 
 - 策略定义、版本、catalog、runtime、因果 evaluation 和 signal；
 - signal handoff；
-- Research experiment、dataset、simulation、evaluation、evidence 和 qualification；
+- Research experiment、dataset、simulation、evaluation、result artifact 和 qualification；
 - Quant math、indicators、因果时钟、回放、撮合、费用和分析；
 - quant-lab、signal-worker；
 - promote、回滚、停用和 PromotionReceipt。
@@ -214,7 +214,7 @@ W1 未完成前，不继续扩展 Strategy、Research 或 Execution 的迁移。
 - 每个运行角色有唯一 App 和明确 owner；
 - Research 不进入生产工件；
 - 所有业务事实只有一个写 owner；
-- 全链路 readiness、blocker、时间戳和证据可定位；
+- 全链路 status、blocker、时间戳和验证记录可定位；
 - 关键 golden cases、状态机、数据库和运行态 parity 通过；
 - cargo xtask wave-check --wave W5 通过；
 - 有明确切流授权、回滚窗口和 legacy 退役清单。
@@ -275,7 +275,7 @@ W5 完成仍不自动执行生产切换。
   -> alpha 全量只读 shadow
   -> 数据与 contract parity
   -> paper/dry-run execution parity
-  -> operator readiness 审查
+  -> operator cutover qualification 审查
   -> 显式切流授权
   -> 分阶段切入口
   -> 观察与对账

@@ -100,7 +100,7 @@
 - Contract/Schema 变化：
 - 本 Owner 事务、Inbox/Outbox 与恢复变化：
 - 跨 Owner Contract/版本交接：
-- live 前置 Contract/Verdict（若适用）：ExecutionAccountBinding、RequiredMarketEvidence、BarFinalization/MarketDecisionReadiness/ResolvedMarketEvidenceSet、AccountAdmission/Fact/Recovery、RiskValuation、ExchangeCapability、SafetyMonitoring/Ack：
+- live 前置 Contract/Verdict（若适用）：ExecutionAccountBinding、RequiredMarketInputs、BarFinalization/DecisionMarketDataStatus/ResolvedMarketInputSet、AccountTradingEligibility/Fact/RecoveryCheckpoint、RiskValuation、ExchangeCapability、SafetyMonitoring/Ack：
 - 外部副作用：
 - 固定 Market 公共 Key access evidence（若使用）：非敏感 key ref、owner、endpoint/method、时间、evidence ref/hash、无用户 credential fallback：
 

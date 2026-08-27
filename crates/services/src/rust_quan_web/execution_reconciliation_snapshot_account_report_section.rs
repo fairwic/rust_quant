@@ -9,6 +9,9 @@ pub fn build_exchange_account_snapshot_report_request(
     account_bills: &[AccountBill],
     position_history: &[PositionHistory],
 ) -> Result<ExchangeAccountSnapshotReportRequest> {
+    let api_credential_id = config.credential_id.ok_or_else(|| {
+        anyhow!("credential_id is required before building an account snapshot report")
+    })?;
     let snapshot_at = web_naive_datetime_string(chrono::Utc::now().naive_utc());
     let source_ref = exchange_account_snapshot_source_ref(config);
     let mut orders = Vec::new();
@@ -249,6 +252,7 @@ pub fn build_exchange_account_snapshot_report_request(
         combo_id: config.combo_id,
         buyer_email: config.buyer_email.clone(),
         exchange: config.exchange.as_str().to_string(),
+        api_credential_id,
         symbol: config.symbol.clone(),
         source_ref,
         snapshot_at: Some(snapshot_at),

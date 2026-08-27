@@ -2,10 +2,12 @@ use anyhow::{bail, Context, Result};
 use chrono::{Datelike, FixedOffset, TimeZone};
 use rust_quant_cli::app::tradingview_velocity_parity::{
     compute_indicators, load_frozen_top60_from_quant_core,
-    strict_visual_breakout_body_strength_for_variant, Candle, Direction, FrozenSymbolCandles,
-    ParityRuleVersion, StrictVisualBreakoutResearchVariant, StrictVisualBreakoutSignal,
-    StrictVisualDepartureSide, StrictVisualLongEntryEvent, StrictVisualLongEntryState,
-    StrictVisualRangeEvent, FROZEN_UNIVERSE_MANIFEST_SHA256, FROZEN_UNIVERSE_VERSION,
+    strict_visual_breakout_body_strength_for_variant, strict_visual_breakout_body_to_range_height,
+    strict_visual_breakout_qualifies_for_range, strict_visual_short_signal_gates_pass, Candle,
+    Direction, FrozenSymbolCandles, ParityRuleVersion, StrictVisualBreakoutResearchVariant,
+    StrictVisualBreakoutSignal, StrictVisualDepartureSide, StrictVisualLongEntryEvent,
+    StrictVisualLongEntryState, StrictVisualRangeEvent, FROZEN_UNIVERSE_MANIFEST_SHA256,
+    FROZEN_UNIVERSE_VERSION,
 };
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -43,7 +45,10 @@ struct ExcludedSymbol {
 #[derive(Debug, Default, Serialize)]
 struct DirectionCounts {
     armed_sources: usize,
+    /// 固定门失败、仅由 V26 区间高度替代门升级的突破来源数。
+    dynamic_narrow_range_anchors: usize,
     confirmed_candidates: usize,
+    signal_gate_rejections: usize,
     invalidated_sources: usize,
     expired_sources: usize,
     unarmed_boundary_breaks: usize,
@@ -82,6 +87,10 @@ struct L1Candidate {
     breakout_close: f64,
     breakout_body_ratio: f64,
     breakout_directional_move_ratio: f64,
+    /// 方向实体除以信号时已冻结的 P90/P10 视觉区间高度。
+    breakout_body_to_range_height_ratio: f64,
+    /// `true` 表示该候选未通过固定门，只依靠 V26 动态替代门成为锚点。
+    dynamic_narrow_range_anchor_used: bool,
     breakout_excess: f64,
     breakout_candle_extreme_stop_price: Option<f64>,
     breakout_candle_extreme_stop_min_atr_multiple: Option<f64>,
@@ -126,6 +135,7 @@ struct L1Report {
     long: DirectionCounts,
     short: DirectionCounts,
     acceptance_unresolved: usize,
+    direct_signals: usize,
     unexpected_legacy_rejections: usize,
     invalid_breakout_candle_extreme_stops: usize,
     invalid_breakout_candle_extreme_stop_min_atr_contracts: usize,
@@ -133,6 +143,14 @@ struct L1Report {
     covered_symbols: usize,
     covered_shanghai_months: usize,
     direction_time_event_clusters_60m: usize,
+    /// 最终确认候选中只由 V26 动态替代门产生的数量。
+    dynamic_narrow_range_candidates: usize,
+    /// 动态候选覆盖的去重交易对数量。
+    dynamic_narrow_range_symbols: usize,
+    /// 动态候选覆盖的北京时间自然月数量。
+    dynamic_narrow_range_shanghai_months: usize,
+    /// 动态候选按方向和链式 60 分钟窗口归并后的事件簇数量。
+    dynamic_narrow_range_event_clusters_60m: usize,
     l1_gate_passed: bool,
     l1_gate: &'static str,
     label_boundary: &'static str,
@@ -203,6 +221,7 @@ async fn main() -> Result<()> {
     let mut long = DirectionCounts::default();
     let mut short = DirectionCounts::default();
     let mut unexpected_legacy_rejections = 0;
+    let mut direct_signals = 0;
     let mut candidates = Vec::new();
     for symbol in &eligible_symbols {
         let indicators = compute_indicators(&symbol.candles, ParityRuleVersion::CandidateV20);
@@ -266,20 +285,50 @@ async fn main() -> Result<()> {
                     evidence.confirmation_index,
                     false,
                 ),
+                // V31 冲击重置只消费横盘，不产生突破来源，也不属于弱离区生命周期。
+                StrictVisualLongEntryEvent::Range(
+                    StrictVisualRangeEvent::InternalImpulseReset(_),
+                ) => {}
                 StrictVisualLongEntryEvent::AcceptanceArmed(signal) => {
-                    direction_counts_mut(&mut long, &mut short, signal.direction).armed_sources +=
-                        1;
+                    let counts = direction_counts_mut(&mut long, &mut short, signal.direction);
+                    counts.armed_sources += 1;
+                    let breakout = symbol.candles[signal.breakout_index];
+                    let fixed = strict_visual_breakout_body_strength_for_variant(
+                        breakout,
+                        signal.direction,
+                        variant,
+                    );
+                    if !fixed.qualifies
+                        && strict_visual_breakout_qualifies_for_range(
+                            breakout,
+                            signal.direction,
+                            signal.range.upper - signal.range.lower,
+                            variant,
+                        )
+                    {
+                        counts.dynamic_narrow_range_anchors += 1;
+                    }
                 }
                 StrictVisualLongEntryEvent::AcceptanceConfirmed(signal) => {
-                    direction_counts_mut(&mut long, &mut short, signal.direction)
-                        .confirmed_candidates += 1;
-                    candidates.push(candidate_from_signal(
-                        symbol,
-                        signal,
-                        indicators.points[signal.breakout_index].filtered_volume_ratio,
-                        indicators.points[signal.signal_index].atr14,
-                        variant,
-                    )?);
+                    let counts = direction_counts_mut(&mut long, &mut short, signal.direction);
+                    if signal.direction == Direction::Short
+                        && !strict_visual_short_signal_gates_pass(
+                            &signal,
+                            indicators.points[signal.breakout_index].ema144,
+                            variant,
+                        )
+                    {
+                        counts.signal_gate_rejections += 1;
+                    } else {
+                        counts.confirmed_candidates += 1;
+                        candidates.push(candidate_from_signal(
+                            symbol,
+                            signal,
+                            indicators.points[signal.breakout_index].filtered_volume_ratio,
+                            indicators.points[signal.signal_index].atr14,
+                            variant,
+                        )?);
+                    }
                 }
                 StrictVisualLongEntryEvent::AcceptanceInvalidated(signal) => {
                     direction_counts_mut(&mut long, &mut short, signal.direction)
@@ -294,7 +343,7 @@ async fn main() -> Result<()> {
                 | StrictVisualLongEntryEvent::ExternalStructureRejected(_) => {
                     unexpected_legacy_rejections += 1;
                 }
-                StrictVisualLongEntryEvent::DirectSignal(_) => unexpected_legacy_rejections += 1,
+                StrictVisualLongEntryEvent::DirectSignal(_) => direct_signals += 1,
             }
         }
     }
@@ -306,9 +355,15 @@ async fn main() -> Result<()> {
         .pending
         .saturating_sub(weak_lower.returned + weak_lower.consumed);
     let acceptance_unresolved = long.armed_sources.saturating_sub(
-        long.confirmed_candidates + long.invalidated_sources + long.expired_sources,
+        long.confirmed_candidates
+            + long.signal_gate_rejections
+            + long.invalidated_sources
+            + long.expired_sources,
     ) + short.armed_sources.saturating_sub(
-        short.confirmed_candidates + short.invalidated_sources + short.expired_sources,
+        short.confirmed_candidates
+            + short.signal_gate_rejections
+            + short.invalidated_sources
+            + short.expired_sources,
     );
     assign_event_clusters(&mut candidates);
     let qualified_candidates = candidates.len();
@@ -327,6 +382,26 @@ async fn main() -> Result<()> {
         .map(|candidate| candidate.event_cluster_id.as_str())
         .collect::<BTreeSet<_>>()
         .len();
+    let dynamic_candidates = candidates
+        .iter()
+        .filter(|candidate| candidate.dynamic_narrow_range_anchor_used)
+        .collect::<Vec<_>>();
+    let dynamic_narrow_range_candidates = dynamic_candidates.len();
+    let dynamic_narrow_range_symbols = dynamic_candidates
+        .iter()
+        .map(|candidate| candidate.symbol.as_str())
+        .collect::<BTreeSet<_>>()
+        .len();
+    let dynamic_narrow_range_shanghai_months = dynamic_candidates
+        .iter()
+        .map(|candidate| candidate.shanghai_month.as_str())
+        .collect::<BTreeSet<_>>()
+        .len();
+    let dynamic_narrow_range_event_clusters_60m = dynamic_candidates
+        .iter()
+        .map(|candidate| candidate.event_cluster_id.as_str())
+        .collect::<BTreeSet<_>>()
+        .len();
     let invalid_breakout_candle_extreme_stops = candidates
         .iter()
         .filter(|candidate| {
@@ -339,8 +414,7 @@ async fn main() -> Result<()> {
                     })
         })
         .count();
-    let expected_minimum_stop_atr =
-        (variant == StrictVisualBreakoutResearchVariant::V12ExtremeStopMinOneAtr).then_some(1.0);
+    let expected_minimum_stop_atr = variant.uses_extreme_stop_min_one_atr().then_some(1.0);
     let invalid_breakout_candle_extreme_stop_min_atr_contracts = candidates
         .iter()
         .filter(|candidate| {
@@ -349,6 +423,11 @@ async fn main() -> Result<()> {
                 || !candidate.confirmation_atr.is_finite()
         })
         .count();
+    let dynamic_anchor_gate_passed = !variant.uses_narrow_range_dynamic_anchor()
+        || (dynamic_narrow_range_candidates >= MIN_CANDIDATES
+            && dynamic_narrow_range_symbols >= MIN_SYMBOLS
+            && dynamic_narrow_range_shanghai_months >= MIN_MONTHS
+            && dynamic_narrow_range_event_clusters_60m >= MIN_EVENT_CLUSTERS);
     let l1_gate_passed = qualified_candidates >= MIN_CANDIDATES
         && long.confirmed_candidates >= MIN_DIRECTION_CANDIDATES
         && short.confirmed_candidates >= MIN_DIRECTION_CANDIDATES
@@ -358,11 +437,13 @@ async fn main() -> Result<()> {
         && weak_upper.unresolved + weak_lower.unresolved == 0
         && weak_upper.maximum_resolution_age_bars <= 1
         && weak_lower.maximum_resolution_age_bars <= 1
+        && direct_signals == 0
         && unexpected_legacy_rejections == 0
         && invalid_breakout_candle_extreme_stops == 0
-        && invalid_breakout_candle_extreme_stop_min_atr_contracts == 0;
+        && invalid_breakout_candle_extreme_stop_min_atr_contracts == 0
+        && dynamic_anchor_gate_passed;
     let report = L1Report {
-        schema_version: "strict_visual_symmetric_retained_breakout_l1_v1",
+        schema_version: "strict_visual_symmetric_retained_breakout_l1_v2",
         research_level: "L1_OUTCOME_BLIND_COVERAGE",
         report_scope: if full_universe_complete {
             "frozen_top60_complete"
@@ -388,6 +469,7 @@ async fn main() -> Result<()> {
         long,
         short,
         acceptance_unresolved,
+        direct_signals,
         unexpected_legacy_rejections,
         invalid_breakout_candle_extreme_stops,
         invalid_breakout_candle_extreme_stop_min_atr_contracts,
@@ -395,8 +477,12 @@ async fn main() -> Result<()> {
         covered_symbols,
         covered_shanghai_months,
         direction_time_event_clusters_60m,
+        dynamic_narrow_range_candidates,
+        dynamic_narrow_range_symbols,
+        dynamic_narrow_range_shanghai_months,
+        dynamic_narrow_range_event_clusters_60m,
         l1_gate_passed,
-        l1_gate: "candidates>=30; long>=15; short>=15; symbols>=8; months>=3; direction+60m clusters>=10; weak lifecycle causal; no legacy rejection path; structural stop outside breakout extreme; V12 declares exactly 1.0 ATR minimum risk",
+        l1_gate: "candidates>=30; long>=15; short>=15; symbols>=8; months>=3; direction+60m clusters>=10; V26 dynamic candidates>=30 across >=8 symbols, >=3 months and >=10 direction+60m clusters; weak lifecycle causal; direct signals=0; no legacy rejection path; structural stop outside breakout extreme; unified retest variants declare exactly 1.0 ATR minimum risk",
         label_boundary: "No MFE, MAE, exit time, final R, win/loss, or post-signal field was read or serialized.",
         candidates,
     };
@@ -427,6 +513,16 @@ fn candidate_from_signal(
     let range = signal.range;
     let strength =
         strict_visual_breakout_body_strength_for_variant(breakout, signal.direction, variant);
+    let range_height = range.upper - range.lower;
+    let body_to_range_height =
+        strict_visual_breakout_body_to_range_height(breakout, signal.direction, range_height);
+    let dynamic_narrow_range_anchor_used = !strength.qualifies
+        && strict_visual_breakout_qualifies_for_range(
+            breakout,
+            signal.direction,
+            range_height,
+            variant,
+        );
     let boundary = match signal.direction {
         Direction::Long => range.upper,
         Direction::Short => range.lower,
@@ -455,13 +551,15 @@ fn candidate_from_signal(
         range_length_bars: range.length_bars,
         upper: range.upper,
         lower: range.lower,
-        range_height: range.upper - range.lower,
+        range_height,
         breakout_open: breakout.open,
         breakout_high: breakout.high,
         breakout_low: breakout.low,
         breakout_close: breakout.close,
         breakout_body_ratio: strength.body_ratio,
         breakout_directional_move_ratio: strength.directional_move_ratio,
+        breakout_body_to_range_height_ratio: body_to_range_height,
+        dynamic_narrow_range_anchor_used,
         breakout_excess: signal.breakout_excess,
         breakout_candle_extreme_stop_price: signal.breakout_candle_extreme_stop_price,
         breakout_candle_extreme_stop_min_atr_multiple: signal
@@ -657,11 +755,24 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Args> {
                     "v12" | "v12-breakout-candle-extreme-stop-min-1atr" => {
                         StrictVisualBreakoutResearchVariant::V12ExtremeStopMinOneAtr
                     }
+                    "v22" | "v22-unified-retest-maker2-taker5-slippage1" => {
+                        StrictVisualBreakoutResearchVariant::V22UnifiedRetestExecutionCost
+                    }
+                    "v23" | "v23-unified-retest-no-short-gates-maker2-taker5-slippage1" => {
+                        StrictVisualBreakoutResearchVariant::V23UnifiedRetestNoShortGates
+                    }
+                    "v25" | "v25-immediate-weak-departure-consume-maker2-taker5-slippage1" => {
+                        StrictVisualBreakoutResearchVariant::V25ImmediateWeakDepartureConsume
+                    }
+                    "v26"
+                    | "v26-narrow-range-dynamic-anchor-body45-range25-maker2-taker5-slippage1" => {
+                        StrictVisualBreakoutResearchVariant::V26NarrowRangeDynamicAnchor
+                    }
                     other => bail!("unsupported strict visual L1 variant: {other}"),
                 };
             }
             "--help" | "-h" => {
-                println!("Usage: tradingview_strict_visual_symmetric_breakout_l1 [--variant v10|v11|v12] [--output PATH] [--allow-partial-diagnostic]");
+                println!("Usage: tradingview_strict_visual_symmetric_breakout_l1 [--variant v10|v11|v12|v22|v23|v25|v26] [--output PATH] [--allow-partial-diagnostic]");
                 std::process::exit(0);
             }
             other => bail!("unknown argument: {other}"),

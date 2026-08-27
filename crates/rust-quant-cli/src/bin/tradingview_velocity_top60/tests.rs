@@ -1,4 +1,7 @@
 use super::*;
+use rust_quant_cli::app::tradingview_velocity_parity::{
+    StrictVisualLongEntryEvent, StrictVisualLongEntryState,
+};
 
 fn candle(timestamp_ms: i64) -> Candle {
     Candle {
@@ -8,6 +11,74 @@ fn candle(timestamp_ms: i64) -> Candle {
         low: 99.0,
         close: 100.5,
         volume: 10.0,
+    }
+}
+
+/// 构造上下沿交替触碰的八棒横盘，供保留率门禁测试冻结同一 V23 来源。
+fn strict_visual_edge_candle(index: usize, upper: bool) -> Candle {
+    let (open, high, low, close) = if upper {
+        (100.4, 101.0, 100.2, 100.7)
+    } else {
+        (99.6, 99.8, 99.0, 99.3)
+    };
+    Candle {
+        timestamp_ms: index as i64 * CANDLE_INTERVAL_MS,
+        open,
+        high,
+        low,
+        close,
+        volume: 100.0,
+    }
+}
+
+/// 冻结指定方向的强突破来源；只改变研究版本，不改变 OHLC 或风险证据。
+fn arm_v23_retention_source(
+    direction: Direction,
+    variant: StrictVisualBreakoutResearchVariant,
+) -> (Vec<Candle>, StrictVisualLongEntryState) {
+    let mut candles = (0..8)
+        .map(|index| strict_visual_edge_candle(index, index % 2 == 0))
+        .collect::<Vec<_>>();
+    let mut state = StrictVisualLongEntryState::default();
+    for index in 0..8 {
+        state.update(&candles, index, 0.01, None, false, None, None, variant);
+    }
+    let (open, high, low, close) = match direction {
+        Direction::Long => (100.9, 101.25, 100.85, 101.11),
+        Direction::Short => (99.1, 99.15, 98.75, 98.89),
+    };
+    candles.push(Candle {
+        timestamp_ms: 8 * CANDLE_INTERVAL_MS,
+        open,
+        high,
+        low,
+        close,
+        volume: 1.0,
+    });
+    assert!(matches!(
+        state.update(&candles, 8, 0.01, Some(1.0), false, None, None, variant),
+        Some(StrictVisualLongEntryEvent::AcceptanceArmed(_))
+    ));
+    (candles, state)
+}
+
+/// 生成触碰冻结边界、并保留指定比例越界幅度的完成确认棒。
+fn retention_confirmation_candle(direction: Direction, ratio: f64, index: usize) -> Candle {
+    let close = match direction {
+        Direction::Long => 101.0 + 0.11 * ratio,
+        Direction::Short => 99.0 - 0.11 * ratio,
+    };
+    let (open, high, low) = match direction {
+        Direction::Long => (101.1, 101.2, 100.99),
+        Direction::Short => (98.9, 99.01, 98.8),
+    };
+    Candle {
+        timestamp_ms: index as i64 * CANDLE_INTERVAL_MS,
+        open,
+        high,
+        low,
+        close,
+        volume: 1.0,
     }
 }
 
@@ -267,4 +338,97 @@ fn next_bar_audit_requires_bearish_body_and_both_volume_contractions() {
         40.0
     ));
     assert!(!is_low_volume_bearish_next(signal, bullish, 40.0));
+}
+
+#[test]
+fn v23_retention_v25_and_v26_reuse_the_unified_retest_execution_cost_contract() {
+    let baseline = ReplayConfig::current_pine_v2("TEST", 0.01, 0, CANDLE_INTERVAL_MS);
+    for variant in [
+        StrictVisualBreakoutResearchVariant::V23UnifiedRetestNoShortGates,
+        StrictVisualBreakoutResearchVariant::V23AcceptanceRetention75CostReplay,
+        StrictVisualBreakoutResearchVariant::V25ImmediateWeakDepartureConsume,
+        StrictVisualBreakoutResearchVariant::V26NarrowRangeDynamicAnchor,
+    ] {
+        let adjusted = cost_adjusted_replay_config(baseline.clone(), variant);
+        let contract = execution_cost_contract(variant);
+
+        assert_eq!(adjusted.entry_cost_bps(), 3.0);
+        assert_eq!(adjusted.exit_cost_bps(), 6.0);
+        assert_eq!(contract.entry_fee_bps, 2.0);
+        assert_eq!(contract.entry_slippage_bps, 1.0);
+        assert_eq!(contract.exit_fee_bps, 5.0);
+        assert_eq!(contract.exit_slippage_bps, 1.0);
+    }
+}
+
+#[test]
+fn retention_75_filters_only_at_the_original_v23_confirmation_and_consumes_source() {
+    let baseline = StrictVisualBreakoutResearchVariant::V23UnifiedRetestNoShortGates;
+    let candidate = StrictVisualBreakoutResearchVariant::V23AcceptanceRetention75CostReplay;
+
+    for direction in [Direction::Long, Direction::Short] {
+        let (mut baseline_candles, mut baseline_state) =
+            arm_v23_retention_source(direction, baseline);
+        baseline_candles.push(retention_confirmation_candle(direction, 0.50, 9));
+        assert!(matches!(
+            baseline_state.update(
+                &baseline_candles,
+                9,
+                0.01,
+                Some(1.0),
+                false,
+                None,
+                None,
+                baseline,
+            ),
+            Some(StrictVisualLongEntryEvent::AcceptanceConfirmed(_))
+        ));
+
+        let (mut candidate_candles, mut candidate_state) =
+            arm_v23_retention_source(direction, candidate);
+        candidate_candles.push(retention_confirmation_candle(direction, 0.50, 9));
+        assert!(candidate_state
+            .update(
+                &candidate_candles,
+                9,
+                0.01,
+                Some(1.0),
+                false,
+                None,
+                None,
+                candidate,
+            )
+            .is_none());
+
+        candidate_candles.push(retention_confirmation_candle(direction, 1.00, 10));
+        assert!(candidate_state
+            .update(
+                &candidate_candles,
+                10,
+                0.01,
+                Some(1.0),
+                false,
+                None,
+                None,
+                candidate,
+            )
+            .and_then(StrictVisualLongEntryEvent::entry_signal)
+            .is_none());
+    }
+}
+
+#[test]
+fn retention_75_accepts_the_exact_symmetric_boundary_for_both_directions() {
+    let variant = StrictVisualBreakoutResearchVariant::V23AcceptanceRetention75CostReplay;
+    for direction in [Direction::Long, Direction::Short] {
+        let (mut candles, mut state) = arm_v23_retention_source(direction, variant);
+        candles.push(retention_confirmation_candle(direction, 0.75, 9));
+        let Some(StrictVisualLongEntryEvent::AcceptanceConfirmed(signal)) =
+            state.update(&candles, 9, 0.01, Some(1.0), false, None, None, variant)
+        else {
+            panic!("75% retention boundary must confirm without direction bias");
+        };
+        assert_eq!(signal.direction, direction);
+        assert_eq!(signal.signal_index, 9);
+    }
 }

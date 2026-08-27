@@ -7,7 +7,20 @@ description: 约束 Rust Quant Core 在 rust_quant legacy 源仓库与 rust_quan
 
 ## 目标
 
-把架构文档转换成可执行的放置、依赖和验证流程，维护业务 owner、时序、交易安全和研究证据边界。
+把架构文档转换成可执行的放置、依赖和验证流程，维护业务 owner、时序、交易安全和研究结果边界。
+
+## 可读术语门禁
+
+内部业务名称必须直接表达对象或动作，禁止把架构感觉当业务名：
+
+- 数据检查使用 `Check/Status/Eligibility`，Wave 门禁使用 `CompletionCheck`；`Readiness` 只允许健康探针或不可变的外部 wire contract。
+- 单一单调位置使用 `Cursor`；包含范围、覆盖、revision、generation、有效期和 hash 的复合恢复状态使用 `Checkpoint`。只有算法确实依赖单调标量语义时才叫 `Watermark`。
+- 数据年龄直接写 `max_age/valid_until/ValidityWindow`；账户持续核验使用 `AccountStateVerification`，不得创建 `Freshness` 聚合、模块或表。
+- `Evidence` 只允许表示可持久检索、由明确 Owner 签发并绑定 subject/scope/time/hash 的正式证明。普通输入、响应、信号、研究结果、对账结果与测试符号列表分别使用 `Inputs`、`ResponseMetadata`、`SignalDecisionRecord`、`ResearchResultArtifact`、`ReconciliationReport`、`TestRefs`；Port 策略字段统一使用 `failure_test_refs`。
+- 对外来源信息使用 `SourceInfo`；只有实现内部确实描述多跳 lineage 时才使用 `Provenance`。
+- Web Owner 的 `authorization_evidence_ref/hash` 同时具备正式证明引用和内容 hash，可进入版本化 Account binding contract。其他旧 wire、SDK DTO、serde 字段或历史 migration 中的旧词只能停在 Adapter/serde/migration 边界；必须记录真实调用方，禁止向 Domain 和新目录扩散。
+
+当前统一名称为 `DatasetCheckReport`、`DatasetUseApproval`、`KlineSourceInfo`、`RequiredMarketInputsV1`、`DecisionMarketDataStatusV1`、`ResolvedMarketInputSetV1`、`AccountRecoveryCheckpoint`、`AccountStateVerification`、`AccountTradingEligibilityV1`、`ResearchResultArtifact` 与 `ReconciliationReport`。新增同义类型、旧名别名或兼容 façade 一律拒绝。
 
 ## 先定位仓库
 
@@ -116,7 +129,7 @@ Adapters：
   -> ExecutionPlanningValue（含 child OrderPlan + ProtectionPlanningValue）
   -> SimulationLedger / event simulation
   -> Analytics
-  -> Completed ResearchEvidence + 独立 evaluation/promotion eligibility
+  -> Completed ResearchResultArtifact + 独立 evaluation/promotion eligibility
 ```
 
 ### 4. 实施当前 Domain Wave
@@ -146,13 +159,13 @@ CI 延后不放宽语义与安全：可以继续编写当前 Wave 的源码、sc
 legacy read-only DTO -> Dataset/Market mapping -> Feature -> Strategy Decision
   -> Research-owned legacy parity simulation
        -> owner-neutral Quant clock/replay/matching/cost primitives
-  -> Analytics -> quant-lab parity evidence
+  -> Analytics -> quant-lab parity result
 ```
 
 - `crates/domains/strategy/src/definition/<family>/` 放不可变定义、参数、配置校验和定义期评分；
   `evaluation/<family>/features/` 放 evaluator 所需特征快照与计算；
   `evaluation/<family>/decision/rules/` 放纯规则，`entry_filters/` 按实际执行阶段保留有序后置门禁，
-  `trade_signal/` 只做方向、候选保护证据和最终信号编排。Strategy 只能提出候选失效价/保护证据，
+  `trade_signal/` 只做方向、候选止损政策和最终信号编排。Strategy 只能提出候选失效价/止损建议，
   不得把账户最大亏损、仓位、杠杆、持仓期限或最终止损审批伪装成 Strategy risk config。
   不要把这些重新合回一个 strategy/service 文件。
 - `crates/quant/indicators/` 的类型、目录和注释不得绑定某个策略家族；固定数量的指标组合由
@@ -165,7 +178,7 @@ legacy read-only DTO -> Dataset/Market mapping -> Feature -> Strategy Decision
   不解析 legacy 时间格式，不内置浮亏近似、无风险利率或研究默认值。场景口径由 Research
   EvaluationManifest/SimulationProfile 冻结并准备输入。Backtest/Analytics 不依赖 Strategy、Adapter、env 或数据库。
 - 为证明冻结 legacy 行为而暂时保留的混合仓位、风险、退出、权益和结果形状，必须隔离在
-  `crates/domains/research/src/simulation/legacy_<family>/`，类型名显式带 `Legacy`，Evidence 为
+  `crates/domains/research/src/simulation/legacy_<family>/`，类型名显式带 `Legacy`，Result Artifact 为
   `nonpromotable`，且能力总账只能登记为 Research implementing；不得把这套兼容状态机登记为
   canonical Quant、Portfolio、Risk 或 Execution 能力。canonical ResearchBar 完成后按 delete gate 删除。
 - `crates/adapters/research-postgres/legacy_<capability>/` 只返回边界 DTO 并保留 legacy 读取语义；
@@ -188,7 +201,7 @@ legacy read-only DTO -> Dataset/Market mapping -> Feature -> Strategy Decision
 只比较最终 PnL、只匹配 summary、只保存 source hash 或“测试通过”都不构成业务 parity。
 遇到隐藏 legacy 语义时，从首个差异回溯当时可见状态；只保留有真实基线证据的语义并增加回归测试，
 不得顺带复刻无调用、实验性或错误行为。若数据混源、不可 point-in-time 回放或不满足研究门禁，使用明确的
-legacy-parity 类型和 `nonpromotable` Evidence；“闭环迁移对齐完成”不等于研究合格、生产就绪或已获 cutover 授权。
+legacy-parity 类型和 `nonpromotable` Result Artifact；“闭环迁移对齐完成”不等于研究合格、生产就绪或已获 cutover 授权。
 
 ### 5. 按风险验证
 
@@ -210,7 +223,7 @@ legacy-parity 类型和 `nonpromotable` Evidence；“闭环迁移对齐完成�
 
 - 业务规则只属于明确 Domain；Domain 不依赖 Wire Contract 或具体 Adapter，App 只负责组合根、配置和运行循环。
 - `quant/math`、`quant/indicators`、`quant/backtest`、`quant/analytics` 只包含 owner 无关的纯机制。
-- Strategy 的候选保护证据不是 `RiskDecision`；Research 的 legacy 口径不是 Quant 默认值。命名、类型和目录
+- Strategy 的候选止损建议不是 `RiskDecision`；Research 的 legacy 口径不是 Quant 默认值。命名、类型和目录
   必须体现这两层边界，禁止用 `initial_risk`、`DecisionRisk` 或通用 `PerformanceProfile` 混淆 owner。
 - `quant/backtest` 只提供确定性时钟、事件调度、Replay、撮合和费用/滑点/资金费模型；不得依赖 Domain、数据库、环境变量或真实交易所。
 - Research 是终端离线 Domain，可以通过稳定公开 API 编排 Market、Strategy、Portfolio、Risk、Execution 和 Quant；生产 Domain 不得依赖 Research。
@@ -230,8 +243,8 @@ legacy-parity 类型和 `nonpromotable` Evidence；“闭环迁移对齐完成�
 - 外部 SDK/HTTP I/O 在数据库事务和 provider/advisory lock 外；正常 snapshot 提交按有界 batch 写 SQL，逐行查询只允许在失败分支定位首个冲突。
 - 有序业务规则只保留短编排入口，规则函数返回强类型结果；拆分必须保持原顺序、首个阻塞和诊断输出，并以 parity 测试固定，禁止为单一实现先造通用 Trait。
 - 同一 Domain 对象混合身份、游标、覆盖范围、有效期与摘要时，按不变量拆成不可变值对象，外层业务入口保持稳定；数据库列无需随之拆表，由 owner Postgres Adapter 显式映射。
-- 宽 SQL 的列、UPDATE 与 bind 顺序必须收口到单一 Adapter Row/bind 表示，并用真实 PostgreSQL 集成测试逐字段回读。多规则 readiness/validation 使用 capability 私有 assessment 统一去重与最终状态归约。
-- App 监督循环可以按 `supervisor/live_loop/retry/timing` 拆运行职责，但只保留唯一入口；错误分类、恢复谓词、状态迁移和业务重试决定仍归 Domain。
+- 宽 SQL 的列、UPDATE 与 bind 顺序必须收口到单一 Adapter Row/bind 表示，并用真实 PostgreSQL 集成测试逐字段回读。多规则 check/validation 使用 capability 私有 findings 收集器统一去重与最终状态归约。
+- App 持续会话可以按 `session_loop/live_loop/retry/timing` 拆运行职责，但只保留唯一入口；错误分类、恢复谓词、状态迁移和业务重试决定仍归 Domain。
 - 多版本输入兼容只停在 `raw -> canonical` 转换层。只有存在真实生产数据、外部契约消费者或明确迁移窗口时才保留 `legacy/`、别名或旧 re-export；否则原子迁移调用方后删除旧实现。
 - 目标文件执行 ADR-0015 的生产代码、总文件、façade 与测试预算。触碰 Error 级超限文件先在同一 capability 内按真实职责拆分。
 - `exchange-gateway` 先按 `public_market`、`private_account`、`fenced_mutation` capability，再按 exchange/provider 拆分；不得用一个 `okx.rs` 重新混合安全边界。
@@ -240,32 +253,32 @@ legacy-parity 类型和 `nonpromotable` Evidence；“闭环迁移对齐完成�
 ### Market、Control 与跨仓库商业边界
 
 - OHLCV/Candle、时间、确认状态、数据源/序号和缺口语义属于 Market。legacy `common::CandleItem` 只能作为迁移来源；目标 canonical `MarketBar` 位于 `domains/market/stream/bars/bar.rs`，数据库 Row、交易所 DTO 与测试 fixture 在 Adapter/Testkit 边界映射，不能迁入 kernel 或 `quant/*`。
-- Exchange SDK 只拥有 endpoint/query、认证传输、provider DTO/envelope/error/quota 和调用者请求语义的忠实表达；Market 拥有 runtime provider inventory、source profile、完整性/readiness、observed/available time、Decimal/canonical 映射、节流调度与恢复。第一版只迁移 OKX、Binance；不得因此禁用或删除 SDK 中已有的其他 provider module，延期 provider 由 Market 入口显式 `Unsupported` 并登记 deferred capability。
-- Control 只拥有 Release/激活指针、发布控制和 Kill Switch；Market 拥有 `MarketDecisionReadiness`（按 instrument/timeframe/source 的 Fresh/Stale/Gapped/Unknown），Account 拥有 ExchangeSession，Execution 拥有执行可用性。Control 只能聚合只读诊断，不能接管或在热路径替这些 owner 放行。
+- Exchange SDK 只拥有 endpoint/query、认证传输、provider DTO/envelope/error/quota 和调用者请求语义的忠实表达；Market 拥有 runtime provider inventory、source profile、完整性检查、observed/available time、Decimal/canonical 映射、节流调度与恢复。第一版只迁移 OKX、Binance；不得因此禁用或删除 SDK 中已有的其他 provider module，延期 provider 由 Market 入口显式 `Unsupported` 并登记 deferred capability。
+- Control 只拥有 Release/激活指针、发布控制和 Kill Switch；Market 拥有 `DecisionMarketDataStatus`（按 instrument/timeframe/source 的 Usable/Stale/Gapped/Unknown），Account 拥有 ExchangeSession，Execution 拥有执行可用性。Control 只能聚合只读诊断，不能接管或在热路径替这些 owner 放行。
 - Control 只能激活 Strategy owner 已发布的不可变 `ActivationEligibility`；eligibility 必须同时绑定 release stage 与 deployment channel，Research/Retired 不能仅因 Snapshot 已发布而被激活。
 - Web 是用户、会员、combo、credential、产品资格和 canonical `ExecutionRequest` 的唯一 owner。Core 的信号生成/handoff 只能通过 `CreateExecutionRequestFromSignalV1` 提交版本化 `StrategySignal` 与幂等身份；不得查询订阅、接收候选用户/credential/risk profile 明细，或自行扇出/创建 Web 请求。Web 创建请求后，Execution 可以消费其中稳定授权引用并按 owner Contract 校验。
-- 产品不存在 Core 自营账户或系统 `ExecutionRequest` 路径。没有 Web 已创建的用户请求，Core 不得进入用户 live 的账户级 Portfolio、Risk、Execution 或外部 mutation；Research 使用 `ResearchScenario`/`ResearchRunSpec`，不是伪造的执行请求，可以调用公开的纯规划 API 生成仅写入 Research `SimulationLedger`/Evidence 的模拟输出，不能形成 live Account/OMS 事实。
+- 产品不存在 Core 自营账户或系统 `ExecutionRequest` 路径。没有 Web 已创建的用户请求，Core 不得进入用户 live 的账户级 Portfolio、Risk、Execution 或外部 mutation；Research 使用 `ResearchScenario`/`ResearchRunSpec`，不是伪造的执行请求，可以调用公开的纯规划 API 生成仅写入 Research `SimulationLedger`/`ResearchResultArtifact` 的模拟输出，不能形成 live Account/OMS 事实。
 - 平台固定 API Key 仅是 `MarketDataAccessCredential`：只在 App/`exchange-gateway` 的公共只读数据 Adapter 中读取 K 线、instrument、公共盘口/成交等，不表示用户、账户、私有流、余额、仓位或 mutation 权限。它不得进入 Domain、`ExecutionRequest`、Decision Context、Risk/Execution Contract 或用户 credential 表，且不能与 Web `credential_reference` 相互转换。完整决策见 ADR-0013。
-- 公共 Market 数据的限流按 provider/operational 共享范围建模为 `PublicQuotaKey(exchange, quota_scope, egress_identity, optional_credential_identity)`；`quota_scope` 可以精确对应交易所官方共享 bucket，也可以把彼此独立的官方 bucket 保守合并成更严格的运营范围，但禁止把同一官方 IP/weight bucket 拆成多份预算。`source_profile_id` 只属于 provenance，不参与 quota hash，禁止通过 profile 改名拆出新预算；例如 Binance USDⓈ-M 公共 REST capability 必须共享 request-weight key，OKX recent/history K 线可以按 history 下限共用运营 key，而 K 线与 instrument 可以保持独立 key。用户私有读取/私有流/mutation 按 `PrivateQuotaKey(exchange, credential_reference, endpoint_group)`；公共采集不得占用用户 mutation 预算。
+- 公共 Market 数据的限流按 provider/operational 共享范围建模为 `PublicQuotaKey(exchange, quota_scope, egress_identity, optional_credential_identity)`；`quota_scope` 可以精确对应交易所官方共享 bucket，也可以把彼此独立的官方 bucket 保守合并成更严格的运营范围，但禁止把同一官方 IP/weight bucket 拆成多份预算。`source_profile_id` 只属于 `SourceInfo`，不参与 quota hash，禁止通过 profile 改名拆出新预算；例如 Binance USDⓈ-M 公共 REST capability 必须共享 request-weight key，OKX recent/history K 线可以按 history 下限共用运营 key，而 K 线与 instrument 可以保持独立 key。用户私有读取/私有流/mutation 按 `PrivateQuotaKey(exchange, credential_reference, endpoint_group)`；公共采集不得占用用户 mutation 预算。
 - News 只产生带来源和版本证据的 `NewsInsightV1`，提交给 Core Strategy ingress；只有已发布且声明该输入的 Strategy evaluator 才能产出 `StrategySignal`。禁止 News 直达 Web 执行请求入口，禁止把 AI 新闻判断当成订单或执行授权。
 - 跨仓库 Contract 必须在其事实/命令 owner repo 中定义、版本化发布并生成或固定消费端 binding；统一 Envelope 承载 event/correlation/causation/idempotency/aggregate/sequence/time/partition identity，业务 payload 不得各自省略。Web 请求由 Claim/Renew/Release/Outcome owner Contract 交给 Core，禁止跨库轮询。
 - `ClaimExecutionRequestV1`、`RenewExecutionRequestClaimV1`、`ReleaseExecutionRequestClaimV1` 是 Execution 发往 Web 的命令；Web 返回 `ClaimExecutionRequestReceiptV1` 或对应 receipt，带单调 `claim_fence`、`claim_expires_at` 与幂等身份，Renew/Release/Outcome 必须以 current fence CAS。新增风险的 live Context、batch/source mapping、Risk approval、planning/OMS、attempt、Gateway capability、final gate 与 permit 都绑定同一 current receipt ref/hash，TTL 不得越过最早 claim expiry。没有有效 claim 只能阻止新开/加仓，不能静默中断已经形成的受管敞口的 Query、Cancel、Protect、Reduce 或 Close。
-- Web 发布稳定 `ExecutionAccountBindingV1`（`execution_account_ref`、`ExchangeAccountRef`、产品/子账户/保证金与持仓模式、settlement、credential revision/revocation generation、binding version/generation）；Account 发布 `AccountAdmissionEvidenceV1`。session、lease、shard、fence、Risk 和 `AccountOpeningSlot` 都以稳定 `ExchangeAccountRef` 为键；credential rotation 只触发新 capability/Evidence/session generation 和水位重闭合，不能创建第二个物理账户会话或 slot。
+- Web 发布稳定 `ExecutionAccountBindingV1`（`execution_account_ref`、`ExchangeAccountRef`、产品/子账户/保证金与持仓模式、settlement、credential revision/revocation generation、binding version/generation）；Account 发布 `AccountTradingEligibilityV1`。session、lease、shard、fence、Risk 和 `AccountOpeningSlot` 都以稳定 `ExchangeAccountRef` 为键；credential rotation 只触发新 capability/session generation、recovery checkpoint 与 state verification，不能创建第二个物理账户会话或 slot。
 - 用户私有流和 signed query 只能由 Account owner 消费：先更新 `AccountProjection`，再发布带 source cursor、session generation 与 projection revision 的 `AccountFactV1` 给 Execution Inbox；Execution 不直接持有或重建私有流。
-- 多周期/多数据源策略必须由 Strategy Snapshot 声明 `RequiredMarketEvidenceV1`；Market 以 `BarFinalizationV1` 形成 `MarketDecisionReadinessV1`，并为一次决策发布完整 `ResolvedMarketEvidenceSetV1`/aggregate hash/TTL。Risk 冻结该集合，Dispatcher 复核 TTL；任一必需周期未 final、stale、gapped 或 source failover 不符合政策时不得新增风险。
-- `SafetyObligation` 只有在无非零 ManagedExposure、无受管开放订单、无 Unknown/attempt/可消费 permit、保护终态且 Account evidence 闭合时结束。Execution 以唯一 schema 的 `SafetyMonitoringV1` add/update/remove fence 经 Outbox/Inbox 交给 Account，字段必须包含受管订单/敞口摘要、最低 Account session generation/watermark；Account 回发 current-fence `SafetyMonitoringAckV1`，漏收/重启以全量 snapshot/replay 修复。credential 撤销且安全能力不可用时进入 `SafetyBlocked`，默认阻止最终删除并通知；只有产品批准的最小受限安全 capability 或带责任人/receipt/deadline/SLA 的人工处置可继续，无法证明无 obligation 时保守保留会话。
+- 多周期/多数据源策略必须由 Strategy Snapshot 声明 `RequiredMarketInputsV1`；Market 以 `BarFinalizationV1` 形成 `DecisionMarketDataStatusV1`，并为一次决策发布完整 `ResolvedMarketInputSetV1`/aggregate hash/TTL。Risk 冻结该集合，Dispatcher 复核 TTL；任一必需周期未 final、stale、gapped 或 source failover 不符合政策时不得新增风险。
+- `SafetyObligation` 只有在无非零 ManagedExposure、无受管开放订单、无 Unknown/attempt/可消费 permit、保护终态且 Account state verification 闭合时结束。Execution 以唯一 schema 的 `SafetyMonitoringV1` add/update/remove fence 经 Outbox/Inbox 交给 Account，字段必须包含受管订单/敞口摘要、最低 Account session generation/projection checkpoint；Account 回发 current-fence `SafetyMonitoringAckV1`，漏收/重启以全量 snapshot/replay 修复。credential 撤销且安全能力不可用时进入 `SafetyBlocked`，默认阻止最终删除并通知；只有产品批准的最小受限安全 capability 或带责任人/receipt/deadline/SLA 的人工处置可继续，无法证明无 obligation 时保守保留会话。
 - 只有可回溯 Web `ExecutionRequest`/Context 的 `ManagedExposure` 可进入自动执行与 safety tail；`ObservedExternalPosition`/未知来源仓位默认只投影、对账、告警，除非 Web 再发布明确账户管理授权。
 - `ObservedExternalPosition` 即使禁止自动 mutation，也必须进入 `AccountSnapshot` 的 unmanaged exposure/保证金占用并默认阻塞或压缩新增风险；忽略或接管只能由版本化 RiskPolicy/Web 授权显式决定。
-- `account-worker` 是唯一持有用户私有流的角色；它发布带 `account_session_generation + closed_watermark` 的账户闭合证据。`execution-worker` 只恢复 OMS 并按账户消费该证据；`ProcessReady` 与 `AccountAdmissionReady(account_ref)` 必须分开，单个 stale 账户不能阻塞其他账户或本账户的 reduce-only 安全动作。
-- `reconciliation-worker` 只发布 `ReconciliationEvidence` 与 typed owner command；它不得直接查询后发布第二份 `AccountFactV1`，也不得修改 Account/Execution/Risk 私有表。
+- `account-worker` 是唯一持有用户私有流的角色；它发布带 `account_session_generation + recovery_checkpoint` 的账户恢复状态。`execution-worker` 只恢复 OMS 并按账户消费 `AccountTradingEligibilityV1`；进程健康与账户交易资格必须分开，单个 stale 账户不能阻塞其他账户或本账户的 reduce-only 安全动作。
+- `reconciliation-worker` 只发布 `ReconciliationReport` 与 typed owner command；它不得直接查询后发布第二份 `AccountFactV1`，也不得修改 Account/Execution/Risk 私有表。
 
 ### Strategy 与 Research
 
 - Strategy 拥有 StrategyDefinition、StrategyArtifact、StrategyRelease 和 StrategyRuntimeSnapshot。
-- Research 拥有 Experiment、BacktestRun、RunCheckpoint、DatasetManifest、SimulationProfile、SimulationLedger 和 ResearchEvidence。
+- Research 拥有 Experiment、BacktestRun、RunCheckpoint、DatasetManifest、SimulationProfile、SimulationLedger 和 ResearchResultArtifact。
 - DatasetManifest 必须固定 point-in-time universe、上市/退市与成员有效期、`available_at`/revision、缺口/修订政策和历史 InstrumentRules；EvaluationManifest 在看结果前固定 train/validation/OOS、purge/embargo、参数空间、优化算法/Seed/预算、选择规则、holdout 重用与集中度审计。
-- `ResearchRunSpec` 必须绑定实际 `ResearchExecutionArtifactRef`（revision/patch、Cargo.lock/toolchain/target/profile/features、entry checksum、依赖图、PRNG/scheduler version）。Completed Evidence 只表示运行和工件完整可见，不自动具备 promotion eligibility；candidate 重建进 released catalog 还需 `PromotionReceiptV1` 证明跨构建可追溯与业务 parity。
-- Strategy Release 只能引用 Completed ResearchEvidence，不复制、覆盖或接管研究证据。
+- `ResearchRunSpec` 必须绑定实际 `ResearchExecutionArtifactRef`（revision/patch、Cargo.lock/toolchain/target/profile/features、entry checksum、依赖图、PRNG/scheduler version）。Completed `ResearchResultArtifact` 只表示运行和工件完整可见，不自动具备 promotion eligibility；candidate 重建进 released catalog 还需 `PromotionReceiptV1` 证明跨构建可追溯与业务 parity。
+- Strategy Release 只能引用 Completed `ResearchResultArtifact`，不复制、覆盖或接管研究结果。
 - Evaluation state 使用：
 
 ```text
@@ -289,8 +302,8 @@ EvaluationScopeId + StrategyRuntimeSnapshotId + MarketStreamPartition
 - 禁止 `Repository<T>`、`BaseService`、`update_by_id`、无条件 upsert 和 runtime DDL。
 - 同 owner 原子提交状态、幂等/Inbox、Outbox 和审计；跨 owner 使用本地事务、Outbox/Inbox、幂等与补偿/Reconciliation，不使用跨域大事务。
 - Outbox/幂等的业务 identity、何时重试/补偿归原 Owner Use Case；原子写集归 Owner Port + Postgres Adapter；通用投递/Ack/退避归 Adapter/Platform；循环监督归 App；恢复决定仍回原 Owner，Reconciliation 只发 typed command。
-- 多 owner 迁移按 Domain Wave 和能力总账拆分：每个 owner 声明自己的读写、事务、Inbox/Outbox、Contract version 与前置 Evidence；不得用笼统的 secondary owner 伪装一个跨 owner 原子批次。
-- ResearchEvidence 先按内容哈希上传不可变对象，再由 Research owner 数据库事务发布 manifest、引用、指标、幂等和 Completed；只保证原子可见，不虚构跨存储全局原子事务。
+- 多 owner 迁移按 Domain Wave 和能力总账拆分：每个 owner 声明自己的读写、事务、Inbox/Outbox、Contract version 与前置批准/校验结果；不得用笼统的 secondary owner 伪装一个跨 owner 原子批次。
+- ResearchResultArtifact 先按内容哈希上传不可变对象，再由 Research owner 数据库事务发布 manifest、引用、指标、幂等和 Completed；只保证原子可见，不虚构跨存储全局原子事务。
 - 新表和新列必须有数据库原生注释；每条 SQL 都检查索引、基数、锁和扫描成本。
 
 ### 交易安全
@@ -387,7 +400,7 @@ EvaluationScopeId + StrategyRuntimeSnapshotId + MarketStreamPartition
 1. **策略版本走配置不走文件**：策略即数据（参数化 + registry），新版本 = 新 `version`/`strategy_key` + 配置，不复制源文件。禁止 `*_v2`/`*_v13` 命名的策略源文件家族。
 2. **单一回测机制，不整块搬 legacy**：所有研究入口复用 `quant/backtest` 的确定性时钟/事件调度/撮合/费用/滑点/资金费；Strategy/Risk/Research 行为仍留在各 owner，通过公开 API 编排，不在 CLI 或其它 crate 重造 equity/PnL/撮合。
 3. **研究 bin 剥离**：一次性 research/panel/probe 入口归 `apps/quant-lab` 与 Research Domain，不进 `core-runtime` 镜像依赖图（§13.23/24）。生产 `src/bin/` 只留生产角色 worker。
-4. **研究产物不进代码仓**：`*_MANIFEST.md`/`*_EVALUATION.md`/`_RESULT.md` 与跑批输出写 gitignore 的 artifacts 目录；进仓的只有 Completed ResearchEvidence 的稳定引用。
+4. **研究产物不进代码仓**：`*_MANIFEST.md`/`*_EVALUATION.md`/`_RESULT.md` 与跑批输出写 gitignore 的 artifacts 目录；进仓的只有 Completed ResearchResultArtifact 的稳定引用。
 5. **一次性脚本用完即删**：`fix_*.sh`/`migrate_phase*.sh` 这类迁移脚本完成后删除，不沉淀为永久噪声。
 6. **禁 Python 研究栈进主线**：迭代/回测禁用 Python（见 CLAUDE.md）；并行的 `.py`/`.mjs` 研究脚本不作为事实源。
 

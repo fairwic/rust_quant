@@ -462,8 +462,8 @@ version = "v1"
 compatibility_window = "initial_v1; producer writes v1; consumers accept v1; removal requires all registered consumer Verdicts"
 kind = "command"
 direction = "rust_quant_alpha::Strategy -> rust_quan_web::Web"
-snapshot = { status = "created", ref = "rust_quant_alpha@c867e03f3913b4b695a30122e5c7bb97dd717043:crates/contracts/snapshots/create_execution_request_from_signal_v1.json", sha256 = "8690193e52f63465da0c3303fda2ed5e5ea9cb1ab86369d0335dbaf933df528c" }
-required_fields = ["strategy_signal_id", "strategy_key", "strategy_version", "strategy_definition_hash", "strategy_runtime_snapshot_id", "strategy_runtime_snapshot_hash", "symbol", "timeframe", "direction", "signal_time", "evidence_cutoff", "signal_evidence_ref", "signal_evidence_sha256", "required_market_evidence_ref", "required_market_evidence_sha256", "idempotency_key"]
+snapshot = { status = "not_created", ref = "", sha256 = "" }
+required_fields = ["strategy_signal_id", "strategy_key", "strategy_version", "strategy_definition_hash", "strategy_runtime_snapshot_id", "strategy_runtime_snapshot_hash", "symbol", "timeframe", "direction", "signal_time", "input_cutoff", "signal_decision_record_ref", "signal_decision_record_sha256", "required_market_inputs_ref", "required_market_inputs_sha256", "idempotency_key"]
 forbidden_fields = ["user_id", "combo_id", "credential_secret", "risk_profile", "prebuilt_execution_requests", "fixed_market_api_key"]
 
 [[program.contracts]]
@@ -530,7 +530,7 @@ compatibility_window = "initial_v1; producer writes v1; consumers accept v1; sta
 kind = "command"
 direction = "rust_quant_alpha::Execution -> rust_quan_web::Web"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
-required_fields = ["execution_request_id", "claim_id", "claim_fence", "outcome_type", "outcome_at", "outcome_evidence_ref", "outcome_evidence_sha256", "idempotency_key", "correlation_id"]
+required_fields = ["execution_request_id", "claim_id", "claim_fence", "outcome_type", "outcome_at", "outcome_record_ref", "outcome_record_sha256", "idempotency_key", "correlation_id"]
 forbidden_fields = ["credential_secret", "fixed_market_api_key"]
 
 [[program.contracts]]
@@ -563,12 +563,12 @@ required_fields = ["execution_request_id", "strategy_signal_id", "claim_executio
 forbidden_fields = ["credential_secret", "fixed_market_api_key", "order_intent_id", "mutation_permit"]
 
 [[program.contracts]]
-contract_id = "RequiredMarketEvidenceV1"
+contract_id = "RequiredMarketInputsV1"
 version = "v1"
-compatibility_window = "initial_v1; Strategy requirement and Market evidence consumers pin the same schema/hash"
+compatibility_window = "initial_v1; Strategy requirement and Market input consumers pin the same schema/hash"
 kind = "owner_value"
 direction = "rust_quant_alpha::Strategy -> rust_quant_alpha::Market/Risk"
-snapshot = { status = "created", ref = "rust_quant_alpha@c867e03f3913b4b695a30122e5c7bb97dd717043:crates/contracts/snapshots/required_market_evidence_v1.json", sha256 = "672d393a6f3606a46ff24d59a4e0f23bf56729b0db0b4779fb9c43bac9c70715" }
+snapshot = { status = "not_created", ref = "", sha256 = "" }
 required_fields = ["strategy_runtime_snapshot_id", "market_role", "exchange_resolution_rule", "instrument", "required_timeframes", "required_series", "market_data_source_profiles", "max_age_policy", "continuity_policy", "finality_policy", "max_lateness", "source_failover_policy", "requirements_hash"]
 
 [[program.contracts]]
@@ -581,31 +581,31 @@ snapshot = { status = "not_created", ref = "", sha256 = "" }
 required_fields = ["exchange", "instrument", "timeframe", "interval_start", "interval_end", "is_final", "revision", "correction_generation", "source_identity", "source_sequence_or_comparator", "continuity_generation", "quality_status", "event_time", "available_at", "observed_at"]
 
 [[program.contracts]]
-contract_id = "MarketDecisionReadinessV1"
+contract_id = "DecisionMarketDataStatusV1"
 version = "v1"
-compatibility_window = "initial_v1; Market writes v1; Risk/Execution reject unknown readiness or expired evidence"
+compatibility_window = "initial_v1; Market writes v1; Risk/Execution reject unknown status or expired inputs"
 kind = "owner_value"
 direction = "rust_quant_alpha::Market -> rust_quant_alpha::Risk/Execution"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
-required_fields = ["exchange", "instrument", "timeframe", "market_data_source_profile_id", "reference_readiness", "last_confirmed_event_time", "observed_wall_clock", "continuity_generation", "source_identity", "fresh_until_wall_clock", "readiness_status", "readiness_hash"]
+required_fields = ["exchange", "instrument", "timeframe", "market_data_source_profile_id", "reference_check", "last_confirmed_event_time", "observed_wall_clock", "continuity_generation", "source_identity", "valid_until_wall_clock", "status", "status_hash"]
 
 [[program.contracts]]
-contract_id = "ResolvedMarketEvidenceSetV1"
+contract_id = "ResolvedMarketInputSetV1"
 version = "v1"
 compatibility_window = "initial_v1; Market writes v1; Risk freezes the exact aggregate hash and Execution revalidates its TTL"
 kind = "owner_value"
 direction = "rust_quant_alpha::Market -> rust_quant_alpha::Risk/Execution"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
-required_fields = ["decision_subject_ref", "required_market_evidence_hash", "resolved_items", "aggregate_readiness", "aggregate_hash", "prepared_at", "valid_until_wall_clock"]
+required_fields = ["decision_subject_ref", "required_market_inputs_hash", "resolved_items", "aggregate_status", "aggregate_hash", "prepared_at", "valid_until_wall_clock"]
 
 [[program.contracts]]
-contract_id = "AccountAdmissionEvidenceV1"
+contract_id = "AccountTradingEligibilityV1"
 version = "v1"
 compatibility_window = "initial_v1; Account writes v1; Risk/Execution accept v1; unknown fields fail closed for new risk"
 kind = "owner_value"
 direction = "rust_quant_alpha::Account -> rust_quant_alpha::Risk/Execution"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
-required_fields = ["execution_account_ref", "exchange_account_ref", "binding_version", "binding_generation", "exchange", "product_type", "margin_mode", "position_mode", "settlement_currency", "credential_revision", "credential_revocation_generation", "observed_account_fingerprint_hash", "signed_preflight_status", "session_readiness", "permission_summary", "session_generation", "projection_revision", "projection_watermark", "recovery_closed_ref", "admission_status", "valid_until_wall_clock", "evidence_hash"]
+required_fields = ["execution_account_ref", "exchange_account_ref", "binding_version", "binding_generation", "exchange", "product_type", "margin_mode", "position_mode", "settlement_currency", "credential_revision", "credential_revocation_generation", "observed_account_fingerprint_hash", "signed_preflight_status", "session_status", "permission_summary", "session_generation", "projection_revision", "projection_checkpoint", "recovery_checkpoint_ref", "eligibility_status", "valid_until_wall_clock", "eligibility_hash"]
 forbidden_fields = ["credential_secret", "fixed_market_api_key"]
 
 [[program.contracts]]
@@ -615,17 +615,17 @@ compatibility_window = "initial_v1; Account writes v1; Execution Inbox accepts v
 kind = "event"
 direction = "rust_quant_alpha::Account -> rust_quant_alpha::Execution"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
-required_fields = ["account_event_id", "execution_account_ref", "exchange_account_ref", "fact_kind", "source", "source_cursor_or_comparator", "session_generation", "projection_revision", "related_watermark", "causation_id", "observed_at"]
+required_fields = ["account_event_id", "execution_account_ref", "exchange_account_ref", "fact_kind", "source", "source_cursor_or_comparator", "session_generation", "projection_revision", "related_checkpoint", "causation_id", "observed_at"]
 forbidden_fields = ["credential_secret", "raw_private_stream_payload"]
 
 [[program.contracts]]
-contract_id = "AccountRecoveryClosedV1"
+contract_id = "AccountRecoveryCheckpointV1"
 version = "v1"
-compatibility_window = "initial_v1; Account writes v1; Execution accepts v1 only within evidence TTL"
+compatibility_window = "initial_v1; Account writes v1; Execution accepts v1 only within checkpoint validity window"
 kind = "owner_value"
 direction = "rust_quant_alpha::Account -> rust_quant_alpha::Execution"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
-required_fields = ["execution_account_ref", "exchange_account_ref", "session_generation", "source_cursors_or_comparators", "source_comparator_versions", "snapshot_scope", "historical_query_coverage", "query_overlap_window", "projection_revision", "related_watermarks", "closed_predicate_version", "closed_at", "valid_until_wall_clock", "evidence_hash"]
+required_fields = ["execution_account_ref", "exchange_account_ref", "session_generation", "source_cursors_or_comparators", "source_comparator_versions", "snapshot_scope", "historical_query_coverage", "query_overlap_window", "projection_revision", "related_checkpoints", "closure_predicate_version", "completed_at", "valid_until_wall_clock", "checkpoint_hash"]
 
 [[program.contracts]]
 contract_id = "RiskValuationSnapshotV1"
@@ -652,7 +652,7 @@ compatibility_window = "initial_v1; Execution writes v1 via Outbox; Account Inbo
 kind = "command"
 direction = "rust_quant_alpha::Execution -> rust_quant_alpha::Account"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
-required_fields = ["safety_obligation_id", "execution_account_ref", "exchange_account_ref", "operation", "monitoring_fence", "obligation_generation", "managed_order_exposure_summary", "required_fact_kinds", "minimum_account_session_generation", "minimum_projection_watermark", "reason", "issued_at", "idempotency_key", "causation_id"]
+required_fields = ["safety_obligation_id", "execution_account_ref", "exchange_account_ref", "operation", "monitoring_fence", "obligation_generation", "managed_order_exposure_summary", "required_fact_kinds", "minimum_account_session_generation", "minimum_projection_checkpoint", "reason", "issued_at", "idempotency_key", "causation_id"]
 
 [[program.contracts]]
 contract_id = "SafetyMonitoringAckV1"
@@ -661,7 +661,7 @@ compatibility_window = "initial_v1; Account writes v1; Execution accepts only th
 kind = "receipt"
 direction = "rust_quant_alpha::Account -> rust_quant_alpha::Execution"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
-required_fields = ["safety_obligation_id", "execution_account_ref", "exchange_account_ref", "operation", "monitoring_fence", "account_session_generation", "ack_status", "projection_watermark", "acked_at", "idempotency_key", "causation_id"]
+required_fields = ["safety_obligation_id", "execution_account_ref", "exchange_account_ref", "operation", "monitoring_fence", "account_session_generation", "ack_status", "projection_checkpoint", "acked_at", "idempotency_key", "causation_id"]
 
 [[program.contracts]]
 contract_id = "RiskApprovalV1"
@@ -710,7 +710,7 @@ compatibility_window = "initial_v1; Fenced Gateway writes v1; Execution Inbox ac
 kind = "event"
 direction = "rust_quant_alpha::FencedExchangeMutationGateway -> rust_quant_alpha::Execution"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
-required_fields = ["mutation_event_id", "mutation_generation", "expected_aggregate_version", "attempt_id", "permit_id", "outcome_class", "exchange_order_identity", "evidence_ref", "evidence_sha256", "observed_at", "correlation_id", "causation_id"]
+required_fields = ["mutation_event_id", "mutation_generation", "expected_aggregate_version", "attempt_id", "permit_id", "outcome_class", "exchange_order_identity", "result_record_ref", "result_record_sha256", "observed_at", "correlation_id", "causation_id"]
 forbidden_fields = ["credential_secret", "gateway_credential_capability", "fixed_market_api_key"]
 
 [[program.contracts]]
@@ -744,13 +744,13 @@ required_fields = ["planning_policy_snapshot_ref", "ordered_child_order_plans", 
 forbidden_fields = ["execution_request_id", "claim_id", "order_intent_id", "execution_plan_id", "submit_pending", "outbox_id", "mutation_permit"]
 
 [[program.contracts]]
-contract_id = "ImmutableDecisionEvidenceBundleV1"
+contract_id = "ImmutableDecisionInputBundleV1"
 version = "v1"
 compatibility_window = "test-only initial v1; producer and consumers must pin the same snapshot hash"
 kind = "test_only_query_value"
 direction = "rust_quant_alpha::Execution::B0 -> rust_quant_alpha::Portfolio/Risk/Execution::B1-B3"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
-required_fields = ["market_evidence_ref", "market_evidence_sha256", "account_evidence_ref", "account_evidence_sha256", "instrument_evidence_ref", "instrument_evidence_sha256", "clock_identity", "seed", "policy_snapshot_refs"]
+required_fields = ["market_inputs_ref", "market_inputs_sha256", "account_inputs_ref", "account_inputs_sha256", "instrument_inputs_ref", "instrument_inputs_sha256", "clock_identity", "seed", "policy_snapshot_refs"]
 forbidden_fields = ["network_fetch", "database_write", "credential_secret", "fixed_market_api_key"]
 
 [[program.children]]
@@ -814,15 +814,15 @@ verdict_revision = "not_created"
 depends_on = ["MIG-MVE-A2-WEB-EXECUTION-REQUEST-V1"]
 
 [[program.children]]
-child_id = "MIG-MVE-B0-IMMUTABLE-EVIDENCE-PROVIDER-V1"
-short_name = "B0-immutable-test-evidence-provider"
+child_id = "MIG-MVE-B0-IMMUTABLE-INPUT-PROVIDER-V1"
+short_name = "B0-immutable-test-input-provider"
 owner = "Execution"
 owner_repository = "rust_quant_alpha"
 manifest_status = "not_created"
 manifest_kind = "owner_child"
-manifest_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MVE-B0-IMMUTABLE-EVIDENCE-PROVIDER-V1/manifest.toml"
-evidence_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MVE-B0-IMMUTABLE-EVIDENCE-PROVIDER-V1/evidence.md"
-verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MVE-B0-IMMUTABLE-EVIDENCE-PROVIDER-V1/verdict.json"
+manifest_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MVE-B0-IMMUTABLE-INPUT-PROVIDER-V1/manifest.toml"
+evidence_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MVE-B0-IMMUTABLE-INPUT-PROVIDER-V1/evidence.md"
+verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MVE-B0-IMMUTABLE-INPUT-PROVIDER-V1/verdict.json"
 manifest_revision = "not_created"
 evidence_revision = "not_created"
 verdict_revision = "not_created"
@@ -841,7 +841,7 @@ verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MVE-B1-PORTFOL
 manifest_revision = "not_created"
 evidence_revision = "not_created"
 verdict_revision = "not_created"
-depends_on = ["MIG-MVE-B0-IMMUTABLE-EVIDENCE-PROVIDER-V1"]
+depends_on = ["MIG-MVE-B0-IMMUTABLE-INPUT-PROVIDER-V1"]
 
 [[program.children]]
 child_id = "MIG-MVE-B2-RISK-DRY-RUN-V1"
@@ -889,30 +889,30 @@ verdict_revision = "not_created"
 depends_on = ["MIG-MVE-A2-WEB-EXECUTION-REQUEST-V1"]
 
 [[program.children]]
-child_id = "MIG-MVE-C1-MARKET-EVIDENCE-V1"
-short_name = "C1-market-resolved-evidence"
+child_id = "MIG-MVE-C1-MARKET-INPUTS-V1"
+short_name = "C1-market-resolved-inputs"
 owner = "Market"
 owner_repository = "rust_quant_alpha"
 manifest_status = "not_created"
 manifest_kind = "owner_child"
-manifest_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MVE-C1-MARKET-EVIDENCE-V1/manifest.toml"
-evidence_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MVE-C1-MARKET-EVIDENCE-V1/evidence.md"
-verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MVE-C1-MARKET-EVIDENCE-V1/verdict.json"
+manifest_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MVE-C1-MARKET-INPUTS-V1/manifest.toml"
+evidence_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MVE-C1-MARKET-INPUTS-V1/evidence.md"
+verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MVE-C1-MARKET-INPUTS-V1/verdict.json"
 manifest_revision = "not_created"
 evidence_revision = "not_created"
 verdict_revision = "not_created"
 depends_on = ["MIG-MVE-A1-STRATEGY-SIGNAL-HANDOFF-V1"]
 
 [[program.children]]
-child_id = "MIG-MVE-C1-ACCOUNT-ADMISSION-FACTS-V1"
-short_name = "C1-account-admission-facts"
+child_id = "MIG-MVE-C1-ACCOUNT-TRADING-ELIGIBILITY-V1"
+short_name = "C1-account-trading-eligibility"
 owner = "Account"
 owner_repository = "rust_quant_alpha"
 manifest_status = "not_created"
 manifest_kind = "owner_child"
-manifest_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MVE-C1-ACCOUNT-ADMISSION-FACTS-V1/manifest.toml"
-evidence_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MVE-C1-ACCOUNT-ADMISSION-FACTS-V1/evidence.md"
-verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MVE-C1-ACCOUNT-ADMISSION-FACTS-V1/verdict.json"
+manifest_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MVE-C1-ACCOUNT-TRADING-ELIGIBILITY-V1/manifest.toml"
+evidence_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MVE-C1-ACCOUNT-TRADING-ELIGIBILITY-V1/evidence.md"
+verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MVE-C1-ACCOUNT-TRADING-ELIGIBILITY-V1/verdict.json"
 manifest_revision = "not_created"
 evidence_revision = "not_created"
 verdict_revision = "not_created"
@@ -946,7 +946,7 @@ verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MVE-C1-RISK-VA
 manifest_revision = "not_created"
 evidence_revision = "not_created"
 verdict_revision = "not_created"
-depends_on = ["MIG-MVE-C1-MARKET-EVIDENCE-V1", "MIG-MVE-C1-ACCOUNT-ADMISSION-FACTS-V1", "MIG-MVE-C1-EXCHANGE-CAPABILITY-V1"]
+depends_on = ["MIG-MVE-C1-MARKET-INPUTS-V1", "MIG-MVE-C1-ACCOUNT-TRADING-ELIGIBILITY-V1", "MIG-MVE-C1-EXCHANGE-CAPABILITY-V1"]
 
 [[program.children]]
 child_id = "MIG-MVE-C1-SAFETY-MONITORING-V1"
@@ -961,7 +961,7 @@ verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-MVE-C1-SAFETY-
 manifest_revision = "not_created"
 evidence_revision = "not_created"
 verdict_revision = "not_created"
-depends_on = ["MIG-MVE-C1-ACCOUNT-ADMISSION-FACTS-V1", "MIG-MVE-C1-EXCHANGE-CAPABILITY-V1"]
+depends_on = ["MIG-MVE-C1-ACCOUNT-TRADING-ELIGIBILITY-V1", "MIG-MVE-C1-EXCHANGE-CAPABILITY-V1"]
 
 [[program.children]]
 child_id = "MIG-MVE-C1-RISK-APPROVAL-V1"
@@ -1060,7 +1060,7 @@ compatibility_window = "initial v1; Strategy writes immutable receipts; Control 
 kind = "owner_value"
 direction = "rust_quant_alpha::Strategy -> rust_quant_alpha::Control"
 snapshot = { status = "not_created", ref = "", sha256 = "" }
-required_fields = ["candidate_definition_artifact_ref", "research_execution_artifact_ref", "completed_evidence_ref", "evaluation_gate_result_ref", "released_definition_artifact_ref", "released_build_digest", "cross_build_parity_ref", "approved_by", "approved_at", "allowed_deployment_channels", "receipt_hash"]
+required_fields = ["candidate_definition_artifact_ref", "research_execution_artifact_ref", "completed_result_artifact_ref", "evaluation_gate_result_ref", "released_definition_artifact_ref", "released_build_digest", "cross_build_parity_ref", "approved_by", "approved_at", "allowed_deployment_channels", "receipt_hash"]
 
 # MarketDatasetFactsBundleV1：错误 PointInTimeDatasetManifestV1 的 Market 侧 successor。
 # 分离 Market 事实与 Research selection——只组合 F4A+F4B 事实引用，禁止 selection_algorithm_hash。
@@ -1217,15 +1217,15 @@ verdict_revision = "not_created"
 depends_on = ["MIG-VEGAS-V5-RISK-POLICY-V1"]
 
 [[program.children]]
-child_id = "MIG-VEGAS-V8-RESEARCH-SIMULATION-EVIDENCE-V1"
-short_name = "V8-research-simulation-evidence"
+child_id = "MIG-VEGAS-V8-RESEARCH-SIMULATION-RESULT-V1"
+short_name = "V8-research-simulation-result"
 owner = "Research"
 owner_repository = "rust_quant_alpha"
 manifest_status = "not_created"
 manifest_kind = "owner_child"
-manifest_path = "rust_quant_alpha:docs/architecture/migrations/MIG-VEGAS-V8-RESEARCH-SIMULATION-EVIDENCE-V1/manifest.toml"
-evidence_path = "rust_quant_alpha:docs/architecture/migrations/MIG-VEGAS-V8-RESEARCH-SIMULATION-EVIDENCE-V1/evidence.md"
-verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-VEGAS-V8-RESEARCH-SIMULATION-EVIDENCE-V1/verdict.json"
+manifest_path = "rust_quant_alpha:docs/architecture/migrations/MIG-VEGAS-V8-RESEARCH-SIMULATION-RESULT-V1/manifest.toml"
+evidence_path = "rust_quant_alpha:docs/architecture/migrations/MIG-VEGAS-V8-RESEARCH-SIMULATION-RESULT-V1/evidence.md"
+verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-VEGAS-V8-RESEARCH-SIMULATION-RESULT-V1/verdict.json"
 manifest_revision = "not_created"
 evidence_revision = "not_created"
 verdict_revision = "not_created"
@@ -1244,7 +1244,7 @@ verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-VEGAS-V9-EXECU
 manifest_revision = "not_created"
 evidence_revision = "not_created"
 verdict_revision = "not_created"
-depends_on = ["MIG-VEGAS-V8-RESEARCH-SIMULATION-EVIDENCE-V1"]
+depends_on = ["MIG-VEGAS-V8-RESEARCH-SIMULATION-RESULT-V1"]
 
 [[program.children]]
 child_id = "MIG-VEGAS-V10-EXECUTION-RECOVERY-HARNESS-V1"
@@ -1319,7 +1319,7 @@ verdict_path = "rust_quant_alpha:docs/architecture/migrations/MIG-VEGAS-V12-STRA
 manifest_revision = "not_created"
 evidence_revision = "not_created"
 verdict_revision = "not_created"
-depends_on = ["MIG-VEGAS-V8-RESEARCH-SIMULATION-EVIDENCE-V1", "MIG-VEGAS-V11-RECONCILIATION-RECOVERY-HARNESS-V1"]
+depends_on = ["MIG-VEGAS-V8-RESEARCH-SIMULATION-RESULT-V1", "MIG-VEGAS-V11-RECONCILIATION-RECOVERY-HARNESS-V1"]
 
 [[program]]
 program_id = "MP-tradingview-velocity-research-characterization"

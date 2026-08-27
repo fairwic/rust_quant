@@ -13,7 +13,7 @@
 
 现有 Vegas 回测可以迁入目标架构，但不能按一条线性“Strategy -> Portfolio -> Risk -> 完整 OMS -> AccountProjection”直接搬运。最终设计采用以下边界：
 
-1. `domains/research` 拥有 Experiment、BacktestRun、DatasetManifest、EvaluationManifest、Checkpoint、SimulationProfile、trial ledger 和 ResearchEvidence；
+1. `domains/research` 拥有 Experiment、BacktestRun、DatasetManifest、EvaluationManifest、Checkpoint、SimulationProfile、trial ledger 和 ResearchResultArtifact；
 2. `quant/backtest` 只保留确定性时钟、事件调度、Replay、撮合、费用、滑点和资金费，不直接调用业务 Domain；
 3. Research use case 通过稳定 API 编排 Strategy、Portfolio、Risk 和必要的 Execution 纯能力；
 4. StrategyEvaluationState 是 evaluator 内部状态，并带 BacktestRun/部署作用域；
@@ -21,7 +21,7 @@
 6. 模拟账户使用 Research `SimulationLedger`，不冒充生产 AccountProjection；
 7. `ResearchBar` 只产生 `ExecutionPlanningValue + child OrderPlan + ProtectionPlanningValue`，并把保护规划落为 Research-owned `SimulationProtectionState`；只有 `PaperEvent` simulated OMS 或 live Execution 可以创建 `OrderIntent`、`ExecutionPlan` 和 `ProtectionPlan` Aggregate；
 8. `ResearchBar`、`PaperEvent`、CI-only `RecoveryHarness` 分别验证研究经济行为、订单事件和故障恢复；
-9. ResearchEvidence 使用内容寻址对象加 Completed Manifest 实现原子可见发布；`Completed` 只表示工件完整，不表示评价 eligible 或已晋级；
+9. ResearchResultArtifact 使用内容寻址对象加 Completed Manifest 实现原子可见发布；`Completed` 只表示工件完整，不表示评价 eligible 或已晋级；
 10. backtest、paper、shadow 和 live 使用同一强类型 Policy Snapshot 与同一业务 symbol；Research 通过 `ResearchDecisionContextSnapshot` 绑定场景，不伪造 live `ExecutionDecisionContextSnapshot`；
 11. `DatasetManifest`、`EvaluationManifest`、`ResearchExecutionArtifactRef`、PRNG 和 Scheduler contract 必须在读取目标结果前冻结，Strategy 晋级必须有可追溯的 `PromotionReceipt`。
 
@@ -145,7 +145,7 @@ K 线参数回测无法证明网络 Unknown、lease、outbox、部分成交竞�
 
 ### 4.7 研究结果只有“原子可见”，没有跨存储原子
 
-当前结果先写主表，再写明细、指标、过滤信号和审计，可能留下不完整但可查询的 Run。目标明确拆开 `BacktestRun.status`、`EvidenceManifest.artifact_status`、`EvaluationGateResult.status` 和 Strategy `PromotionReceipt.status`：Run 完成不等于 Evidence 工件完整，Evidence `Completed` 不等于评价 `eligible`，eligible 也不等于已晋级。
+当前结果先写主表，再写明细、指标、过滤信号和审计，可能留下不完整但可查询的 Run。目标明确拆开 `BacktestRun.status`、`ResultArtifactManifest.artifact_status`、`EvaluationGateResult.status` 和 Strategy `PromotionReceipt.status`：Run 完成不等于结果工件完整，ResearchResultArtifact `Completed` 不等于评价 `eligible`，eligible 也不等于已晋级。
 
 ### 4.8 风险配置与止盈止损存在双语义
 
@@ -178,7 +178,7 @@ ResearchDecisionContextSnapshot
   -> ResearchScenarioRef 对同一 DecisionContextCore 与以上四个 Published Policy Snapshot 的稳定绑定
   -> 不含 Web ExecutionRequest、combo、credential_reference 或用户执行授权
 
-动态 Evidence
+动态 Inputs
   -> MarketSnapshotRef、AccountSnapshotRef、InstrumentRulesSnapshotRef、Clock
 
 ResearchScenario
@@ -231,14 +231,14 @@ crates/domains/
 │   │   ├── strategy_definition.rs
 │   │   ├── runtime_snapshot.rs
 │   │   ├── strategy_signal.rs
-│   │   ├── signal_evidence.rs
+│   │   ├── signal_decision_record.rs
 │   │   └── evaluation_state.rs
 │   ├── strategies/vegas/
 │   │   ├── config.rs
 │   │   ├── feature_set.rs
 │   │   ├── evaluator.rs
 │   │   ├── candidate_levels.rs
-│   │   ├── evidence.rs
+│   │   ├── decision_record.rs
 │   │   └── rules/
 │   │       ├── ema_structure.rs
 │   │       ├── momentum.rs
@@ -268,7 +268,7 @@ crates/domains/
     │   ├── simulation_ledger.rs
     │   ├── simulation_protection_state.rs
     │   ├── checkpoint.rs
-    │   └── research_evidence.rs
+    │   └── research_result_artifact.rs
     ├── policies/
     │   ├── parameter_space.rs
     │   ├── walk_forward.rs
@@ -279,10 +279,10 @@ crates/domains/
     │   ├── checkpoint_backtest_run.rs
     │   ├── complete_backtest_run.rs
     │   ├── evaluate_backtest_run.rs
-    │   └── publish_research_evidence.rs
+    │   └── publish_research_result.rs
     ├── ports/
     │   ├── experiment_store.rs
-    │   ├── research_evidence_store.rs
+    │   ├── research_result_store.rs
     │   └── artifact_store.rs
     └── api/
 
@@ -302,7 +302,7 @@ crates/quant/
 crates/adapters/
 ├── postgres/src/research/
 │   ├── experiment_store.rs
-│   └── research_evidence_store.rs
+│   └── research_result_store.rs
 ├── object-storage/src/research_artifact.rs
 ├── redis/src/strategy_evaluation_state.rs
 └── simulated-exchange/              # 仅 PaperEvent/test 使用
@@ -327,7 +327,7 @@ tests/
 | `ExecutionPlanningValue`、确定性的 child `OrderPlan`、`ProtectionPlanningValue`，以及 live/Paper simulated OMS 的 OrderIntent、ExecutionPlan、ProtectionPlan 与纯订单状态迁移 | Execution |
 | 真实余额、仓位、保证金和 PnL | Account |
 | 模拟现金、仓位、费用、working orders、`SimulationProtectionState` 和权益 | Research SimulationLedger |
-| Experiment、Run、Checkpoint、DatasetManifest、EvaluationManifest、trial ledger、ResearchEvidence 与 EvaluationGateResult | Research |
+| Experiment、Run、Checkpoint、DatasetManifest、EvaluationManifest、trial ledger、ResearchResultArtifact 与 EvaluationGateResult | Research |
 | StrategyDefinition、StrategyArtifact、Release、RuntimeSnapshot 与 PromotionReceipt | Strategy |
 
 Research 只能编排，不复制其他 owner 的政策。
@@ -354,7 +354,7 @@ quant-lab request
   -> Running
   -> Execute / Checkpoint
   -> Complete 或 Failed
-  -> Publish Completed Evidence artifact
+  -> Publish Completed ResearchResultArtifact
   -> Evaluate -> eligible / rejected / inconclusive
   -> Strategy promote 时另建 PromotionReceipt
 ```
@@ -384,7 +384,7 @@ EventScheduler 取出最早 decision_time
   -> candle/tick FillModel
   -> SimulationLedger 应用模拟成交
   -> 回到 Continuous Risk；若有 RiskAction，走上方 reduce-only planning/fill/ledger 闭环直至稳定
-  -> 记录 typed evidence event
+  -> 记录 typed decision event
   -> 下一 decision_time
 ```
 
@@ -392,22 +392,22 @@ EventScheduler 取出最早 decision_time
 
 严格时序：
 
-- Signal 只能读取当前已完成、生产可见的市场证据；
+- Signal 只能读取当前已完成、生产可见的市场输入；
 - 入场触发和入场价不能读取未来 K 线；
 - 后续 K 线只用于已产生订单的撮合、止盈止损和持仓路径；
 - candle 内价格路径必须由 SimulationProfile 明确；
 - 多币组合使用统一资金、容量、相关簇和事件时钟；
 - symbol 输入排序变化不得改变结果。
 
-### 7.3 Evidence 发布流程
+### 7.3 ResearchResultArtifact 发布流程
 
 ```text
 typed event log + equity curve
   -> quant/analytics
-  -> ResearchEvidence draft
+  -> ResearchResultArtifact draft
   -> 内容哈希上传不可变大对象
   -> Research owner 单一 DB transaction
-       EvidenceManifest
+       ResultArtifactManifest
        metrics/index
        object references
        idempotency
@@ -416,7 +416,7 @@ typed event log + equity curve
   -> Strategy 仅可引用 Completed + eligible 创建 PromotionReceipt
 ```
 
-对象已写、数据库失败时不产生可见 Completed Evidence；孤立对象由 GC 清理。`Completed` 只证明证据对象和引用完整、原子可见，可以对应失败、亏损、过拟合或样本不足；它不能自动改写为 `eligible`。`PromotionReceipt` 必须固定 Completed Evidence、eligible gate、被评估的 candidate artifact、目标 released artifact/build digest、candidate 到 released 的同输入逐层 parity 证据、批准人/时间和允许的 deployment channel。
+对象已写、数据库失败时不产生可见 Completed ResearchResultArtifact；孤立对象由 GC 清理。`Completed` 只证明结果对象和引用完整、原子可见，可以对应失败、亏损、过拟合或样本不足；它不能自动改写为 `eligible`。`PromotionReceipt` 必须固定 Completed ResearchResultArtifact、eligible gate、被评估的 candidate artifact、目标 released artifact/build digest、candidate 到 released 的同输入逐层 parity 结果、批准人/时间和允许的 deployment channel。
 
 ## 8. 三种 SimulationProfile
 
@@ -443,7 +443,7 @@ typed event log + equity curve
 
 ResearchBar 的 Continuous Risk 只复用 Risk 与 Execution 的纯业务决策/计划，不运行生产 lease、Outbox、Gateway permit 或 Unknown 恢复；这些可靠性语义仍由 PaperEvent/RecoveryHarness 验证。
 
-`SimulationProfile` 的业务不变量只适用于**相同单步输入**：当四个 Policy Snapshot、`ResearchDecisionContextSnapshot` 的 Context Core、Market/Account/Instrument Evidence、EvaluationState before 和 DecisionTime 相同时，改变 fee/slippage/funding/latency/candle path 不能改变该单步的 Signal、Target、RiskDecision、`ExecutionPlanningValue`、child `OrderPlan` 或 `ProtectionPlanningValue`。完整运行中，只要 Fill、fee、funding 或 Ledger 首次不同，下一时点输入已经不同；从首个模拟状态/Evidence hash 分歧起必须标记为 scenario divergence，不再错误要求后续业务输出相同。只有动态 Evidence 仍一致的前缀继续做 exact parity。
+`SimulationProfile` 的业务不变量只适用于**相同单步输入**：当四个 Policy Snapshot、`ResearchDecisionContextSnapshot` 的 Context Core、Market/Account/Instrument Inputs、EvaluationState before 和 DecisionTime 相同时，改变 fee/slippage/funding/latency/candle path 不能改变该单步的 Signal、Target、RiskDecision、`ExecutionPlanningValue`、child `OrderPlan` 或 `ProtectionPlanningValue`。完整运行中，只要 Fill、fee、funding 或 Ledger 首次不同，下一时点输入已经不同；从首个模拟状态/ResultArtifact hash 分歧起必须标记为 scenario divergence，不再错误要求后续业务输出相同。只有动态 Inputs 仍一致的前缀继续做 exact parity。
 
 ### 8.2 PaperEvent
 
@@ -478,7 +478,7 @@ RecoveryHarness 不自建 OMS Aggregate；它只在 CI ephemeral adapters 上驱
 | EMA 结构、动量、Fib、K 线入场规则 | `domains/strategy/strategies/vegas/rules` |
 | long/short 策略结论 | `vegas/evaluator.rs` |
 | 候选入场价、候选失效价 | `vegas/candidate_levels.rs` |
-| Signal 原因、权重和过滤证据 | `vegas/evidence.rs` |
+| Signal 原因、权重和过滤记录 | `vegas/decision_record.rs` |
 | 参数与输入要求 | `vegas/config.rs` + StrategyDefinition |
 | 指标 checkpoint | Strategy EvaluationState |
 | `allocation_ratio=0.58` | Portfolio policy/snapshot |
@@ -501,13 +501,13 @@ RecoveryHarness 不自建 OMS Aggregate；它只在 CI ephemeral adapters 上驱
 | `IndicatorStrategyBacktest` | Strategy Evaluator API | 删除账户 risk_config 参数 |
 | `VegasBacktestAdapter` | 迁移期 Strategy API bridge | ResearchBar 成为唯一入口 |
 | `SignalStage` | Strategy evaluator + scoped state | 逐 K 线 Signal parity |
-| `FilterStage` | 按原因拆到 Strategy evidence、Portfolio 或 Risk | 每个 reason owner 明确 |
+| `FilterStage` | 按原因拆到 Strategy decision record、Portfolio 或 Risk | 每个 reason owner 明确 |
 | `PositionStage` | Portfolio + Risk + ExecutionPlanningValue（含 child OrderPlan/ProtectionPlanningValue）+ ResearchBar fill | Target/Decision/Planning parity |
 | `deal_signal` | 多 owner strangler | 调用方归零且差异已批准 |
 | `BacktestContext` | Research RunState + owner typed outputs | 不再允许任意 Stage 修改全部状态 |
 | `BacktestService` | Research complete/publish + quant analytics | 无环境变量、无硬编码初始资金 |
 | `SqlxBacktestRepository` | Postgres Research owner module | runtime DDL 删除、事务测试通过 |
-| `SqlxAuditRepository` | EvidenceManifest/EvidenceObjectRef writer | 不再暴露逐表万能写接口 |
+| `SqlxAuditRepository` | ResultArtifactManifest/ResultObjectRef writer | 不再暴露逐表万能写接口 |
 | `StrategyProgressManager` | Research RunCheckpoint | 幂等断点恢复 parity |
 
 ### 10.1 当前关键类型的代码形态迁移
@@ -530,11 +530,11 @@ RecoveryHarness 不自建 OMS Aggregate；它只在 CI ephemeral adapters 上驱
 Research 定义业务 Port：
 
 ```rust
-trait ResearchEvidenceStore {
-    async fn publish_completed_evidence(
+trait ResearchResultArtifactStore {
+    async fn publish_completed_result_artifact(
         &self,
-        manifest: &CompletedEvidenceManifest,
-    ) -> Result<ResearchEvidenceId, PublishEvidenceError>;
+        manifest: &CompletedResultArtifactManifest,
+    ) -> Result<ResearchResultArtifactId, PublishResultArtifactError>;
 }
 ```
 
@@ -548,19 +548,19 @@ crates/adapters/postgres/src/research/
 
 Research 数据库事务至少原子写入：
 
-- Evidence identity、`artifact_status = Completed` 与所引用的 Run identity；不得借此覆盖 `BacktestRun.status`；
+- Result artifact identity、`artifact_status = Completed` 与所引用的 Run identity；不得借此覆盖 `BacktestRun.status`；
 - Dataset/Evaluation/Strategy/Policy/SimulationProfile/ExecutionArtifact/RNG/Scheduler 引用与 hash；
-- 指标与证据索引；
+- 指标与结果索引；
 - 大对象内容哈希与引用；
 - 幂等记录。
 
-`EvaluationGateResult` 由独立 Research use case 根据冻结的 EvaluationManifest 写入；Strategy `PromotionReceipt` 由 Strategy owner 写入，不得塞进 Evidence 发布事务。schema 只通过 `migrations/` 维护，不允许 Repository runtime DDL。Web/Admin 查询 ResearchEvidence 必须经 Core Research Query API，不直查私有表。
+`EvaluationGateResult` 由独立 Research use case 根据冻结的 EvaluationManifest 写入；Strategy `PromotionReceipt` 由 Strategy owner 写入，不得塞进 ResearchResultArtifact 发布事务。schema 只通过 `migrations/` 维护，不允许 Repository runtime DDL。Web/Admin 查询 ResearchResultArtifact 必须经 Core Research Query API，不直查私有表。
 
 ## 12. 六类真实修改如何定位
 
 ### 修改 Vegas EMA 入场条件
 
-修改 Strategy Vegas rule、单元测试和新 Definition version。Research 重新运行并产生新 Evidence；不改 Backtest Kernel、Portfolio、Risk 或 SQL。
+修改 Strategy Vegas rule、单元测试和新 Definition version。Research 重新运行并产生新 ResearchResultArtifact；不改 Backtest Kernel、Portfolio、Risk 或 SQL。
 
 ### 资金比例从 58% 改为 30%
 
@@ -572,11 +572,11 @@ Research 数据库事务至少原子写入：
 
 ### 修改最大亏损或最终止损
 
-修改唯一的 `RiskPolicySnapshot` 与 Risk policy/version。Vegas 候选失效价和 Strategy exit intent 保持输入证据；Research、paper、shadow、live 调用同一 final-stop symbol，`RiskDecision`、approved quantity/stop、`ExecutionPlanningValue`（及其 child `OrderPlan`）和 `ProtectionPlanningValue` 从 Risk 层开始一致变化。不得修改 `BacktestRiskConfig` 或 `LiveStopLossService`，因为目标架构中不存在这两套实现。
+修改唯一的 `RiskPolicySnapshot` 与 Risk policy/version。Vegas 候选失效价和 Strategy exit intent 保持输入记录；Research、paper、shadow、live 调用同一 final-stop symbol，`RiskDecision`、approved quantity/stop、`ExecutionPlanningValue`（及其 child `OrderPlan`）和 `ProtectionPlanningValue` 从 Risk 层开始一致变化。不得修改 `BacktestRiskConfig` 或 `LiveStopLossService`，因为目标架构中不存在这两套实现。
 
 ### 修改手续费或滑点
 
-修改 `quant/backtest` 模型或 SimulationProfile version。对**相同单步输入**，Signal、Target、RiskDecision、`ExecutionPlanningValue`、child `OrderPlan` 与 `ProtectionPlanningValue` 必须不变，模拟 Fill 与净指标可以变化。首次 Fill/Ledger/Evidence hash 分歧之后属于 scenario divergence，不能再要求后续输入和输出保持相同。
+修改 `quant/backtest` 模型或 SimulationProfile version。对**相同单步输入**，Signal、Target、RiskDecision、`ExecutionPlanningValue`、child `OrderPlan` 与 `ProtectionPlanningValue` 必须不变，模拟 Fill 与净指标可以变化。首次 Fill/Ledger/ResultArtifact hash 分歧之后属于 scenario divergence，不能再要求后续输入和输出保持相同。
 
 ### 修改订单 Unknown/恢复
 
@@ -596,17 +596,17 @@ W2 Wave plan 只协调基线、依赖、跨 owner 验收和最终关闭条件；
 | --- | --- | --- | --- |
 | `V0-market-point-in-time-dataset` | Market | 早期错误登记，混合 point-in-time Market 事实、Research universe selection 与多种独立 stream | 禁止实施；等待按 Owner/能力拆分的 successor |
 | `V1-research-run-governance` | Research | Experiment、BacktestRun、Dataset/Evaluation Manifest、trial ledger、RunSpec、ResearchDecisionContextSnapshot、Checkpoint | RunSpec 在读取结果前冻结；Research 不制造 Web request |
-| `V2-strategy-vegas-evaluator` | Strategy | Vegas evaluator、规则、candidate levels、evidence、RuntimeSnapshot | 固定输入下逐 K 线 Signal/evidence parity |
+| `V2-strategy-vegas-evaluator` | Strategy | Vegas evaluator、规则、candidate levels、decision record、RuntimeSnapshot | 固定输入下逐 K 线 Signal/decision-record parity |
 | `V3-strategy-evaluation-state` | Strategy | EvaluationScopeId、state schema、预热/缺口/重启规则与 store Port | 并行 Run 隔离；冷启动、增量和恢复输出一致 |
 | `V4-portfolio-policy` | Portfolio | allocation_ratio、排序、净额、相关簇、容量和 decision-time barrier | symbol 重排不改变 Target |
 | `V5-risk-policy` | Risk | RiskPolicySnapshot、PreTrade/Continuous Risk、唯一 final-stop 约束 | Approve/Resize/Reject、RiskAction 和原因逐层 parity |
 | `V6-execution-planning` | Execution | ExecutionPlanningPolicySnapshot、ExecutionPlanningValue、child OrderPlan、ProtectionPlanningValue | 纯 planning API 无 live store/lease/outbox 依赖 |
 | `V7-quant-backtest-kernel` | Quant 技术 Owner | Clock、Scheduler、Replay、Fill/Fee/Slippage/Funding、数值与规范序列化 | Domain-free；同 artifact/target/RunSpec 可 bitwise replay |
-| `V8-research-simulation-evidence` | Research | SimulationLedger、SimulationProtectionState、ResearchBar、Evidence 原子可见发布、EvaluationGateResult | 只保存 planning value；Completed 与 eligible 分离 |
+| `V8-research-simulation-result` | Research | SimulationLedger、SimulationProtectionState、ResearchBar、ResearchResultArtifact 原子可见发布、EvaluationGateResult | 只保存 planning value；Completed 与 eligible 分离 |
 | `V9-execution-paper-simulated-oms` | Execution | PaperEvent simulated store、OrderIntent/ExecutionPlan/ProtectionPlan 初始化和事件状态迁移 | 不写生产 Execution/Account 事实 |
 | `V10-execution-recovery-harness` | Execution | lease、inbox/outbox、Unknown、重复/乱序、部分成交和保护恢复测试 | CI-only ephemeral；不进入 deployable Release Unit |
-| `V11-reconciliation-recovery-harness` | Reconciliation | 对账差异、崩溃恢复、外部事实收敛和人工处置证据 | CI-only ephemeral；不访问生产 secret/环境 |
-| `V12-strategy-promotion-receipt` | Strategy | candidate -> released artifact 等价链、PromotionReceipt、promote/rollback gate | 必须引用 Completed Evidence + eligible gate + released build parity |
+| `V11-reconciliation-recovery-harness` | Reconciliation | 对账差异、崩溃恢复、外部事实收敛和人工处置记录 | CI-only ephemeral；不访问生产 secret/环境 |
+| `V12-strategy-promotion-receipt` | Strategy | candidate -> released artifact 等价链、PromotionReceipt、promote/rollback gate | 必须引用 Completed ResearchResultArtifact + eligible gate + released build parity |
 
 每个 capability 组必须在能力总账和 W2 plan 中记录 `owner`、`baseline`、`target contract`、`evidence`、`rollback` 和 `delete gate`。如果 Vegas 模式在策略语义、状态 schema、运行入口或交付物上互斥，应使用独立策略版本或 capability 子职责；不得通过一个“共同 Owner”掩盖多 owner 修改。
 
@@ -617,14 +617,14 @@ W2 Wave plan 只协调基线、依赖、跨 owner 验收和最终关闭条件；
 W2 Wave plan 定义共同 fixture 目录和比较协议，各 owner 只冻结自己拥有的基线：
 
 - Market 固定 BTC、ETH、其他币种的多个 point-in-time 行情窗口、instrument lifecycle/rules 与数据 revision；
-- Research 固定历史 universe selection/membership、Run identity、Dataset/Evaluation Manifest、SimulationProfile、初始模拟资金和 Evidence schema；
-- Strategy 固定逐 K 线 Signal、EvaluationState before/after、candidate level 与 evidence；
+- Research 固定历史 universe selection/membership、Run identity、Dataset/Evaluation Manifest、SimulationProfile、初始模拟资金和 ResultArtifact schema；
+- Strategy 固定逐 K 线 Signal、EvaluationState before/after、candidate level 与 decision record；
 - Portfolio 固定排序、容量、净额与 Target；
 - Risk 固定候选失效价、最终 stop、RiskDecision/RiskAction 与原因；
 - Execution 固定 `ExecutionPlanningValue`、child `OrderPlan`、`ProtectionPlanningValue` 与 trace；
 - Quant 固定 Artifact/RNG/Scheduler/数值 contract，并记录 7000/4000/300 窗口差异，不在基线阶段顺手改变行为。
 
-共同验收是同一 legacy revision 和冻结输入可重复产生相同前缀证据；任何行为差异都落到首个 owner 层，而不是用最终 PnL 掩盖。
+共同验收是同一 legacy revision 和冻结输入可重复产生相同前缀结果；任何行为差异都落到首个 owner 层，而不是用最终 PnL 掩盖。
 
 ### 13.2 依赖顺序与切换门
 
@@ -638,7 +638,7 @@ V6 + V7 -> V8 -> V9 -> V10 -> V11
 V8 + V11 -> V12 -> promote gate
 ```
 
-Research 只有在 `V0` point-in-time 数据合同、`V1` RunSpec 与 `V7` artifact/RNG/scheduler contract 可用后，才可发布新的可重放 Evidence。`V8` 的 Completed Evidence 不自动触发 `V12`；只有 frozen EvaluationManifest 得到 `eligible` 且 candidate/released 工件等价链完整，Strategy 才可签发 PromotionReceipt。
+Research 只有在 `V0` point-in-time 数据合同、`V1` RunSpec 与 `V7` artifact/RNG/scheduler contract 可用后，才可发布新的可重放 ResearchResultArtifact。`V8` 的 Completed ResearchResultArtifact 不自动触发 `V12`；只有 frozen EvaluationManifest 得到 `eligible` 且 candidate/released 工件等价链完整，Strategy 才可签发 PromotionReceipt。
 
 HTTP/quant-lab 切换、旧表停写、旧 Runner/Executor/万能 Context/`deal_signal` 删除，必须在 W5 由受影响 owner 分别满足 cutover/delete gate。只有所有调用方归零、回滚窗口结束、Wave Evidence 完整且生产授权门禁另行通过后才能关闭；不得用一次跨 owner“大切换”替代这些门。
 
@@ -646,13 +646,13 @@ HTTP/quant-lab 切换、旧表停写、旧 Runner/Executor/万能 Context/`deal_
 
 | 维度 | 必须证明 | 不接受 |
 | --- | --- | --- |
-| Owner | Run/Evidence 归 Research，Definition/Release 归 Strategy | 两边都能写同一事实 |
+| Owner | Run/ResearchResultArtifact 归 Research，Definition/Release 归 Strategy | 两边都能写同一事实 |
 | Quant | 无业务 Domain/DB/env 依赖 | “只依赖公开 API 所以没问题” |
-| Strategy | 同输入逐 K 线 Signal/evidence 一致 | 最终收益接近 |
+| Strategy | 同输入逐 K 线 Signal/decision record 一致 | 最终收益接近 |
 | State | Run 隔离、冷启动、增量、缺口一致 | 只跑一次完整历史 |
 | Portfolio | 同时点统一分配、symbol 重排不变 | 按遍历顺序抢资金 |
 | Risk | Approve/Resize/Reject、原因和边界一致 | 只比较是否成交 |
-| 配置 | 同一四个 Policy Snapshot + `ResearchDecisionContextSnapshot` identity/version/hash；动态 Evidence 另行固定 | Research 伪造 `ExecutionDecisionContextSnapshot` 或同一 JSON 解析成两套结构 |
+| 配置 | 同一四个 Policy Snapshot + `ResearchDecisionContextSnapshot` identity/version/hash；动态 Inputs 另行固定 | Research 伪造 `ExecutionDecisionContextSnapshot` 或同一 JSON 解析成两套结构 |
 | 数据 | DatasetManifest 可按 `as_of` 重建 revision、历史 universe、上市/退市、InstrumentRules 与 funding/index/mark | 用当前币种列表回放历史或原地覆盖数据版本 |
 | 评价 | EvaluationManifest 在 OOS 前冻结，全部 trial 和 walk-forward/purge/embargo 可审计 | 看完结果再改窗口/门槛或只保存胜出参数 |
 | 止盈止损 | Strategy exit intent、候选失效价、最终 Risk stop、`ProtectionPlanningValue` 和模拟触发顺序逐层一致 | backtest/live 各有 Calculator/Service |
@@ -663,8 +663,8 @@ HTTP/quant-lab 切换、旧表停写、旧 Runner/Executor/万能 Context/`deal_
 | ResearchBar | 不声称覆盖 OMS 恢复 | 用参数回测证明 Unknown 安全 |
 | PaperEvent | 订单事件和保护状态迁移可验证 | 只生成最终成交 |
 | Recovery | lease/outbox/Unknown/reconciliation 有 CI-only ephemeral 故障测试 | 进入生产镜像、读取生产 secret 或用收益报告代替 |
-| Evidence | Completed 原子可见、对象引用完整，且与 EvaluationGateResult 状态分离 | 多表部分成功可查询或 Completed 自动等于 eligible |
-| Promotion | PromotionReceipt 固定 Completed + eligible + candidate/released artifact 等价证据 | 重新构建后无等价链直接激活 Release |
+| Research result | Completed 原子可见、对象引用完整，且与 EvaluationGateResult 状态分离 | 多表部分成功可查询或 Completed 自动等于 eligible |
+| Promotion | PromotionReceipt 固定 Completed + eligible + candidate/released artifact 等价结果 | 重新构建后无等价链直接激活 Release |
 | 生产安全 | 无真实 Exchange mutation、无生产事实写入 | 依赖人工避免误操作 |
 | Legacy | 调用方、配置和表写入归零 | 只改文件名 |
 | Wave | 每个 capability 只有一个 owner；互斥策略语义使用独立版本 | 多 owner 实现单元或可选 mode 混装 |

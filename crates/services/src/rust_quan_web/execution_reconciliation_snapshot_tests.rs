@@ -8,7 +8,7 @@ mod tests {
             symbol: "BTC-USDT-SWAP".to_string(),
             combo_id: 85,
             task_id: 85,
-            credential_id: None,
+            credential_id: Some(41),
             credential_ref: Some("manual".to_string()),
             report_reconciliation: false,
             include_fills: true,
@@ -117,6 +117,7 @@ mod tests {
         )
         .expect("account snapshot request");
         let snapshot_at = request.snapshot_at.expect("snapshot_at");
+        assert_eq!(request.api_credential_id, 41);
         assert!(
             chrono::NaiveDateTime::parse_from_str(&snapshot_at, "%Y-%m-%dT%H:%M:%S").is_ok(),
             "snapshot_at must use Web NaiveDateTime JSON contract, got {snapshot_at}"

@@ -1,17 +1,27 @@
-use super::indicators::nearest_rank;
+use super::acceptance_retention;
 use super::model::{Candle, Direction, StrictVisualBreakoutResearchVariant};
+use super::strict_visual_breakout_experiments::prior_three_bars_have_supporting_wick;
 use serde::Serialize;
 
-const CANDIDATE_LENGTHS: [usize; 8] = [8, 12, 16, 24, 32, 48, 64, 96];
-const MAXIMUM_WIDTH_RATIO: f64 = 0.03;
-const MINIMUM_CONTAINMENT_RATIO: f64 = 0.80;
-const MAXIMUM_DIRECTION_EFFICIENCY: f64 = 0.35;
-const MINIMUM_EDGE_TRANSITIONS: usize = 3;
-const MAXIMUM_UPPER_DRIFT: f64 = 0.25;
-const MAXIMUM_LOWER_DRIFT: f64 = 0.35;
-const MINIMUM_TOUCH_GAP: usize = 2;
-const TOUCH_BAND_HEIGHT_RATIO: f64 = 0.10;
-const TRANSITION_BAND_HEIGHT_RATIO: f64 = 0.20;
+mod consolidation_quality;
+mod execution_boundary;
+mod nested_child;
+
+pub use consolidation_quality::{
+    audit_strict_visual_body_wick_candidate_for_research,
+    evaluate_strict_visual_body_wick_candidate_for_research,
+    evaluate_strict_visual_dual_boundary_candidate_for_research,
+    evaluate_strict_visual_percentile_candidate_for_research, strict_visual_body_wick_envelope,
+    StrictVisualBodyWickEnvelope, StrictVisualCandidateQualityAudit,
+    StrictVisualDualBoundaryEvidence, STRICT_VISUAL_CANDIDATE_LENGTHS,
+    STRICT_VISUAL_MAX_INTERNAL_BODY_TO_RANGE_HEIGHT,
+};
+use consolidation_quality::{
+    can_upgrade_parent, internal_impulse_ratio, longest_candidate, longest_nested_candidate,
+};
+use execution_boundary::frozen_execution_bounds;
+pub(crate) use nested_child::{StrictVisualNestedChildState, StrictVisualNestedRangeScope};
+
 const ACCEPTANCE_WINDOW_BARS: usize = 3;
 /// 双向新合同只在突破后的第 1～5 根完成棒内寻找首次合法回踩。
 pub const STRICT_VISUAL_RETAINED_ACCEPTANCE_WINDOW_BARS: usize = 5;
@@ -25,6 +35,10 @@ pub const STRICT_VISUAL_BREAKOUT_MIN_DIRECTIONAL_MOVE_RATIO: f64 = 0.0025;
 pub const STRICT_VISUAL_RETAINED_BREAKOUT_MIN_BODY_RATIO: f64 = 0.50;
 /// 双向新合同要求方向实体涨跌幅至少 15 bps，即 0.15%。
 pub const STRICT_VISUAL_RETAINED_BREAKOUT_MIN_DIRECTIONAL_MOVE_RATIO: f64 = 0.0015;
+/// V26 动态替代门仍要求实体至少占整根振幅 45%，避免十字星升级为突破锚点。
+pub const STRICT_VISUAL_DYNAMIC_ANCHOR_MIN_BODY_RATIO: f64 = 0.45;
+/// V26 动态替代门要求方向实体至少达到冻结横盘高度的 25%。
+pub const STRICT_VISUAL_DYNAMIC_ANCHOR_MIN_BODY_TO_RANGE_HEIGHT: f64 = 0.25;
 /// 合法回踩确认至少保留突破收盘越界幅度的 25%。
 pub const STRICT_VISUAL_RETAINED_BREAKOUT_EXCESS_RATIO: f64 = 0.25;
 /// V4 把已完成横盘长度不超过该阈值的 Fixed 退出冻结为 1R。
@@ -64,7 +78,14 @@ pub fn strict_visual_breakout_body_strength_for_variant(
     direction: Direction,
     variant: StrictVisualBreakoutResearchVariant,
 ) -> StrictVisualBreakoutBodyStrength {
-    if variant.uses_symmetric_retained_breakout_contract() {
+    if let Some(move_ratio) = variant.directional_move_ratio_override() {
+        strict_visual_breakout_body_strength_with_thresholds(
+            candle,
+            direction,
+            STRICT_VISUAL_RETAINED_BREAKOUT_MIN_BODY_RATIO,
+            move_ratio,
+        )
+    } else if variant.uses_symmetric_retained_breakout_contract() {
         strict_visual_breakout_body_strength_with_thresholds(
             candle,
             direction,
@@ -74,6 +95,38 @@ pub fn strict_visual_breakout_body_strength_for_variant(
     } else {
         strict_visual_breakout_body_strength(candle, direction)
     }
+}
+
+/// 返回方向实体相对冻结横盘高度的比例；只读取突破完成棒和此前冻结的区间。
+pub fn strict_visual_breakout_body_to_range_height(
+    candle: Candle,
+    direction: Direction,
+    range_height: f64,
+) -> f64 {
+    let directional_body = match direction {
+        Direction::Long => candle.close - candle.open,
+        Direction::Short => candle.open - candle.close,
+    };
+    if range_height > 0.0 {
+        directional_body / range_height
+    } else {
+        0.0
+    }
+}
+
+/// 判断完成棒能否成为当前冻结横盘的突破锚点；V26 在固定门失败时追加窄区间替代门。
+pub fn strict_visual_breakout_qualifies_for_range(
+    candle: Candle,
+    direction: Direction,
+    range_height: f64,
+    variant: StrictVisualBreakoutResearchVariant,
+) -> bool {
+    let fixed = strict_visual_breakout_body_strength_for_variant(candle, direction, variant);
+    fixed.qualifies
+        || (variant.uses_narrow_range_dynamic_anchor()
+            && fixed.body_ratio >= STRICT_VISUAL_DYNAMIC_ANCHOR_MIN_BODY_RATIO
+            && strict_visual_breakout_body_to_range_height(candle, direction, range_height)
+                >= STRICT_VISUAL_DYNAMIC_ANCHOR_MIN_BODY_TO_RANGE_HEIGHT)
 }
 
 fn strict_visual_breakout_body_strength_with_thresholds(
@@ -106,6 +159,35 @@ fn strict_visual_breakout_body_strength_with_thresholds(
     }
 }
 
+/// 统一执行严格视觉版本声明的空头附加门禁；只读取突破来源棒当时可见指标。
+pub fn strict_visual_short_signal_gates_pass(
+    signal: &StrictVisualBreakoutSignal,
+    source_ema144: Option<f64>,
+    variant: StrictVisualBreakoutResearchVariant,
+) -> bool {
+    let excess_pass = variant
+        .soft_breakout_short_max_excess_atr()
+        .is_none_or(|maximum| {
+            signal.source_atr > 0.0 && signal.breakout_excess / signal.source_atr <= maximum
+        });
+    let ema_pass = variant
+        .soft_breakout_short_min_close_vs_ema144_atr()
+        .is_none_or(|minimum| match source_ema144 {
+            Some(ema144) if signal.source_atr > 0.0 => {
+                (signal.breakout_close - ema144) / signal.source_atr >= minimum
+            }
+            _ => true,
+        });
+    let body_pass = variant
+        .soft_breakout_short_max_body_ratio()
+        .is_none_or(|maximum| {
+            signal.source_atr > 0.0
+                && (signal.breakout_close - signal.breakout_open).abs() / signal.source_atr
+                    <= maximum
+        });
+    excess_pass && ema_pass && body_pass
+}
+
 /// 只按突破时已经冻结的区间长度选择 V4 退出分支，后续确认棒不能重算。
 const fn frozen_short_range_one_r_target(
     variant: StrictVisualBreakoutResearchVariant,
@@ -126,9 +208,9 @@ pub struct StrictVisualRangeEvidence {
     pub boundary_confirmation_index: usize,
     /// 当前父横盘包含的完成 K 线数量，只取冻结离散长度集合。
     pub length_bars: usize,
-    /// 高点 P90 上沿，价格单位与交易对一致。
+    /// 当前变体 high 分位上沿，价格单位与交易对一致。
     pub upper: f64,
-    /// 低点 P10 下沿，价格单位与交易对一致。
+    /// 当前变体 low 分位下沿，价格单位与交易对一致。
     pub lower: f64,
     /// 位于边界容差带内的收盘比例，范围为 0～1。
     pub containment_ratio: f64,
@@ -230,7 +312,7 @@ pub enum StrictVisualDepartureSide {
     Lower,
 }
 
-/// V6 弱离区等待与紧邻完成棒决策共享的冻结证据。
+/// 启用一棒观察期的版本在弱离区等待与紧邻完成棒决策间共享的冻结证据。
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub struct StrictVisualWeakDepartureEvidence {
     /// 弱离区前已经确认且保持不变的活动横盘。
@@ -241,6 +323,17 @@ pub struct StrictVisualWeakDepartureEvidence {
     pub confirmation_index: Option<usize>,
     /// 弱离区发生在冻结上沿或下沿。
     pub side: StrictVisualDepartureSide,
+}
+
+/// V31 在已确认横盘内部发现单根实体冲击时冻结的结构重置证据。
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct StrictVisualInternalImpulseEvidence {
+    /// 冲击棒完成前仍然有效的冻结横盘。
+    pub range: StrictVisualRangeEvidence,
+    /// 触发结构重置的完成棒索引。
+    pub reset_index: usize,
+    /// 冲击棒实体除以冻结横盘高度，达到 0.50 时触发。
+    pub body_to_range_height: f64,
 }
 
 /// 单根完成 K 线对严格横盘状态产生的唯一结构事件。
@@ -254,12 +347,14 @@ pub enum StrictVisualRangeEvent {
     UpperBreak(StrictVisualRangeEvidence),
     /// 首次完成收盘低于此前已知下沿，活动区间已被消费。
     LowerBreak(StrictVisualRangeEvidence),
-    /// V6 首根弱离区冻结原边界，等待紧邻下一根完成棒。
+    /// 首根弱离区冻结原边界，等待紧邻下一根完成棒。
     WeakDeparturePending(StrictVisualWeakDepartureEvidence),
     /// V6 紧邻下一根完成收盘回到含边界的原区间，活动横盘恢复。
     WeakDepartureReturned(StrictVisualWeakDepartureEvidence),
-    /// V6 紧邻下一根仍在任一边界外，旧横盘被消费且确认棒不补算锚点。
+    /// V6 紧邻下一根仍在任一边界外；它不补成旧区间突破，但可成为后续新横盘首棒。
     WeakDepartureConsumed(StrictVisualWeakDepartureEvidence),
+    /// V31 区间内冲击棒消费旧横盘；新横盘只能从下一根完成棒重新累计。
+    InternalImpulseReset(StrictVisualInternalImpulseEvidence),
 }
 
 /// 严格横盘突破来源与后续确认共享的冻结交易证据。
@@ -267,6 +362,8 @@ pub enum StrictVisualRangeEvent {
 pub struct StrictVisualBreakoutSignal {
     /// 突破前已经确认并冻结的严格横盘。
     pub range: StrictVisualRangeEvidence,
+    /// 离区、突破与回踩共享的方向边界；V40 冻结父边界，其余版本等于核心边界。
+    pub execution_boundary: f64,
     /// 冻结突破方向；V1～V9 恒为多头，新合同允许完全镜像的空头。
     pub direction: Direction,
     /// 首次合格突破棒在输入序列中的索引。
@@ -346,6 +443,11 @@ pub struct StrictVisualLongEntryState {
 }
 
 impl StrictVisualLongEntryState {
+    /// 外层结构门禁在突破棒完成时拒绝来源后，必须同步消费内部回踩状态。
+    pub(crate) fn discard_pending_acceptance(&mut self) {
+        self.pending_acceptance = None;
+    }
+
     /// 推进当前完成棒；V2 始终先处理旧来源，再允许当前棒创建新的横盘结构事件。
     #[allow(clippy::too_many_arguments)]
     pub fn update(
@@ -359,6 +461,32 @@ impl StrictVisualLongEntryState {
         take_profit_atr: Option<f64>,
         variant: StrictVisualBreakoutResearchVariant,
     ) -> Option<StrictVisualLongEntryEvent> {
+        self.update_with_scope(
+            candles,
+            index,
+            tick_size,
+            source_atr,
+            volume_event,
+            volume_ratio,
+            take_profit_atr,
+            variant,
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn update_with_scope(
+        &mut self,
+        candles: &[Candle],
+        index: usize,
+        tick_size: f64,
+        source_atr: Option<f64>,
+        volume_event: bool,
+        volume_ratio: Option<f64>,
+        take_profit_atr: Option<f64>,
+        variant: StrictVisualBreakoutResearchVariant,
+        nested_scope: Option<StrictVisualNestedRangeScope>,
+    ) -> Option<StrictVisualLongEntryEvent> {
         let candle = *candles.get(index)?;
 
         if let Some(source) = self.pending_acceptance {
@@ -370,12 +498,12 @@ impl StrictVisualLongEntryState {
                 ACCEPTANCE_WINDOW_BARS
             };
             let invalidated = match source.direction {
-                Direction::Long => candle.close <= source.range.upper,
-                Direction::Short => candle.close >= source.range.lower,
+                Direction::Long => candle.close <= source.execution_boundary,
+                Direction::Short => candle.close >= source.execution_boundary,
             };
             let touched_boundary = match source.direction {
-                Direction::Long => candle.low <= source.range.upper + source.retest_band,
-                Direction::Short => candle.high >= source.range.lower - source.retest_band,
+                Direction::Long => candle.low <= source.execution_boundary + source.retest_band,
+                Direction::Short => candle.high >= source.execution_boundary - source.retest_band,
             };
             let retained_breakout = match source.direction {
                 Direction::Long => candle.close >= source.required_acceptance_close,
@@ -401,7 +529,7 @@ impl StrictVisualLongEntryState {
                 }
                 // 分母必须固定为突破棒 ATR；确认棒传入的 ATR 只属于当前行情，不能重写来源身份。
                 let acceptance_margin_atr = if source.source_atr > 0.0 {
-                    (candle.close - source.range.upper) / source.source_atr
+                    (candle.close - source.execution_boundary) / source.source_atr
                 } else {
                     f64::NEG_INFINITY
                 };
@@ -421,6 +549,14 @@ impl StrictVisualLongEntryState {
                         decided,
                     ));
                 }
+                if variant
+                    .minimum_acceptance_retention_ratio()
+                    .is_some_and(|minimum| {
+                        acceptance_retention::is_below_minimum(&source, candle.close, minimum)
+                    })
+                {
+                    return None;
+                }
                 return Some(StrictVisualLongEntryEvent::AcceptanceConfirmed(decided));
             }
             if invalidated {
@@ -434,9 +570,14 @@ impl StrictVisualLongEntryState {
             return None;
         }
 
-        let range_event = self
-            .range_state
-            .update_for_variant(candles, index, tick_size, variant)?;
+        let range_event = match nested_scope {
+            Some(scope) => self
+                .range_state
+                .update_nested_for_variant(candles, index, tick_size, variant, scope),
+            None => self
+                .range_state
+                .update_for_variant(candles, index, tick_size, variant),
+        }?;
         let (direction, range) = match range_event {
             StrictVisualRangeEvent::UpperBreak(range) => (Direction::Long, range),
             StrictVisualRangeEvent::LowerBreak(range)
@@ -447,8 +588,12 @@ impl StrictVisualLongEntryState {
             _ => return Some(StrictVisualLongEntryEvent::Range(range_event)),
         };
         if variant.requires_breakout_body_strength()
-            && !strict_visual_breakout_body_strength_for_variant(candle, direction, variant)
-                .qualifies
+            && !strict_visual_breakout_qualifies_for_range(
+                candle,
+                direction,
+                range.upper - range.lower,
+                variant,
+            )
         {
             // 弱离区仍消费活动横盘，但不能冻结为 V5 突破来源或进入接受窗口。
             return Some(StrictVisualLongEntryEvent::Range(range_event));
@@ -470,9 +615,10 @@ impl StrictVisualLongEntryState {
             }
             (source_volume_ratio, source_take_profit_atr)
         };
+        let execution_bounds = frozen_execution_bounds(candles, range, variant)?;
         let boundary = match direction {
-            Direction::Long => range.upper,
-            Direction::Short => range.lower,
+            Direction::Long => execution_bounds.upper,
+            Direction::Short => execution_bounds.lower,
         };
         let breakout_excess = match direction {
             Direction::Long => candle.close - boundary,
@@ -496,12 +642,12 @@ impl StrictVisualLongEntryState {
                     Direction::Long => round_down(candle.low - tick_size, tick_size),
                     Direction::Short => round_up(candle.high + tick_size, tick_size),
                 });
-        let breakout_candle_extreme_stop_min_atr_multiple = (variant
-            == StrictVisualBreakoutResearchVariant::V12ExtremeStopMinOneAtr)
-            .then_some(1.0);
+        let breakout_candle_extreme_stop_min_atr_multiple =
+            variant.uses_extreme_stop_min_one_atr().then_some(1.0);
 
         let source = StrictVisualBreakoutSignal {
             range,
+            execution_boundary: boundary,
             direction,
             breakout_index: index,
             signal_index: index,
@@ -529,7 +675,9 @@ impl StrictVisualLongEntryState {
                 })
                 .flatten(),
         };
-        if variant.requires_retest_acceptance() {
+        let direct_chase = variant.uses_prior_three_wick_direct_chase()
+            && prior_three_bars_have_supporting_wick(candles, index, direction, source_atr);
+        if variant.requires_retest_acceptance() && !direct_chase {
             self.pending_acceptance = Some(source);
             Some(StrictVisualLongEntryEvent::AcceptanceArmed(source))
         } else {
@@ -553,7 +701,7 @@ fn round_up(price: f64, tick_size: f64) -> f64 {
 pub struct StrictVisualConsolidationState {
     /// 上一完成时点已经确认、可供当前棒判断离区的冻结横盘。
     active: Option<StrictVisualRangeEvidence>,
-    /// V6 首根弱离区冻结的原边界；只允许紧邻下一根完成棒解决。
+    /// 首根弱离区冻结的原边界；只允许紧邻下一根完成棒解决。
     pending_weak_departure: Option<StrictVisualWeakDepartureEvidence>,
     /// 最近一次离开活动区间的完成棒；新横盘必须从其后重新积累。
     last_closed_index: Option<usize>,
@@ -575,13 +723,24 @@ impl StrictVisualConsolidationState {
         )
     }
 
-    /// 按独立 Research 版本推进结构；只有 V6 改变弱离区生命周期。
+    /// 按独立 Research 版本推进结构；启用 probation 的版本共享一根棒弱离区生命周期。
     pub fn update_for_variant(
         &mut self,
         candles: &[Candle],
         index: usize,
         tick_size: f64,
         variant: StrictVisualBreakoutResearchVariant,
+    ) -> Option<StrictVisualRangeEvent> {
+        self.update_scoped(candles, index, tick_size, variant, None)
+    }
+
+    fn update_scoped(
+        &mut self,
+        candles: &[Candle],
+        index: usize,
+        tick_size: f64,
+        variant: StrictVisualBreakoutResearchVariant,
+        nested_scope: Option<StrictVisualNestedRangeScope>,
     ) -> Option<StrictVisualRangeEvent> {
         let candle = candles
             .get(index)
@@ -600,7 +759,11 @@ impl StrictVisualConsolidationState {
                 confirmation_index: Some(index),
                 ..pending
             };
-            if candle.close >= pending.range.lower && candle.close <= pending.range.upper {
+            let Some(bounds) = frozen_execution_bounds(candles, pending.range, variant) else {
+                self.pending_weak_departure = Some(pending);
+                return None;
+            };
+            if candle.close >= bounds.lower && candle.close <= bounds.upper {
                 // 回区棒只解决 pending，不能同棒升级边界或再次突破。
                 return Some(StrictVisualRangeEvent::WeakDepartureReturned(resolved));
             }
@@ -612,14 +775,15 @@ impl StrictVisualConsolidationState {
 
         // 必须先用上一完成时点已知的边界判断离开；本棒发现的父区间不能反改本棒突破。
         if let Some(active) = self.active {
-            if candle.close > active.upper {
+            let bounds = frozen_execution_bounds(candles, active, variant)?;
+            if candle.close > bounds.upper {
                 if variant.uses_weak_departure_probation()
-                    && !strict_visual_breakout_body_strength_for_variant(
+                    && !strict_visual_breakout_qualifies_for_range(
                         candle,
                         Direction::Long,
+                        active.upper - active.lower,
                         variant,
                     )
-                    .qualifies
                 {
                     let pending = StrictVisualWeakDepartureEvidence {
                         range: active,
@@ -634,14 +798,14 @@ impl StrictVisualConsolidationState {
                 self.last_closed_index = Some(index);
                 return Some(StrictVisualRangeEvent::UpperBreak(active));
             }
-            if candle.close < active.lower {
+            if candle.close < bounds.lower {
                 if variant.uses_weak_departure_probation()
-                    && !strict_visual_breakout_body_strength_for_variant(
+                    && !strict_visual_breakout_qualifies_for_range(
                         candle,
                         Direction::Short,
+                        active.upper - active.lower,
                         variant,
                     )
-                    .qualifies
                 {
                     let pending = StrictVisualWeakDepartureEvidence {
                         range: active,
@@ -657,9 +821,29 @@ impl StrictVisualConsolidationState {
                 return Some(StrictVisualRangeEvent::LowerBreak(active));
             }
 
-            if let Some(candidate) = longest_candidate(candles, index, tick_size, None) {
-                let overlaps = candidate.upper >= active.lower && candidate.lower <= active.upper;
-                if overlaps && candidate.start_index < active.start_index {
+            if variant.uses_internal_impulse_body_guard() {
+                if let Some(body_to_range_height) = internal_impulse_ratio(candle, active, variant)
+                {
+                    self.active = None;
+                    self.last_closed_index = Some(index);
+                    return Some(StrictVisualRangeEvent::InternalImpulseReset(
+                        StrictVisualInternalImpulseEvidence {
+                            range: active,
+                            reset_index: index,
+                            body_to_range_height,
+                        },
+                    ));
+                }
+            }
+
+            let candidate = match nested_scope {
+                Some(scope) => {
+                    longest_nested_candidate(candles, index, tick_size, None, variant, scope)
+                }
+                None => longest_candidate(candles, index, tick_size, None, variant),
+            };
+            if let Some(candidate) = candidate {
+                if can_upgrade_parent(candles, active, candidate, variant) {
                     let upgraded = StrictVisualRangeEvidence {
                         first_confirmation_index: active.first_confirmation_index,
                         ..candidate
@@ -676,7 +860,17 @@ impl StrictVisualConsolidationState {
             .uses_symmetric_retained_breakout_contract()
             .then(|| self.last_closed_index.map(|closed| closed + 1))
             .flatten();
-        let candidate = longest_candidate(candles, index, tick_size, minimum_start_index)?;
+        let candidate = match nested_scope {
+            Some(scope) => longest_nested_candidate(
+                candles,
+                index,
+                tick_size,
+                minimum_start_index,
+                variant,
+                scope,
+            ),
+            None => longest_candidate(candles, index, tick_size, minimum_start_index, variant),
+        }?;
         if !variant.uses_symmetric_retained_breakout_contract()
             && self
                 .last_closed_index
@@ -707,145 +901,6 @@ impl StrictVisualConsolidationState {
             _ => None,
         }
     }
-}
-
-/// 当前完成棒只选择最长有效父区间，保持与冻结视觉指标相同的离散扫描顺序。
-fn longest_candidate(
-    candles: &[Candle],
-    index: usize,
-    tick_size: f64,
-    minimum_start_index: Option<usize>,
-) -> Option<StrictVisualRangeEvidence> {
-    let mut selected = None;
-    for length in CANDIDATE_LENGTHS {
-        if length <= index + 1 {
-            if let Some(candidate) =
-                evaluate_candidate(candles, index, length, tick_size).filter(|candidate| {
-                    minimum_start_index.is_none_or(|minimum| candidate.start_index >= minimum)
-                })
-            {
-                selected = Some(candidate);
-            }
-        }
-    }
-    selected
-}
-
-/// 固定长度同时验证边界、往返、路径与漂移，任何条件缺失都不构造视觉横盘。
-fn evaluate_candidate(
-    candles: &[Candle],
-    index: usize,
-    length: usize,
-    tick_size: f64,
-) -> Option<StrictVisualRangeEvidence> {
-    let start = index + 1 - length;
-    let history = candles.get(start..=index)?;
-    if history.iter().any(|candle| !candle.is_valid()) {
-        return None;
-    }
-    let highs: Vec<f64> = history.iter().map(|candle| candle.high).collect();
-    let lows: Vec<f64> = history.iter().map(|candle| candle.low).collect();
-    let upper = nearest_rank(&highs, 90.0)?;
-    let lower = nearest_rank(&lows, 10.0)?;
-    let height = upper - lower;
-    let middle = (upper + lower) * 0.5;
-    if height <= 0.0 || middle <= 0.0 || height / middle > MAXIMUM_WIDTH_RATIO {
-        return None;
-    }
-
-    let touch_band = (tick_size * 2.0).max(height * TOUCH_BAND_HEIGHT_RATIO);
-    let upper_touch_groups = touch_groups(history, |candle| candle.high >= upper - touch_band);
-    let lower_touch_groups = touch_groups(history, |candle| candle.low <= lower + touch_band);
-    let contained = history
-        .iter()
-        .filter(|candle| candle.close <= upper + touch_band && candle.close >= lower - touch_band)
-        .count();
-    let containment_ratio = contained as f64 / length as f64;
-
-    let half = length / 2;
-    let earlier_highs = &highs[..half];
-    let recent_highs = &highs[half..];
-    let earlier_lows = &lows[..half];
-    let recent_lows = &lows[half..];
-    let upper_drift_ratio =
-        (nearest_rank(recent_highs, 80.0)? - nearest_rank(earlier_highs, 80.0)?).abs() / height;
-    let lower_drift_ratio =
-        (nearest_rank(recent_lows, 20.0)? - nearest_rank(earlier_lows, 20.0)?).abs() / height;
-    let direction_efficiency = close_direction_efficiency(history)?;
-    let edge_transition_count = edge_transition_count(history, upper, lower, tick_size);
-
-    (upper_touch_groups >= 2
-        && lower_touch_groups >= 2
-        && containment_ratio >= MINIMUM_CONTAINMENT_RATIO
-        && upper_drift_ratio <= MAXIMUM_UPPER_DRIFT
-        && lower_drift_ratio <= MAXIMUM_LOWER_DRIFT
-        && direction_efficiency <= MAXIMUM_DIRECTION_EFFICIENCY
-        && edge_transition_count >= MINIMUM_EDGE_TRANSITIONS)
-        .then_some(StrictVisualRangeEvidence {
-            start_index: start,
-            first_confirmation_index: index,
-            boundary_confirmation_index: index,
-            length_bars: length,
-            upper,
-            lower,
-            containment_ratio,
-            direction_efficiency,
-            edge_transition_count,
-            upper_touch_groups,
-            lower_touch_groups,
-            upper_drift_ratio,
-            lower_drift_ratio,
-        })
-}
-
-fn touch_groups(history: &[Candle], touches: impl Fn(&Candle) -> bool) -> usize {
-    let mut groups = 0;
-    let mut last_touch = None;
-    for (chronological_index, candle) in history.iter().enumerate() {
-        if touches(candle) {
-            if last_touch.is_none_or(|last| chronological_index - last >= MINIMUM_TOUCH_GAP) {
-                groups += 1;
-            }
-            last_touch = Some(chronological_index);
-        }
-    }
-    groups
-}
-
-fn close_direction_efficiency(history: &[Candle]) -> Option<f64> {
-    let first = history.first()?.close;
-    let last = history.last()?.close;
-    let path = history
-        .windows(2)
-        .map(|pair| (pair[1].close - pair[0].close).abs())
-        .sum::<f64>();
-    Some(if path <= f64::EPSILON {
-        0.0
-    } else {
-        (last - first).abs() / path
-    })
-}
-
-fn edge_transition_count(history: &[Candle], upper: f64, lower: f64, tick_size: f64) -> usize {
-    let band = (tick_size * 2.0).max((upper - lower) * TRANSITION_BAND_HEIGHT_RATIO);
-    let mut previous_edge = 0_i8;
-    let mut transitions = 0;
-    for candle in history {
-        let touches_upper = candle.high >= upper - band;
-        let touches_lower = candle.low <= lower + band;
-        let edge = match (touches_upper, touches_lower) {
-            (true, false) => 1,
-            (false, true) => -1,
-            _ => 0,
-        };
-        if edge != 0 {
-            if previous_edge != 0 && edge != previous_edge {
-                transitions += 1;
-            }
-            previous_edge = edge;
-        }
-    }
-    transitions
 }
 
 #[cfg(test)]
@@ -900,6 +955,51 @@ mod tests {
             lower_drift_ratio: 0.0,
         };
         (candles, range)
+    }
+
+    #[test]
+    fn v31_resets_an_active_range_on_an_inside_half_height_body() {
+        let (mut candles, range) = external_structure_fixture();
+        candles.push(Candle {
+            timestamp_ms: 16 * 900_000,
+            open: 99.4,
+            high: 100.8,
+            low: 99.2,
+            close: 100.6,
+            volume: 100.0,
+        });
+        let mut baseline = StrictVisualConsolidationState {
+            active: Some(range),
+            ..StrictVisualConsolidationState::default()
+        };
+        let mut candidate = StrictVisualConsolidationState {
+            active: Some(range),
+            ..StrictVisualConsolidationState::default()
+        };
+
+        assert!(!matches!(
+            baseline.update_for_variant(
+                &candles,
+                16,
+                0.01,
+                StrictVisualBreakoutResearchVariant::V23AcceptanceRetention75CostReplay,
+            ),
+            Some(StrictVisualRangeEvent::InternalImpulseReset(_))
+        ));
+        let Some(StrictVisualRangeEvent::InternalImpulseReset(reset)) = candidate
+            .update_for_variant(
+                &candles,
+                16,
+                0.01,
+                StrictVisualBreakoutResearchVariant::V31InternalImpulseBodyGuard,
+            )
+        else {
+            panic!("V31 must reset the active range on an internal 60% body");
+        };
+        assert_eq!(reset.range, range);
+        assert!((reset.body_to_range_height - 0.6).abs() < 1e-12);
+        assert!(candidate.active.is_none());
+        assert_eq!(candidate.last_closed_index, Some(16));
     }
 
     #[test]
@@ -1211,6 +1311,43 @@ mod tests {
     }
 
     #[test]
+    fn v26_dynamic_anchor_is_mirrored_and_only_adds_to_the_fixed_gate() {
+        let long = Candle {
+            timestamp_ms: 0,
+            open: 100.0,
+            high: 100.25,
+            low: 99.95,
+            close: 100.14,
+            volume: 1.0,
+        };
+        let short = Candle {
+            open: 100.0,
+            high: 100.05,
+            low: 99.75,
+            close: 99.86,
+            ..long
+        };
+        let baseline = StrictVisualBreakoutResearchVariant::V23UnifiedRetestNoShortGates;
+        let candidate = StrictVisualBreakoutResearchVariant::V26NarrowRangeDynamicAnchor;
+        let qualifies = |candle, direction, height, variant| {
+            strict_visual_breakout_qualifies_for_range(candle, direction, height, variant)
+        };
+
+        for (candle, direction) in [(long, Direction::Long), (short, Direction::Short)] {
+            assert!(!qualifies(candle, direction, 0.5, baseline));
+            assert!(qualifies(candle, direction, 0.5, candidate));
+            assert!(!qualifies(candle, direction, 1.0, candidate));
+        }
+
+        let fixed = Candle {
+            close: 100.2,
+            ..long
+        };
+        assert!(qualifies(fixed, Direction::Long, 1.0, baseline));
+        assert!(qualifies(fixed, Direction::Long, 1.0, candidate));
+    }
+
+    #[test]
     fn v5_consumes_a_weak_departure_without_arming_an_anchor() {
         let mut candles: Vec<_> = (0..8)
             .map(|index| edge_candle(index, index % 2 == 0))
@@ -1504,6 +1641,63 @@ mod tests {
     }
 
     #[test]
+    fn v25_consumes_a_weak_departure_immediately_and_cannot_restore_the_old_range() {
+        let v23 = StrictVisualBreakoutResearchVariant::V23UnifiedRetestNoShortGates;
+        let v25 = StrictVisualBreakoutResearchVariant::V25ImmediateWeakDepartureConsume;
+        let mut candles: Vec<_> = (0..8)
+            .map(|index| edge_candle(index, index % 2 == 0))
+            .collect();
+        let mut v23_state = StrictVisualConsolidationState::default();
+        let mut v25_state = StrictVisualConsolidationState::default();
+        for index in 0..8 {
+            v23_state.update_for_variant(&candles, index, 0.01, v23);
+            v25_state.update_for_variant(&candles, index, 0.01, v25);
+        }
+
+        // 收盘越过 101.0，但实体占比和方向位移都不足 V23/V25 的强突破门槛。
+        candles.push(Candle {
+            timestamp_ms: 8 * 900_000,
+            open: 100.99,
+            high: 101.25,
+            low: 100.98,
+            close: 101.10,
+            volume: 300.0,
+        });
+        assert!(matches!(
+            v23_state.update_for_variant(&candles, 8, 0.01, v23),
+            Some(StrictVisualRangeEvent::WeakDeparturePending(_))
+        ));
+        assert!(matches!(
+            v25_state.update_for_variant(&candles, 8, 0.01, v25),
+            Some(StrictVisualRangeEvent::UpperBreak(_))
+        ));
+        assert!(v25_state.active.is_none());
+        assert!(v25_state.pending_weak_departure.is_none());
+        assert_eq!(v25_state.last_closed_index, Some(8));
+
+        candles.push(Candle {
+            timestamp_ms: 9 * 900_000,
+            open: 101.1,
+            high: 101.15,
+            low: 100.8,
+            close: 100.9,
+            volume: 100.0,
+        });
+        assert!(matches!(
+            v23_state.update_for_variant(&candles, 9, 0.01, v23),
+            Some(StrictVisualRangeEvent::WeakDepartureReturned(_))
+        ));
+        assert_eq!(v25_state.update_for_variant(&candles, 9, 0.01, v25), None);
+
+        assert!(v25.requires_retest_acceptance());
+        assert!(v25.requires_breakout_body_strength());
+        assert!(v25.uses_symmetric_retained_breakout_contract());
+        assert!(v25.uses_extreme_stop_min_one_atr());
+        assert!(v25.uses_unified_retest_execution_cost());
+        assert!(!v25.uses_weak_departure_probation());
+    }
+
+    #[test]
     fn v8_rejects_a_subthreshold_margin_and_consumes_the_source() {
         let variant = StrictVisualBreakoutResearchVariant::V8AcceptanceMargin40Atr;
         let (mut candles, mut state) = armed_v8_acceptance(1.0, 100.7, 101.3);
@@ -1730,5 +1924,77 @@ mod tests {
         assert_eq!(v12.breakout_candle_extreme_stop_min_atr_multiple, Some(1.0));
         v12.breakout_candle_extreme_stop_min_atr_multiple = None;
         assert_eq!(v11, v12);
+    }
+
+    #[test]
+    fn v22_restores_retest_for_both_directions_and_uses_15bps_strength() {
+        let variant = StrictVisualBreakoutResearchVariant::V22UnifiedRetestExecutionCost;
+        assert!(variant.requires_retest_acceptance());
+        assert_eq!(variant.directional_move_ratio_override(), None);
+        assert!(variant.uses_extreme_stop_min_one_atr());
+
+        for direction in [Direction::Long, Direction::Short] {
+            let (candles, _) = armed_symmetric_source(direction, variant);
+            let strength =
+                strict_visual_breakout_body_strength_for_variant(candles[8], direction, variant);
+            assert!(strength.qualifies);
+            assert!(strength.directional_move_ratio >= 0.0015);
+            assert!(strength.directional_move_ratio < 0.005);
+        }
+    }
+
+    #[test]
+    fn v22_short_gates_are_shared_by_l1_and_execution_signal_paths() {
+        let variant = StrictVisualBreakoutResearchVariant::V22UnifiedRetestExecutionCost;
+        let mut signal = accepted_signal(variant);
+        signal.direction = Direction::Short;
+        signal.breakout_open = 100.0;
+        signal.breakout_close = 99.8;
+        signal.source_atr = 1.0;
+        signal.breakout_excess = 0.2;
+
+        assert!(strict_visual_short_signal_gates_pass(
+            &signal,
+            Some(100.0),
+            variant,
+        ));
+        signal.breakout_excess = 0.4;
+        assert!(!strict_visual_short_signal_gates_pass(
+            &signal,
+            Some(100.0),
+            variant,
+        ));
+    }
+
+    #[test]
+    fn v23_keeps_v22_contract_but_removes_all_three_short_gates() {
+        let v22 = StrictVisualBreakoutResearchVariant::V22UnifiedRetestExecutionCost;
+        let v23 = StrictVisualBreakoutResearchVariant::V23UnifiedRetestNoShortGates;
+        assert!(v23.requires_retest_acceptance());
+        assert!(v23.requires_breakout_body_strength());
+        assert!(v23.uses_extreme_stop_min_one_atr());
+        assert!(v23.uses_unified_retest_execution_cost());
+        assert_eq!(v23.directional_move_ratio_override(), None);
+        assert_eq!(v23.soft_breakout_short_max_excess_atr(), None);
+        assert_eq!(v23.soft_breakout_short_min_close_vs_ema144_atr(), None);
+        assert_eq!(v23.soft_breakout_short_max_body_ratio(), None);
+
+        let mut signal = accepted_signal(v23);
+        signal.direction = Direction::Short;
+        signal.breakout_open = 100.0;
+        signal.breakout_close = 96.0;
+        signal.source_atr = 1.0;
+        signal.breakout_excess = 2.0;
+
+        assert!(!strict_visual_short_signal_gates_pass(
+            &signal,
+            Some(110.0),
+            v22,
+        ));
+        assert!(strict_visual_short_signal_gates_pass(
+            &signal,
+            Some(110.0),
+            v23,
+        ));
     }
 }

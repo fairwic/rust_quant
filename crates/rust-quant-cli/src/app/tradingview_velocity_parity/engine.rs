@@ -6,6 +6,9 @@ use super::model::{
     StrictVisualBreakoutResearchVariant, Trade,
 };
 use super::signals::SignalState;
+use super::strict_visual_breakout_experiments::{
+    activate_volume_profit_protection, has_minimum_remaining_net_reward, is_strict_visual_position,
+};
 
 const V5_NET_BREAK_EVEN_COST_BPS_PER_SIDE: f64 = 8.0;
 const V5_TWO_R_ACTIVATION_MULTIPLE: f64 = 2.0;
@@ -146,6 +149,7 @@ fn replay_with_research_variants(
         strict_visual_breakout_variant,
     );
     let mut broker = Broker::new(config.clone());
+    broker.strict_visual_breakout_variant = strict_visual_breakout_variant;
     let mut entry_candidates = Vec::new();
 
     for (index, candle) in candles.iter().copied().enumerate() {
@@ -159,6 +163,9 @@ fn replay_with_research_variants(
         broker.update_dynamic_protection_at_close(
             candle,
             indicators.get(index).and_then(|point| point.atr14),
+            indicators
+                .get(index)
+                .is_some_and(|point| point.volume_event),
         );
 
         let entries_enabled = candle.timestamp_ms >= config.evaluation_start_ms
@@ -208,6 +215,8 @@ fn replay_with_research_variants(
         evaluation_end_ms: config.evaluation_end_ms,
         fee_bps_per_side: config.fee_bps_per_side,
         slippage_bps_per_side: config.slippage_bps_per_side,
+        exit_fee_bps_per_side: config.exit_fee_bps_per_side,
+        exit_slippage_bps_per_side: config.exit_slippage_bps_per_side,
         metrics,
         entry_candidates,
         trades: broker.trades,
@@ -221,6 +230,7 @@ fn replay_with_research_variants(
 #[derive(Debug)]
 struct Broker {
     config: ReplayConfig,
+    strict_visual_breakout_variant: StrictVisualBreakoutResearchVariant,
     position: Option<Position>,
     pending_entry: Option<EntryIntent>,
     pending_stop_entry: Option<StopEntryIntent>,
@@ -237,6 +247,7 @@ impl Broker {
     fn new(config: ReplayConfig) -> Self {
         Self {
             config,
+            strict_visual_breakout_variant: StrictVisualBreakoutResearchVariant::Baseline,
             position: None,
             pending_entry: None,
             pending_stop_entry: None,
@@ -269,6 +280,29 @@ impl Broker {
             });
             return;
         }
+        let position = position_from_intent(
+            intent,
+            candle.open,
+            candle.timestamp_ms,
+            self.config.tick_size,
+        );
+        if self
+            .strict_visual_breakout_variant
+            .requires_minimum_remaining_net_reward()
+            && is_strict_visual_position(&position)
+            && !has_minimum_remaining_net_reward(
+                &position,
+                self.config.entry_cost_bps(),
+                self.config.exit_cost_bps(),
+            )
+        {
+            self.blocked.push(BlockedSignal {
+                signal_time_ms: position.signal_time_ms,
+                direction: Some(position.direction),
+                reason: "V35_REMAINING_NET_REWARD_BELOW_050R".to_owned(),
+            });
+            return;
+        }
         if self.position.is_some() {
             self.close_position(
                 candle.open,
@@ -276,12 +310,7 @@ impl Broker {
                 ExitReason::ReverseAtNextOpen,
             );
         }
-        self.position = Some(position_from_intent(
-            intent,
-            candle.open,
-            candle.timestamp_ms,
-            self.config.tick_size,
-        ));
+        self.position = Some(position);
         self.record_intrabar_drawdown(candle.open);
     }
 
@@ -447,10 +476,28 @@ impl Broker {
     }
 
     /// 动态保本只在整根 15m K 线完成后生效，避免用未知的棒内先后次序回填成交。
-    fn update_dynamic_protection_at_close(&mut self, candle: Candle, atr: Option<f64>) {
+    fn update_dynamic_protection_at_close(
+        &mut self,
+        candle: Candle,
+        atr: Option<f64>,
+        volume_event: bool,
+    ) {
         let Some(position) = self.position.as_mut() else {
             return;
         };
+        if self
+            .strict_visual_breakout_variant
+            .uses_volume_profit_protection()
+        {
+            activate_volume_profit_protection(
+                position,
+                candle,
+                volume_event,
+                self.config.entry_cost_bps(),
+                self.config.exit_cost_bps(),
+                self.config.tick_size,
+            );
+        }
         if position.exit_policy == ExitPolicy::RangeSqueezeStaged {
             if let Some(reason) =
                 update_range_squeeze_v15_protection(position, candle, atr, self.config.tick_size)
@@ -519,18 +566,21 @@ impl Broker {
             return;
         }
         let quantity = V15_PARTIAL_QUANTITY.min(position.remaining_quantity);
-        let cost_bps = self.config.fee_bps_per_side + self.config.slippage_bps_per_side;
+        let entry_cost_bps = self.config.entry_cost_bps();
+        let exit_cost_bps = self.config.exit_cost_bps();
         let gross_pnl = position
             .direction
             .gross_pnl(position.entry_price, raw_exit_price)
             * quantity;
-        let costs = (position.entry_price + raw_exit_price) * quantity * cost_bps / 10_000.0;
+        let costs = (position.entry_price * entry_cost_bps + raw_exit_price * exit_cost_bps)
+            * quantity
+            / 10_000.0;
         let net_pnl = gross_pnl - costs;
         position.remaining_quantity -= quantity;
         position.realized_quantity += quantity;
         position.realized_gross_pnl += gross_pnl;
         position.realized_exit_notional += raw_exit_price * quantity;
-        position.realized_exit_cost += raw_exit_price * quantity * cost_bps / 10_000.0;
+        position.realized_exit_cost += raw_exit_price * quantity * exit_cost_bps / 10_000.0;
         position.realized_net_pnl += net_pnl;
         position.range_partial_one_r_taken = true;
         self.realized_equity += net_pnl;
@@ -547,10 +597,10 @@ impl Broker {
             .direction
             .gross_pnl(position.entry_price, raw_exit_price)
             * position.remaining_quantity;
-        let cost_bps = self.config.fee_bps_per_side + self.config.slippage_bps_per_side;
-        let final_costs =
-            (position.entry_price + raw_exit_price) * position.remaining_quantity * cost_bps
-                / 10_000.0;
+        let final_costs = (position.entry_price * self.config.entry_cost_bps()
+            + raw_exit_price * self.config.exit_cost_bps())
+            * position.remaining_quantity
+            / 10_000.0;
         let final_net_pnl = final_gross_pnl - final_costs;
         let gross_pnl = position.realized_gross_pnl + final_gross_pnl;
         let net_pnl = position.realized_net_pnl + final_net_pnl;
@@ -1124,7 +1174,7 @@ fn profit_reason(policy: ExitPolicy, _activated: bool) -> ExitReason {
         ExitPolicy::BollingerLowerReclaim => ExitReason::BollingerLowerReclaimTakeProfit,
         ExitPolicy::Ema596ReclaimDeparture => ExitReason::Ema596ReclaimDepartureTakeProfit,
         ExitPolicy::RangeSqueezeStaged => ExitReason::RangeSqueezeTakeProfit,
-        ExitPolicy::Fixed => ExitReason::TakeProfit,
+        ExitPolicy::Fixed | ExitPolicy::StrictVisualVolumeProtected => ExitReason::TakeProfit,
     }
 }
 
@@ -1138,6 +1188,7 @@ fn break_even_reason(policy: ExitPolicy) -> ExitReason {
         ExitPolicy::CounterTrendStructureV4 => ExitReason::CounterTrendTrailingStop,
         ExitPolicy::RsiCounterTrendAgeV5 => ExitReason::RsiCounterTrendNetBreakEven,
         ExitPolicy::RangeSqueezeStaged => ExitReason::RangeSqueezeNetBreakEven,
+        ExitPolicy::StrictVisualVolumeProtected => ExitReason::StrictVisualVolumeNetBreakEven,
         ExitPolicy::Fixed
         | ExitPolicy::CounterTrendStructure
         | ExitPolicy::BollingerLowerReclaim
@@ -1277,6 +1328,23 @@ mod tests {
         assert_eq!(position.entry_price, 105.0);
         assert_eq!(position.stop, 102.0);
         assert_eq!(position.target, Some(111.0));
+    }
+
+    #[test]
+    fn asymmetric_entry_and_exit_costs_are_charged_on_their_own_notionals() {
+        let mut config = ReplayConfig::tradingview_baseline("TEST", 0.1, 0, i64::MAX);
+        config.fee_bps_per_side = 2.0;
+        config.slippage_bps_per_side = 1.0;
+        config.exit_fee_bps_per_side = Some(5.0);
+        config.exit_slippage_bps_per_side = Some(1.0);
+        let mut broker = Broker::new(config);
+        broker.position = Some(position_from_intent(intent(Direction::Long), 100.0, 0, 0.1));
+
+        broker.close_position(110.0, 900_000, ExitReason::TakeProfit);
+
+        let trade = &broker.trades[0];
+        assert!((trade.gross_pnl - 10.0).abs() < 1e-12);
+        assert!((trade.net_pnl - 9.904).abs() < 1e-12);
     }
 
     #[test]
@@ -1540,6 +1608,7 @@ mod tests {
                 volume: 1.0,
             },
             None,
+            false,
         );
         assert!(broker.position.is_some());
         assert_eq!(
@@ -1737,6 +1806,7 @@ mod tests {
                 volume: 1.0,
             },
             None,
+            false,
         );
         assert_eq!(
             broker.position.as_ref().map(|position| position.stop),
@@ -1754,7 +1824,7 @@ mod tests {
         };
         broker.process_protective_orders(pullback, 3);
         assert!(broker.position.is_some());
-        broker.update_dynamic_protection_at_close(pullback, None);
+        broker.update_dynamic_protection_at_close(pullback, None, false);
         assert_eq!(
             broker.pending_close_reason,
             Some(ExitReason::RsiCounterTrendTwoRTrailingStop)
@@ -1834,7 +1904,7 @@ mod tests {
             volume: 1.0,
         };
         broker.process_protective_orders(intrabar_one_r, 2);
-        broker.update_dynamic_protection_at_close(intrabar_one_r, Some(1.0));
+        broker.update_dynamic_protection_at_close(intrabar_one_r, Some(1.0), false);
         let position = broker.position.as_ref().expect("remaining position");
         assert!(position.range_partial_one_r_taken);
         assert!((position.remaining_quantity - 0.67).abs() < 1e-9);
@@ -1850,7 +1920,7 @@ mod tests {
             volume: 1.0,
         };
         broker.process_protective_orders(close_confirmed, 3);
-        broker.update_dynamic_protection_at_close(close_confirmed, Some(1.0));
+        broker.update_dynamic_protection_at_close(close_confirmed, Some(1.0), false);
         let position = broker.position.as_ref().expect("protected remainder");
         assert!(position.range_one_r_close_confirmed);
         assert_eq!(position.stop, 100.2);
@@ -1897,6 +1967,7 @@ mod tests {
                 volume: 1.0,
             },
             Some(1.0),
+            false,
         );
         assert_eq!(
             broker.pending_close_reason,
