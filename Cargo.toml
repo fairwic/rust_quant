@@ -89,6 +89,7 @@ tokio-retry = "0.3.0"
 
 # === 技术分析库 ===
 ta = "0.5.0"
+fin-primitives = { version = "4.0.1", default-features = false, features = ["indicators"] }
 
 # === 数值计算 ===
 ndarray = "0.15"

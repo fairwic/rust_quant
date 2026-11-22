@@ -1,3 +1,4 @@
+use fin_primitives::signals::float::MacdF64;
 use rust_quant_market::models::CandlesEntity;
 use ta::indicators::MovingAverageConvergenceDivergence;
 use ta::Next;
@@ -46,23 +47,18 @@ impl MacdSimpleIndicator {
         slow_period: usize,
         signal_period: usize,
     ) -> Option<Vec<Option<MacdCloseValue>>> {
-        let mut macd =
-            MovingAverageConvergenceDivergence::new(fast_period, slow_period, signal_period)
-                .ok()?;
-        let warmup_samples = slow_period.checked_add(signal_period)?.checked_sub(1)?;
-        let mut sample_count = 0usize;
+        let mut macd = MacdF64::new(fast_period, slow_period, signal_period).ok()?;
         let values = closes
             .into_iter()
             .map(|close| {
                 if !close.is_finite() || close <= 0.0 {
                     return None;
                 }
-                sample_count += 1;
-                let output = macd.next(close);
-                (sample_count >= warmup_samples).then_some(MacdCloseValue {
+                let output = macd.update(close)?;
+                Some(MacdCloseValue {
                     macd_line: output.macd,
                     signal_line: output.signal,
-                    histogram: output.macd - output.signal,
+                    histogram: output.histogram,
                 })
             })
             .collect();
@@ -97,5 +93,19 @@ mod tests {
             .expect("valid MACD periods");
 
         assert_eq!(before_future, after_future[..before_future.len()]);
+    }
+
+    #[test]
+    fn close_series_matches_tradingview_sma_seeded_macd() {
+        // On a linear ramp an SMA-seeded EMA(n) lags by exactly (n - 1) / 2, so
+        // TradingView's ta.macd(close, 12, 26, 9) line is 12.5 - 5.5 = 7.0 from bar 26 on.
+        let values =
+            MacdSimpleIndicator::calculate_close_series((1..=40).map(f64::from), 12, 26, 9)
+                .expect("valid MACD periods");
+
+        let first = values[33].expect("34th sample is ready");
+        assert!((first.macd_line - 7.0).abs() < 1e-9, "{first:?}");
+        assert!((first.signal_line - 7.0).abs() < 1e-9, "{first:?}");
+        assert!(first.histogram.abs() < 1e-9, "{first:?}");
     }
 }
